@@ -32,6 +32,21 @@ nametagPipelineTicks: 16 # how many ticks to divide nametag updates
 # force copy to dynmap
 dynmapCopyTowns: false
 
+# NodesMap web map (nodesmap/ plugin in this repo).
+# Exports small JSON layers that the map polls. Only changed layers are written,
+# and all serialization/IO runs off the main thread.
+mapExport:
+  enabled: true
+  # export even when the NodesMap plugin isn't installed (e.g. serving the files yourself)
+  always: false
+  path: "plugins/NodesMap/web/data/nodes"
+  # towns/nations/claims refresh rate (ticks)
+  statePeriodTicks: 100
+  # war flags, occupation, warzones, raids refresh rate (ticks)
+  livePeriodTicks: 40
+  # include supply-line connectivity (computed one town per tick)
+  supplyLines: true
+
 # ===================================
 # nametag configs
 # ===================================

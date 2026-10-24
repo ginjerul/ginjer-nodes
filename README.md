@@ -21,7 +21,8 @@ Nodes is a Minecraft plugin that adds a territory-based geopolitics system to yo
 ### Companion Plugins
 
 - **Kotlin runtime** – Nodes requires a Kotlin runtime plugin on the server. See [minecraft-kotlin](https://github.com/d-z4/minecraft-kotlin) for a compatible runtime.
-- **Dynmap** (optional) – Install [Dynmap](https://www.spigotmc.org/resources/dynmap.274/) and the included Dynmap extension for an interactive live map. See `dynmap/README.md` for details.
+- **NodesMap** (recommended) – Lightweight live web map built for Nodes, included in `nodesmap/`. Replaces Dynmap with live war, warzones, raids, supply lines and more. See `nodesmap/README.md`.
+- **Dynmap** (optional, legacy) – Install [Dynmap](https://www.spigotmc.org/resources/dynmap.274/) and the included Dynmap extension for an interactive live map. See `dynmap/README.md` for details.
 
 ## Usage
 

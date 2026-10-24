@@ -36,6 +36,9 @@ object WarTimer {
 
     fun isTimed(): Boolean = endsAtMs > System.currentTimeMillis()
 
+    /** epoch ms when the timed war ends, or 0 if the war isn't on a timer (used by the web map) */
+    fun endsAt(): Long = if (isTimed()) endsAtMs else 0L
+
     fun scheduleDisable(durationMs: Long, reason: String, barLabel: String = "War") {
         cancel()
         val plugin = Nodes.plugin ?: return

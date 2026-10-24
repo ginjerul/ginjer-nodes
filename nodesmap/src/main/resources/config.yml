@@ -1,0 +1,48 @@
+# NodesMap - lightweight live map for Nodes
+#
+# Everything heavy runs off the main thread. The only main-thread work is
+# taking chunk snapshots (time-budgeted per tick, see render.snapshot-budget-ms)
+# and a tiny player position list (once per players.update-ticks).
+
+# World to render. Leave empty to use the first (main) world.
+world: ""
+
+web:
+  # Built-in web server. Disable if you serve plugins/NodesMap/web with nginx/caddy.
+  enabled: true
+  bind: "0.0.0.0"
+  port: 8100
+  # Threads serving HTTP requests. 2-4 is plenty for most servers.
+  threads: 3
+  # Re-extract the bundled viewer on plugin version change.
+  # Set false if you customised the viewer files.
+  update-viewer: true
+  # Title shown in the browser tab and on the map.
+  title: "Nodes Map"
+
+render:
+  # Re-render chunks that changed (block place/break, explosions, growth...).
+  live-updates: true
+  # Seconds to collect changes before re-rendering them in one batch.
+  batch-seconds: 15
+  # Max main-thread milliseconds per tick spent taking chunk snapshots.
+  snapshot-budget-ms: 2.0
+  # Max chunks being loaded asynchronously at once during a full render.
+  full-render-concurrent-loads: 12
+  # Number of zoomed-out levels to generate (each halves resolution).
+  # 5 levels = whole 16k x 16k map fits on a laptop screen.
+  zoom-out-levels: 5
+  # Hill shading strength 0.0 - 1.0
+  shading: 0.85
+  # Draw water with depth (darker = deeper)
+  water-depth: true
+  # Highlight chunk edges slightly. Off by default.
+  chunk-grid: false
+
+players:
+  show: true
+  update-ticks: 20
+  hide-sneaking: true
+  hide-invisible: true
+  hide-spectators: true
+  # Players with nodesmap.hidden are always hidden.

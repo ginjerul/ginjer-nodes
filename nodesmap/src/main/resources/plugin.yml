@@ -1,0 +1,21 @@
+main: phonon.nodesmap.NodesMapPlugin
+name: NodesMap
+version: ${version}
+api-version: '1.21'
+description: Lightweight live web map built for Nodes
+softdepend: [kotlin, nodes]
+
+commands:
+  nodesmap:
+    description: NodesMap admin commands
+    aliases: [nmap]
+    permission: nodesmap.admin
+    usage: /nodesmap help
+
+permissions:
+  nodesmap.admin:
+    description: Use /nodesmap admin commands
+    default: op
+  nodesmap.hidden:
+    description: Player is never shown on the web map
+    default: false

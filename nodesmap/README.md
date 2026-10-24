@@ -1,0 +1,85 @@
+# NodesMap
+
+A lightweight live web map built specifically for Nodes. It replaces Dynmap + the old Nodes Dynmap extension.
+
+- **Terrain renderer**: draws the world top-down into tiles, with water depth and hill shading.
+- **Nodes layer**: territories, towns, nations, war, warzones, raids, supply lines, forts, outposts, ports, mining towers, refineries and supply drops, all updating live without a page refresh.
+- **Built-in web server**: no Dynmap, no nginx needed (though nginx works too).
+
+## Install
+
+1. Build both plugins (see *Building*), then put `nodes-*.jar` and `nodesmap-*.jar` in `plugins/`.
+2. Start the server. Open `http://<server-ip>:8100/`.
+3. Run `/nodesmap fullrender` once to draw the existing world. After that, the map keeps itself up to date.
+
+Nodes detects NodesMap automatically and starts exporting map data. You can remove Dynmap.
+
+## Commands (`nodesmap.admin`, op by default)
+
+| Command | What it does |
+|---|---|
+| `/nodesmap status` | Render queue, progress, web address |
+| `/nodesmap fullrender [radius]` | Draw every generated chunk (or only within `radius` chunks of you) |
+| `/nodesmap render [radius]` | Redraw the loaded chunks around you (default 8) |
+| `/nodesmap cancel` | Drop everything queued |
+| `/nodesmap reload` | Reload config (web server/world changes need a restart) |
+
+Permission `nodesmap.hidden` hides a player from the map. Sneaking, invisible, spectator and vanished players are hidden by default.
+
+## What it costs the server
+
+The design rule: **the main thread never draws, encodes, or writes anything.**
+
+| Work | Where | Cost |
+|---|---|---|
+| Noticing changes | block events | a heightmap lookup + set insert; changes more than 2 blocks below the surface (mining, caves) are ignored |
+| Chunk snapshots | main thread | time-boxed per tick (`render.snapshot-budget-ms`, default 2 ms); unloaded chunks are loaded with Paper's async loader and never generated |
+| Drawing tiles, zoom levels, PNG encoding | 1 low-priority background thread | ~2,000+ chunks/s on one core |
+| Changed chunks | batched | released every `render.batch-seconds` (15 s), so a chunk edited 500 times is drawn once |
+| Players | main thread, every 20 ticks | one pass over online players; served from memory |
+| Nodes data | main thread copies small snapshots; JSON + hashing + writing on a background thread | files are only rewritten when their content actually changes |
+| Web | 3 HTTP threads | ETags everywhere, so unchanged tiles and data cost a `304`; text is gzipped |
+
+Browsers poll one tiny `version.json` and only download the layers whose hash changed. They swap only the tiles that were redrawn.
+
+## Web map features
+
+- **Color modes:** towns, nations, diplomacy (relative to any town: own, nation, ally, vassal, enemy, neutral), resource finder (highlight every territory with a given resource node), supply lines (connected vs cut off), plain terrain.
+- **Live war:** flags with progress rings and countdowns; occupied chunks hatched in the occupier's color; war timer pill; war tab with every attack, warzone scoreboards, raids (prep/live with countdowns), supply drop timer and an occupation leaderboard.
+- **Warzones:** gold dashed outline, live countdown and current holder on the map.
+- **Click anything:**
+  - Territory: owner, nation, occupier, fort level, raid, supply status, resources with icons, claim cost.
+  - Town: leader, residents with online status, claims, allies, enemies, vassals, outposts.
+  - Nation: towns, allies, enemies, totals.
+- **Search** (press `/`) across towns, nations, players, territories, or type `x z` to jump.
+- Town/nation lists with sorting; players colored by town; shareable URL (`#x,z,zoom`); settings remembered per browser; works on phones.
+
+## Config
+
+`plugins/NodesMap/config.yml`: world, port, render budget, zoom levels, shading, player privacy. Every option is commented.
+
+`plugins/nodes/config.yml` → `mapExport:`: export path and refresh rates for the Nodes layer (`statePeriodTicks`, `livePeriodTicks`), and whether to include supply lines. Supply connectivity is computed one town per tick to spread the cost out.
+
+### Serving with nginx instead
+
+Set `web.enabled: false`, then serve `plugins/NodesMap/web/` as static files. NodesMap still writes `data/players.json` and `data/tiles.json` there.
+
+## Building
+
+```
+cd nodesmap
+./gradlew build      # -> build/libs/nodesmap-0.1.0.jar
+```
+
+Like Nodes, it needs the Kotlin runtime plugin on the server.
+
+## Files
+
+```
+plugins/NodesMap/web/
+  index.html, app.js, geometry.js, style.css, vendor/, icons/   viewer (re-extracted on plugin update)
+  tiles/<world>/<zoom>/<x>_<z>.png                               terrain tiles
+  data/map.json, players.json, tiles.json                        NodesMap (in memory when the built-in server is on)
+  data/nodes/version.json, world.json, state.json,
+             features.json, live.json                            written by Nodes
+```

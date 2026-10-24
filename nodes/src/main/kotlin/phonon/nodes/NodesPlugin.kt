@@ -226,6 +226,9 @@ public class NodesPlugin : JavaPlugin() {
         Vassals.load()
         Fortifications.load()
 
+        // web map export (after every system above has loaded its state)
+        phonon.nodes.map.MapExporter.start(this)
+
         val timeEnd = System.currentTimeMillis()
         val timeLoad = timeEnd - timeStart
         logger.info("Enabled in ${timeLoad}ms")
@@ -235,6 +238,7 @@ public class NodesPlugin : JavaPlugin() {
 
     override fun onDisable() {
         logger.info("ginjer is the goat but disabled")
+        phonon.nodes.map.MapExporter.stop()
         Warzone.shutdown()
         Raid.shutdown()
         MiningBoost.shutdown()

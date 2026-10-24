@@ -55,6 +55,14 @@ public object Config {
 
     public var dynmapCopyTowns: Boolean = false
 
+    // NodesMap web map export (see nodesmap/ in the repo)
+    public var mapExportEnabled: Boolean = true
+    public var mapExportAlways: Boolean = false // export even if NodesMap isn't installed (external web server)
+    public var mapExportPath: String = "plugins/NodesMap/web/data/nodes"
+    public var mapExportStatePeriodTicks: Long = 100L
+    public var mapExportLivePeriodTicks: Long = 40L
+    public var mapExportSupplyLines: Boolean = true
+
     // ===================================
     // nametag configs
     // ===================================
@@ -482,6 +490,16 @@ public object Config {
         Config.nametagUpdatePeriod = config.getLong("nametagUpdatePeriod", Config.nametagUpdatePeriod)
         Config.nametagPipelineTicks = config.getInt("nametagPipelineTicks", Config.nametagPipelineTicks)
         Config.dynmapCopyTowns = config.getBoolean("dynmapCopyTowns", Config.dynmapCopyTowns)
+
+        val mapExportSec = config.getConfigurationSection("mapExport")
+        if (mapExportSec != null) {
+            Config.mapExportEnabled = mapExportSec.getBoolean("enabled", Config.mapExportEnabled)
+            Config.mapExportAlways = mapExportSec.getBoolean("always", Config.mapExportAlways)
+            Config.mapExportPath = mapExportSec.getString("path", Config.mapExportPath) ?: Config.mapExportPath
+            Config.mapExportStatePeriodTicks = mapExportSec.getLong("statePeriodTicks", Config.mapExportStatePeriodTicks).coerceIn(20L, 12000L)
+            Config.mapExportLivePeriodTicks = mapExportSec.getLong("livePeriodTicks", Config.mapExportLivePeriodTicks).coerceIn(10L, 1200L)
+            Config.mapExportSupplyLines = mapExportSec.getBoolean("supplyLines", Config.mapExportSupplyLines)
+        }
 
         Config.useNametags = config.getBoolean("useNametags", Config.useNametags)
 

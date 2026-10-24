@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Nodes Map</title>
+<link rel="icon" href="icons/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="map"></div>
+
+<header id="topbar">
+  <button id="menu-btn" class="icon-btn" aria-label="Toggle sidebar">
+    <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+  </button>
+  <div id="brand"><span class="brand-mark"></span><span id="title">Nodes Map</span></div>
+  <div id="search-wrap">
+    <svg class="search-ico" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>
+    <input id="search" type="search" placeholder="Search towns, nations, players, territories" autocomplete="off" spellcheck="false">
+    <div id="search-results" hidden></div>
+  </div>
+  <div id="war-pill" hidden></div>
+</header>
+
+<aside id="sidebar">
+  <nav id="tabs">
+    <button data-tab="towns" class="active">Towns</button>
+    <button data-tab="nations">Nations</button>
+    <button data-tab="war">War</button>
+    <button data-tab="layers">Map</button>
+  </nav>
+  <section id="tab-towns" class="tab active">
+    <div class="list-tools">
+      <input class="filter" data-list="towns" placeholder="Filter towns">
+      <select class="sort" data-list="towns">
+        <option value="territories">Most land</option>
+        <option value="residents">Most residents</option>
+        <option value="online">Most online</option>
+        <option value="name">Name</option>
+      </select>
+    </div>
+    <div class="list" id="list-towns"></div>
+  </section>
+  <section id="tab-nations" class="tab">
+    <div class="list-tools">
+      <input class="filter" data-list="nations" placeholder="Filter nations">
+      <select class="sort" data-list="nations">
+        <option value="territories">Most land</option>
+        <option value="towns">Most towns</option>
+        <option value="residents">Most residents</option>
+        <option value="name">Name</option>
+      </select>
+    </div>
+    <div class="list" id="list-nations"></div>
+  </section>
+  <section id="tab-war" class="tab"><div id="war-panel"></div></section>
+  <section id="tab-layers" class="tab">
+    <h3>Color territories by</h3>
+    <div id="modes" class="seg"></div>
+    <div id="mode-extra"></div>
+    <h3>Show</h3>
+    <div id="layer-toggles"></div>
+    <p class="hint">Settings are remembered in this browser.</p>
+  </section>
+</aside>
+
+<aside id="info" hidden>
+  <button id="info-close" class="icon-btn" aria-label="Close">
+    <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+  </button>
+  <div id="info-body"></div>
+</aside>
+
+<footer id="statusbar">
+  <span id="coords">x —  z —</span>
+  <span id="hover-terr"></span>
+  <span id="live-dot" title="Live data"></span>
+</footer>
+
+<script src="vendor/leaflet/leaflet.js"></script>
+<script src="geometry.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
