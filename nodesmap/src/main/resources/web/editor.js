@@ -243,6 +243,16 @@
     return c + Math.round(s * t.chunks.size);
   }
 
+  /** combined flag capture time multiplier from a territory's resources (Nodes multiplies them) */
+  function attackMult(t) {
+    let m = 1;
+    for (const n of t.nodes) {
+      const v = E.resources[n]?.attacker_time_multiplier;
+      if (typeof v === "number" && isFinite(v)) m *= v;
+    }
+    return m;
+  }
+
   /** greedy 6-coloring so neighbors differ (like the old editor's generateColors) */
   function recolorAll(onlyMissing) {
     const ids = [...E.terr.keys()];
@@ -1225,7 +1235,9 @@
     const names = Object.keys(E.resources).filter((n) => !q || n.toLowerCase().includes(q)).sort((a, b) => a.localeCompare(b));
     $("#res-list").innerHTML = names.map((n) => {
       const u = iconUrl(n);
-      return `<div class="trow ${n === resSel ? "sel" : ""}" data-res="${esc(n)}">${u ? `<img src="${esc(u)}" alt="" style="width:16px;height:16px;image-rendering:pixelated">` : `<span class="sw" style="background:#555"></span>`}<div class="nm">${esc(n)}</div><span class="stat">${resCount(n)}</span></div>`;
+      const am = E.resources[n]?.attacker_time_multiplier;
+      const tag = typeof am === "number" && am !== 1 ? ` <span class="badge" style="padding:1px 6px;font-size:11px">capture ×${am}</span>` : "";
+      return `<div class="trow ${n === resSel ? "sel" : ""}" data-res="${esc(n)}">${u ? `<img src="${esc(u)}" alt="" style="width:16px;height:16px;image-rendering:pixelated">` : `<span class="sw" style="background:#555"></span>`}<div class="nm">${esc(n)}${tag}</div><span class="stat">${resCount(n)}</span></div>`;
     }).join("") || `<div class="empty">No resource nodes yet</div>`;
     renderResEditor();
   }
@@ -1246,6 +1258,10 @@
         <div class="field"><span>Cost ×</span><input id="re-cs" type="number" step="0.05" value="${r.cost?.scale ?? 1}"></div>
         <div class="field"><span>Priority</span><input id="re-pr" type="number" step="1" value="${r.priority ?? 0}"></div>
       </div>
+      <div class="grid2" style="display:grid;grid-template-columns:1fr 1fr;gap:0 8px">
+        <div class="field" title="Flag attacks on territories with this node take this many times as long (2 = twice as long)"><span>Attack time ×</span><input id="re-atk" type="number" step="0.05" min="0" placeholder="1" value="${r.attacker_time_multiplier ?? ""}"></div>
+        <div class="field" title="Owners/allies retaking their own land take this many times as long"><span>Defend time ×</span><input id="re-def" type="number" step="0.05" min="0" placeholder="1" value="${r.defender_time_multiplier ?? ""}"></div>
+      </div>
       <div class="field"><span>All settings (JSON: income, ore, crops, animals…)</span><textarea id="re-json" spellcheck="false">${esc(json)}</textarea></div>
       <div id="re-err"></div>
       <div class="actions"><button class="btn small primary" id="re-save">Save resource</button><button class="btn small" id="re-select">Select territories with it</button><button class="btn small danger" id="re-del">Delete</button></div>`;
@@ -1255,10 +1271,14 @@
         o.icon = $("#re-icon").value || null;
         o.cost = { ...(o.cost || {}), constant: +$("#re-cc").value || 0, scale: $("#re-cs").value === "" ? 1 : +$("#re-cs").value };
         o.priority = +$("#re-pr").value || 0;
+        for (const [id, key] of [["#re-atk", "attacker_time_multiplier"], ["#re-def", "defender_time_multiplier"]]) {
+          const v = $(id).value.trim();
+          if (v === "" || +v === 1) delete o[key]; else o[key] = +v;
+        }
         $("#re-json").value = JSON.stringify(o, null, 2);
       } catch { /* user is mid-edit in the JSON box */ }
     };
-    for (const id of ["#re-icon", "#re-cc", "#re-cs", "#re-pr"]) $(id).addEventListener("change", syncJson);
+    for (const id of ["#re-icon", "#re-cc", "#re-cs", "#re-pr", "#re-atk", "#re-def"]) $(id).addEventListener("change", syncJson);
     $("#re-save").onclick = () => {
       let obj;
       try { obj = JSON.parse($("#re-json").value); } catch (e) { $("#re-err").innerHTML = `<div class="note err">That JSON isn't valid: ${esc(e.message)}</div>`; return; }
@@ -1316,6 +1336,7 @@
         <dl class="kv">
           <dt>Chunks</dt><dd>${t.chunks.size}</dd>
           <dt>Claim cost</dt><dd>${terrCost(t)}</dd>
+          ${attackMult(t) !== 1 ? `<dt>Capture time</dt><dd>×${+attackMult(t).toFixed(2)}</dd>` : ""}
           <dt>Core chunk</dt><dd>${t.core ? t.core.join(", ") : "—"} <a href="#" id="in-core" title="Pick a new core on the map">change</a></dd>
           <dt>Neighbors</dt><dd>${neighbors.size}${edge ? " · borders wilderness" : ""}</dd>
         </dl>
@@ -1390,6 +1411,62 @@
       store.set("gen", params);
       closeModal();
       setTimeout(() => generate(params), 20);
+    };
+  }
+
+  async function packDialog() {
+    let pack;
+    try { pack = await (await fetch("presets/resources-default.json", { cache: "no-cache" })).json(); } catch { return toast("Couldn't load the default pack", true); }
+    const line = (name, n) => {
+      const u = E.icons[n.icon] || null;
+      const bits = [];
+      const inc = Object.entries(n.income || {});
+      if (inc.length) bits.push(inc.length > 2 ? `income: ${inc.length} items` : "income: " + inc.map(([k, v]) => `${v} ${k.replace(/_/g, " ")}`).join(", "));
+      const ore = Object.entries(n.ore || {});
+      if (ore.length) bits.push(ore.length > 2 ? `mining: ${ore.length} ores` : "mining: " + ore.map(([k, v]) => `${Math.round((Array.isArray(v) ? v[0] : v) * 1000) / 10}% ${k.replace(/_/g, " ")}`).join(", "));
+      if (n.attacker_time_multiplier) bits.push(`capture ×${n.attacker_time_multiplier}`);
+      if (n.cost?.constant) bits.push(`+${n.cost.constant} claims`);
+      const exists = E.resources[name] ? ` <span class="badge gold" style="padding:1px 6px;font-size:11px">exists</span>` : "";
+      return `<div class="trow" style="cursor:default">${u ? `<img src="${esc(u)}" alt="" style="width:16px;height:16px;image-rendering:pixelated">` : `<span class="sw"></span>`}<div><div class="nm">${esc(name)}${exists}</div><div class="sub">${esc(bits.join(" · "))}</div></div><span></span></div>`;
+    };
+    modal(`<h2>${esc(pack.name)}</h2>
+      <p>Adds ready-made resource nodes. Income is per hour per territory; mining is the chance per stone block mined in the territory. You can edit them afterwards, and undo this.</p>
+      ${pack.groups.map((g) => `<label class="tgl" style="margin-top:8px"><input type="checkbox" class="pk-g" data-g="${esc(g.id)}" checked><b>${esc(g.title)}</b></label>
+        <div class="hint" style="margin:0 0 4px 23px">${esc(g.about)}</div>
+        <div class="list" style="margin-left:15px">${Object.entries(g.nodes).map(([n, d]) => line(n, d)).join("")}</div>`).join("")}
+      <h3 style="margin:14px 0 6px;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--faint)">Options</h3>
+      <label class="tgl"><input type="checkbox" id="pk-replace">Replace nodes that already exist with the same name</label>
+      <label class="tgl"><input type="checkbox" id="pk-basic">Give every unlocked territory the <b>basic</b> node</label>
+      <div class="foot"><button class="btn" data-close>Cancel</button><button class="btn primary" id="pk-go">Add nodes</button></div>`);
+    $("#pk-go").onclick = () => {
+      const groups = new Set($$(".pk-g").filter((c) => c.checked).map((c) => c.dataset.g));
+      const replace = $("#pk-replace").checked;
+      const giveBasic = $("#pk-basic").checked;
+      closeModal();
+      begin("Add default resources");
+      touchRes();
+      let added = 0, replaced = 0, skipped = 0;
+      for (const g of pack.groups) {
+        if (!groups.has(g.id)) continue;
+        for (const [name, def] of Object.entries(g.nodes)) {
+          if (E.resources[name] && !replace) { skipped++; continue; }
+          if (E.resources[name]) replaced++; else added++;
+          E.resources[name] = JSON.parse(JSON.stringify(def));
+        }
+      }
+      let given = 0;
+      if (giveBasic && E.resources.basic) {
+        for (const t of E.terr.values()) {
+          if (isLocked(t.id) || t.nodes.includes("basic")) continue;
+          touch(t.id);
+          t.nodes.unshift("basic");
+          given++;
+        }
+      }
+      end();
+      resSel = null;
+      renderResList();
+      toast(`Added ${added} node${added === 1 ? "" : "s"}${replaced ? `, replaced ${replaced}` : ""}${skipped ? `, skipped ${skipped} that already existed` : ""}${given ? `, gave basic to ${given} territories` : ""}`);
     };
   }
 
@@ -1480,6 +1557,7 @@
       resSel = row.dataset.res;
       renderResList();
     };
+    $("#res-pack").onclick = packDialog;
     $("#res-new").onclick = () => {
       let n = "new_resource", i = 1;
       while (E.resources[n]) n = `new_resource_${i++}`;

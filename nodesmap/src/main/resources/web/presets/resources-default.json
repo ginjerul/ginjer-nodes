@@ -1,0 +1,299 @@
+{
+ "name": "Default resource nodes",
+ "version": 1,
+ "groups": [
+  {
+   "id": "basic",
+   "title": "Basic",
+   "about": "A little of every ore: small hourly income and a small chance of ore when mining stone.",
+   "nodes": {
+    "basic": {
+     "icon": "iron_pickaxe",
+     "cost": {
+      "constant": 0,
+      "scale": 1.0
+     },
+     "priority": 0,
+     "income": {
+      "coal": 2,
+      "copper_ingot": 2,
+      "iron_ingot": 1,
+      "gold_ingot": 0.5,
+      "redstone": 2,
+      "lapis_lazuli": 1,
+      "quartz": 1,
+      "diamond": 0.2,
+      "emerald": 0.2
+     },
+     "ore": {
+      "coal": 0.01,
+      "raw_copper": 0.01,
+      "raw_iron": 0.008,
+      "raw_gold": 0.004,
+      "redstone": 0.006,
+      "lapis_lazuli": 0.004,
+      "quartz": 0.004,
+      "diamond": 0.001,
+      "emerald": 0.001
+     },
+     "crops": {},
+     "animals": {}
+    }
+   }
+  },
+  {
+   "id": "ores",
+   "title": "Ores",
+   "about": "One node per ore. Much more income and mining for that ore than Basic. Rare ores cost more claims.",
+   "nodes": {
+    "coal": {
+     "icon": "coal",
+     "cost": {
+      "constant": 0,
+      "scale": 1.0
+     },
+     "priority": 0,
+     "income": {
+      "coal": 12
+     },
+     "ore": {
+      "coal": [
+       0.06,
+       1,
+       2
+      ]
+     },
+     "crops": {},
+     "animals": {}
+    },
+    "copper": {
+     "icon": "copper_ingot",
+     "cost": {
+      "constant": 0,
+      "scale": 1.0
+     },
+     "priority": 0,
+     "income": {
+      "copper_ingot": 12
+     },
+     "ore": {
+      "raw_copper": [
+       0.06,
+       1,
+       3
+      ]
+     },
+     "crops": {},
+     "animals": {}
+    },
+    "iron": {
+     "icon": "iron_ingot",
+     "cost": {
+      "constant": 2,
+      "scale": 1.1
+     },
+     "priority": 0,
+     "income": {
+      "iron_ingot": 8
+     },
+     "ore": {
+      "raw_iron": [
+       0.045,
+       1,
+       2
+      ]
+     },
+     "crops": {},
+     "animals": {}
+    },
+    "gold": {
+     "icon": "gold_ingot",
+     "cost": {
+      "constant": 3,
+      "scale": 1.1
+     },
+     "priority": 0,
+     "income": {
+      "gold_ingot": 6
+     },
+     "ore": {
+      "raw_gold": [
+       0.035,
+       1,
+       2
+      ]
+     },
+     "crops": {},
+     "animals": {}
+    },
+    "redstone": {
+     "icon": "redstone",
+     "cost": {
+      "constant": 2,
+      "scale": 1.0
+     },
+     "priority": 0,
+     "income": {
+      "redstone": 12
+     },
+     "ore": {
+      "redstone": [
+       0.05,
+       2,
+       5
+      ]
+     },
+     "crops": {},
+     "animals": {}
+    },
+    "lapis": {
+     "icon": "lapis_lazuli",
+     "cost": {
+      "constant": 2,
+      "scale": 1.0
+     },
+     "priority": 0,
+     "income": {
+      "lapis_lazuli": 8
+     },
+     "ore": {
+      "lapis_lazuli": [
+       0.04,
+       2,
+       6
+      ]
+     },
+     "crops": {},
+     "animals": {}
+    },
+    "quartz": {
+     "icon": "quartz",
+     "cost": {
+      "constant": 2,
+      "scale": 1.0
+     },
+     "priority": 0,
+     "income": {
+      "quartz": 10
+     },
+     "ore": {
+      "quartz": [
+       0.05,
+       1,
+       3
+      ]
+     },
+     "crops": {},
+     "animals": {}
+    },
+    "diamond": {
+     "icon": "diamond",
+     "cost": {
+      "constant": 6,
+      "scale": 1.25
+     },
+     "priority": 0,
+     "income": {
+      "diamond": 2
+     },
+     "ore": {
+      "diamond": 0.012
+     },
+     "crops": {},
+     "animals": {}
+    },
+    "emerald": {
+     "icon": "emerald",
+     "cost": {
+      "constant": 6,
+      "scale": 1.25
+     },
+     "priority": 0,
+     "income": {
+      "emerald": 2
+     },
+     "ore": {
+      "emerald": 0.012
+     },
+     "crops": {},
+     "animals": {}
+    },
+    "netherite": {
+     "icon": "netherite_scrap",
+     "cost": {
+      "constant": 10,
+      "scale": 1.5
+     },
+     "priority": 0,
+     "income": {
+      "netherite_scrap": 0.5
+     },
+     "ore": {
+      "ancient_debris": 0.003
+     },
+     "crops": {},
+     "animals": {}
+    }
+   }
+  },
+  {
+   "id": "tiers",
+   "title": "Defense tiers",
+   "about": "Make territories harder to capture: flag attacks take 1.25\u00d7, 1.5\u00d7, 2\u00d7 or 3\u00d7 as long. Higher tiers cost more claims.",
+   "nodes": {
+    "tier_1": {
+     "icon": "tier_1",
+     "cost": {
+      "constant": 2,
+      "scale": 1.0
+     },
+     "priority": 10,
+     "income": {},
+     "ore": {},
+     "crops": {},
+     "animals": {},
+     "attacker_time_multiplier": 1.25
+    },
+    "tier_2": {
+     "icon": "tier_2",
+     "cost": {
+      "constant": 4,
+      "scale": 1.0
+     },
+     "priority": 10,
+     "income": {},
+     "ore": {},
+     "crops": {},
+     "animals": {},
+     "attacker_time_multiplier": 1.5
+    },
+    "tier_3": {
+     "icon": "tier_3",
+     "cost": {
+      "constant": 8,
+      "scale": 1.0
+     },
+     "priority": 10,
+     "income": {},
+     "ore": {},
+     "crops": {},
+     "animals": {},
+     "attacker_time_multiplier": 2.0
+    },
+    "tier_4": {
+     "icon": "tier_4",
+     "cost": {
+      "constant": 12,
+      "scale": 1.0
+     },
+     "priority": 10,
+     "income": {},
+     "ore": {},
+     "crops": {},
+     "animals": {},
+     "attacker_time_multiplier": 3.0
+    }
+   }
+  }
+ ]
+}

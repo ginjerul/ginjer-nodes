@@ -125,6 +125,7 @@ public object MapExporter {
                             key("resources").arr { for (r in t.resourceNodes) str(r) }
                             key("cost").num(t.cost)
                             key("wild").bool(t.bordersWilderness)
+                            if (t.attackerTimeMultiplier != 1.0) key("atk").num(t.attackerTimeMultiplier)
                         }
                     }
                 }

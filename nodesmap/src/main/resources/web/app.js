@@ -807,6 +807,7 @@
     if (fort) badges.push(`<span class="badge">Fort level ${fort}</span>`);
     if (town && town.supplied) badges.push(supplyCut(id, town) ? `<span class="badge war">Supply cut</span>` : `<span class="badge ok">Supplied</span>`);
     if (t.wild) badges.push(`<span class="badge">Borders wilderness</span>`);
+    if (t.atk && t.atk !== 1) badges.push(`<span class="badge ${t.atk > 1 ? "ok" : "war"}" title="Flag attacks here take ${+t.atk.toFixed(2)}× as long">${t.atk > 1 ? "Fortified" : "Weak"}: capture ×${+t.atk.toFixed(2)}</span>`);
     const res = t.resources.map((r) => { const u = resIconUrl(r); return `<div class="res">${u ? `<img src="${esc(u)}" alt="">` : ""}${esc(r)}</div>`; }).join("");
     openInfo(`
       <div class="info-kicker">Territory #${t.id}</div>
