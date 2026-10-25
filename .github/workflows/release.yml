@@ -24,8 +24,13 @@ jobs:
         run: |
           cd nodes
           ./gradlew clean build
+          cd ../nodesmap
+          chmod +x gradlew
+          ./gradlew clean build
 
       - name: Upload JAR to release
         uses: softprops/action-gh-release@v2
         with:
-          files: nodes/build/libs/*.jar
+          files: |
+            nodes/build/libs/*.jar
+            nodesmap/build/libs/*.jar

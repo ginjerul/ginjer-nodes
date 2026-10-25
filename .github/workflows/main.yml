@@ -21,6 +21,19 @@ jobs:
           cd nodes
           ./gradlew clean build
 
+      - name: Build NodesMap
+        run: |
+          cd nodesmap
+          chmod +x gradlew
+          ./gradlew clean build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jars
+          path: |
+            nodes/build/libs/*.jar
+            nodesmap/build/libs/*.jar
+
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-node@v5
         with:
@@ -67,7 +80,8 @@ jobs:
         run: |
           NODES_JAR=nodes/build/libs/nodes-$VERSION.jar
           DYNMAP_ZIP=dynmap/dynmap.zip
-          ALL="$NODES_JAR $DYNMAP_ZIP"
+          NODESMAP_JAR=$(ls nodesmap/build/libs/nodesmap-*.jar | head -n 1)
+          ALL="$NODES_JAR $DYNMAP_ZIP $NODESMAP_JAR"
           if [ -z "$ALL" ]; then
             echo "No build files found"
             exit 1
