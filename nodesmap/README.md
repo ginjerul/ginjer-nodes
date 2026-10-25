@@ -14,6 +14,34 @@ A lightweight live web map built specifically for Nodes. It replaces Dynmap + th
 
 Nodes detects NodesMap automatically and starts exporting map data. You can remove Dynmap.
 
+## Map editor
+
+A full editor for `world.json` (territories and resource nodes), drawn on top of your real terrain.
+
+1. Run `/nodesmap editor` in game (permission `nodesmap.editor`, op by default) and click the link. The link logs you in for 2 hours (`editor.session-minutes`). `/nodesmap editor revoke` ends your sessions early.
+2. Edit:
+   - **Select (V):** click territories. Ctrl/⌘-click adds to the selection, Shift+drag box-selects.
+   - **Paint (B), New (N), Erase (E):** brush painting, with `[` and `]` changing the brush size.
+   - **Box (R):** drag a rectangle to fill.
+   - **Fill (F):** fills a whole island or valley in one click.
+   - **Core (C):** sets a territory's core chunk.
+   - **Selection actions:** merge, delete, split disconnected pieces, regenerate into random territories of a chosen size, and add a resource to random territories.
+   - **Resources tab:** create, rename and delete resource nodes, pick icons, and set cost, priority and the full JSON (income, ore, crops, animals, neighbor modifiers).
+   - **Undo/redo** for everything (Ctrl+Z / Ctrl+Shift+Z).
+3. **Check** shows what would change. **Apply to server** writes it live: Nodes backs up the old `world.json` to `plugins/nodes/backup/`, reloads territories, keeps occupation state, and recalculates town claims.
+
+Safety built into the server side (the browser can't bypass it):
+- Territories owned or occupied by a town can never be deleted.
+- Changes to claimed land need an explicit confirm.
+- Nothing applies while flag attacks or raids are running.
+- Cores must sit inside their territory, chunks can't overlap, and resources must exist.
+
+In the editor, "Lock claimed territories" (on by default) also stops you from painting over claimed land at all.
+
+"Land only" (on by default) reads the rendered tiles so painting and filling skip water and ungenerated chunks. You can also import, edit and download a `world.json` without being connected to a server.
+
+Set `web.public-url` if players reach the map through a domain or reverse proxy, so the editor link points there. Editing over plain HTTP sends the session token unencrypted, so use HTTPS (a reverse proxy) if your map is public.
+
 ## Commands (`nodesmap.admin`, op by default)
 
 | Command | What it does |
@@ -23,6 +51,7 @@ Nodes detects NodesMap automatically and starts exporting map data. You can remo
 | `/nodesmap render [radius]` | Redraw the loaded chunks around you (default 8) |
 | `/nodesmap cancel` | Drop everything queued |
 | `/nodesmap reload` | Reload config (web server/world changes need a restart) |
+| `/nodesmap editor [revoke]` | Get a login link for the map editor (`nodesmap.editor`) |
 
 Permission `nodesmap.hidden` hides a player from the map. Sneaking, invisible, spectator and vanished players are hidden by default.
 

@@ -101,6 +101,8 @@ public object MapExporter {
         lastWorldRefs = refs
         // territories are immutable after load, so they can be read off-thread
         val resources = Nodes.resourceNodes.values.map { it.name to it.icon }
+        val costBase = Config.territoryCostBase
+        val costScale = Config.territoryCostScale
         submit("world") {
             val j = Json(256 * refs.size + 1024)
             j.obj {
@@ -125,6 +127,10 @@ public object MapExporter {
                             key("wild").bool(t.bordersWilderness)
                         }
                     }
+                }
+                key("costConfig").obj {
+                    key("constant").num(costBase)
+                    key("scale").num(costScale)
                 }
                 key("resources").obj {
                     for ((name, icon) in resources) key(name).obj { key("icon").strOrNull(icon) }

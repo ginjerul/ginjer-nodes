@@ -32,6 +32,14 @@ class WebServer(
 ) {
     private class Dynamic(val bytes: ByteArray, val gz: ByteArray?, val etag: String, val type: String)
 
+    /** A request to an /api/ route. */
+    class ApiRequest(val method: String, val path: String, val query: Map<String, String>, val token: String?, val body: ByteArray)
+
+    class ApiResponse(val status: Int, val body: String, val type: String = "application/json; charset=utf-8")
+
+    /** Handles /api/... requests; set by the plugin. Runs on a web thread. */
+    @Volatile var api: ((ApiRequest) -> ApiResponse)? = null
+
     private val dynamic = ConcurrentHashMap<String, Dynamic>()
     private val gzCache = ConcurrentHashMap<Path, Pair<String, ByteArray>>()
     private var server: HttpServer? = null
@@ -71,6 +79,10 @@ class WebServer(
     }
 
     private fun handle(ex: HttpExchange) {
+        if (ex.requestURI.rawPath.startsWith("/api/")) {
+            handleApi(ex)
+            return
+        }
         if (ex.requestMethod != "GET" && ex.requestMethod != "HEAD") {
             send(ex, 405, "text/plain", ByteArray(0), null, null)
             return
@@ -111,6 +123,72 @@ class WebServer(
         }
     }
 
+    private fun handleApi(ex: HttpExchange) {
+        val handler = api
+        if (handler == null) {
+            sendApi(ex, ApiResponse(404, "{\"error\":\"not found\"}"))
+            return
+        }
+        val method = ex.requestMethod
+        if (method != "GET" && method != "POST") {
+            sendApi(ex, ApiResponse(405, "{\"error\":\"method not allowed\"}"))
+            return
+        }
+        val body = if (method == "POST") {
+            val declared = ex.requestHeaders.getFirst("Content-Length")?.toLongOrNull() ?: 0L
+            if (declared > MAX_BODY) {
+                sendApi(ex, ApiResponse(413, "{\"error\":\"too large\"}"))
+                return
+            }
+            readLimited(ex.requestBody, MAX_BODY) ?: run {
+                sendApi(ex, ApiResponse(413, "{\"error\":\"too large\"}"))
+                return
+            }
+        } else {
+            ByteArray(0)
+        }
+        val query = HashMap<String, String>()
+        ex.requestURI.rawQuery?.split('&')?.forEach { kv ->
+            val i = kv.indexOf('=')
+            if (i > 0) query[URLDecoder.decode(kv.substring(0, i), StandardCharsets.UTF_8)] = URLDecoder.decode(kv.substring(i + 1), StandardCharsets.UTF_8)
+        }
+        val auth = ex.requestHeaders.getFirst("Authorization")
+        val token = if (auth != null && auth.startsWith("Bearer ")) auth.substring(7).trim() else null
+        val res = try {
+            handler(ApiRequest(method, ex.requestURI.rawPath, query, token, body))
+        } catch (e: Exception) {
+            logger.warning("[NodesMap] api error on ${ex.requestURI.rawPath}: $e")
+            ApiResponse(500, "{\"error\":\"server error\"}")
+        }
+        sendApi(ex, res)
+    }
+
+    private fun readLimited(input: java.io.InputStream, limit: Long): ByteArray? {
+        val out = ByteArrayOutputStream()
+        val buf = ByteArray(64 * 1024)
+        var total = 0L
+        while (true) {
+            val n = input.read(buf)
+            if (n < 0) break
+            total += n
+            if (total > limit) return null
+            out.write(buf, 0, n)
+        }
+        return out.toByteArray()
+    }
+
+    private fun sendApi(ex: HttpExchange, res: ApiResponse) {
+        val bytes = res.body.toByteArray(StandardCharsets.UTF_8)
+        val h = ex.responseHeaders
+        h.add("Content-Type", res.type)
+        h.add("Cache-Control", "no-store")
+        val gz = bytes.size > 4096 && acceptsGzip(ex)
+        val out = if (gz) gzip(bytes) else bytes
+        if (gz) h.add("Content-Encoding", "gzip")
+        ex.sendResponseHeaders(res.status, if (out.isEmpty()) -1 else out.size.toLong())
+        if (out.isNotEmpty()) ex.responseBody.use { it.write(out) }
+    }
+
     private fun notModified(ex: HttpExchange, etag: String): Boolean {
         val inm = ex.requestHeaders.getFirst("If-None-Match") ?: return false
         if (inm != etag) return false
@@ -142,6 +220,11 @@ class WebServer(
         val out = ByteArrayOutputStream(b.size / 4 + 64)
         GZIPOutputStream(out).use { it.write(b) }
         return out.toByteArray()
+    }
+
+    companion object {
+        /** large maps can produce multi-megabyte world.json files */
+        const val MAX_BODY: Long = 64L * 1024 * 1024
     }
 
     private fun contentType(p: Path): String = when (p.fileName.toString().substringAfterLast('.').lowercase()) {

@@ -8,6 +8,10 @@ import org.bukkit.command.CommandSender
 import org.bukkit.entity.Player
 import org.bukkit.event.HandlerList
 import org.bukkit.plugin.java.JavaPlugin
+import net.kyori.adventure.text.Component
+import net.kyori.adventure.text.event.ClickEvent
+import net.kyori.adventure.text.format.NamedTextColor
+import phonon.nodesmap.editor.EditorApi
 import phonon.nodesmap.live.PlayerTracker
 import phonon.nodesmap.render.BlockColors
 import phonon.nodesmap.render.ChangeListener
@@ -33,6 +37,7 @@ class NodesMapPlugin : JavaPlugin() {
     private var listener: ChangeListener? = null
     private var web: WebServer? = null
     private var players: PlayerTracker? = null
+    private var editor: EditorApi? = null
 
     /** recently redrawn tiles, so open browsers can swap just those images */
     private val tileUpdates = ConcurrentLinkedDeque<Pair<String, Long>>()
@@ -68,7 +73,18 @@ class NodesMapPlugin : JavaPlugin() {
 
         if (cfg.webEnabled) {
             try {
-                web = WebServer(webRoot, cfg.webBind, cfg.webPort, cfg.webThreads, logger).also { it.start() }
+                val ed = EditorApi(server, logger, cfg.editorSessionMinutes)
+                editor = ed
+                web = WebServer(webRoot, cfg.webBind, cfg.webPort, cfg.webThreads, logger).also {
+                    it.api = { req ->
+                        if (req.path.startsWith("/api/editor/") && cfg.editorEnabled) {
+                            ed.handle(req)
+                        } else {
+                            WebServer.ApiResponse(404, "{\"error\":\"not found\"}")
+                        }
+                    }
+                    it.start()
+                }
             } catch (e: Exception) {
                 logger.severe("[NodesMap] could not start web server on ${cfg.webBind}:${cfg.webPort}: $e")
             }
@@ -169,7 +185,20 @@ class NodesMapPlugin : JavaPlugin() {
         val r = renderer ?: return true
         val a = ChatColor.AQUA
         val g = ChatColor.GRAY
-        when (args.getOrNull(0)?.lowercase()) {
+        val sub = args.getOrNull(0)?.lowercase()
+        if (sub == "editor") {
+            editorCommand(sender, args)
+            return true
+        }
+        if (!sender.hasPermission("nodesmap.admin")) {
+            if (sender.hasPermission("nodesmap.editor")) {
+                sender.sendMessage("$a[NodesMap]$g /nodesmap editor${ChatColor.DARK_GRAY} - open the map editor")
+            } else {
+                sender.sendMessage("${ChatColor.RED}You don't have permission to use this command.")
+            }
+            return true
+        }
+        when (sub) {
             "status" -> {
                 sender.sendMessage("$a[NodesMap]$g world: ${ChatColor.WHITE}${world.name}")
                 sender.sendMessage("$g  waiting to snapshot: ${ChatColor.WHITE}${s.pendingCount}$g, changed (next batch): ${ChatColor.WHITE}${s.dirtyCount}")
@@ -208,6 +237,8 @@ class NodesMapPlugin : JavaPlugin() {
                 s.concurrentLoads = cfg.fullRenderConcurrentLoads
                 s.restartBatch(cfg.batchSeconds)
                 players?.start(cfg)
+                editor?.sessionMinutes = cfg.editorSessionMinutes
+                editor?.resetBridge()
                 publishMapInfo()
                 sender.sendMessage("$a[NodesMap]$g config reloaded (web server and world changes need a restart)")
             }
@@ -218,13 +249,58 @@ class NodesMapPlugin : JavaPlugin() {
                 sender.sendMessage("$g  /nodesmap render [radiusChunks]${ChatColor.DARK_GRAY} - redraw loaded chunks around you")
                 sender.sendMessage("$g  /nodesmap cancel")
                 sender.sendMessage("$g  /nodesmap reload")
+                sender.sendMessage("$g  /nodesmap editor [revoke]${ChatColor.DARK_GRAY} - get a login link for the map editor")
             }
         }
         return true
     }
 
+    private fun editorCommand(sender: CommandSender, args: Array<out String>) {
+        val a = ChatColor.AQUA
+        val g = ChatColor.GRAY
+        if (!sender.hasPermission("nodesmap.editor")) {
+            sender.sendMessage("${ChatColor.RED}You don't have permission to use the map editor.")
+            return
+        }
+        val ed = editor
+        if (ed == null || !cfg.editorEnabled) {
+            sender.sendMessage("$a[NodesMap]$g the editor is off (needs web.enabled and editor.enabled)")
+            return
+        }
+        if (args.getOrNull(1)?.lowercase() == "revoke") {
+            val all = args.getOrNull(2)?.lowercase() == "all" && sender.hasPermission("nodesmap.admin")
+            val n = ed.revoke(if (all) null else sender.name)
+            sender.sendMessage("$a[NodesMap]$g ended $n editor session(s)")
+            return
+        }
+        val token = ed.createSession(sender.name, (sender as? Player)?.uniqueId)
+        val base = cfg.publicUrl.ifEmpty {
+            val host = server.ip.ifEmpty { "localhost" }.let { if (it == "0.0.0.0") "localhost" else it }
+            "http://$host:${cfg.webPort}"
+        }
+        val url = "$base/editor.html#token=$token"
+        sender.sendMessage("$a[NodesMap]$g editor link (valid ${cfg.editorSessionMinutes} min, don't share it):")
+        if (sender is Player) {
+            sender.sendMessage(
+                Component.text("  [Open map editor]", NamedTextColor.GREEN)
+                    .clickEvent(ClickEvent.openUrl(url))
+                    .append(Component.text("  click, or copy below", NamedTextColor.DARK_GRAY)),
+            )
+            sender.sendMessage(Component.text(url, NamedTextColor.GRAY).clickEvent(ClickEvent.copyToClipboard(url)))
+        } else {
+            sender.sendMessage(url)
+        }
+        sender.sendMessage("$g  end it early with /nodesmap editor revoke")
+    }
+
     override fun onTabComplete(sender: CommandSender, command: Command, alias: String, args: Array<out String>): List<String> {
-        if (args.size == 1) return listOf("status", "fullrender", "render", "cancel", "reload").filter { it.startsWith(args[0].lowercase()) }
+        if (args.size == 1) {
+            val opts = ArrayList<String>()
+            if (sender.hasPermission("nodesmap.admin")) opts += listOf("status", "fullrender", "render", "cancel", "reload")
+            if (sender.hasPermission("nodesmap.editor")) opts += "editor"
+            return opts.filter { it.startsWith(args[0].lowercase()) }
+        }
+        if (args.size == 2 && args[0].equals("editor", true)) return listOf("revoke").filter { it.startsWith(args[1].lowercase()) }
         return emptyList()
     }
 }

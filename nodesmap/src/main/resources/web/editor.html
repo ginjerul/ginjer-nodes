@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Map Editor</title>
+<link rel="icon" href="icons/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="editor.css">
+</head>
+<body class="editor">
+<div id="map"></div>
+
+<header id="topbar">
+  <a class="icon-btn" href="./" title="Back to the map" aria-label="Back to the map">
+    <svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg>
+  </a>
+  <div id="brand"><span class="brand-mark"></span><span>Map editor</span></div>
+
+  <div id="tools" class="toolgroup" role="toolbar" aria-label="Tools">
+    <button data-tool="select" title="Select (V) · Shift+drag to box-select">
+      <svg viewBox="0 0 24 24"><path d="M5 3l14 8-6 2-2 6z"/></svg><span>Select</span><kbd>V</kbd></button>
+    <button data-tool="paint" title="Paint chunks into the selected territory (B)">
+      <svg viewBox="0 0 24 24"><path d="M4 20c3 0 5-2 5-5l9-9a2 2 0 0 0-3-3l-9 9c-3 0-5 2-2 8z"/></svg><span>Paint</span><kbd>B</kbd></button>
+    <button data-tool="new" title="Paint a brand new territory (N)">
+      <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>New</span><kbd>N</kbd></button>
+    <button data-tool="erase" title="Erase chunks back to wilderness (E)">
+      <svg viewBox="0 0 24 24"><path d="M16 3l5 5-11 11H5v-5zM9 21h12"/></svg><span>Erase</span><kbd>E</kbd></button>
+    <button data-tool="rect" title="Drag a rectangle to fill (R)">
+      <svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="1"/></svg><span>Box</span><kbd>R</kbd></button>
+    <button data-tool="fill" title="Fill a connected area of empty land, like an island (F)">
+      <svg viewBox="0 0 24 24"><path d="M5 11l7-7 7 7-7 7zM19 15c1 2 2 3 2 4a2 2 0 0 1-4 0c0-1 1-2 2-4z"/></svg><span>Fill</span><kbd>F</kbd></button>
+    <button data-tool="core" title="Click a chunk to make it its territory's core (C)">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg><span>Core</span><kbd>C</kbd></button>
+  </div>
+
+  <div id="brush" class="toolgroup slim" title="Brush size ( [ and ] )">
+    <label for="brush-size">Brush</label>
+    <input id="brush-size" type="range" min="0" max="12" step="1" value="2">
+    <output id="brush-out">5×5</output>
+  </div>
+
+  <div class="toolgroup slim">
+    <button id="undo" class="icon-btn" title="Undo (Ctrl+Z)" aria-label="Undo"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5M4 9h11a5 5 0 0 1 0 10h-3"/></svg></button>
+    <button id="redo" class="icon-btn" title="Redo (Ctrl+Shift+Z)" aria-label="Redo"><svg viewBox="0 0 24 24"><path d="M15 14l5-5-5-5M20 9H9a5 5 0 0 0 0 10h3"/></svg></button>
+  </div>
+
+  <div class="spacer"></div>
+  <span id="save-state" class="pill">Loading…</span>
+  <button id="btn-check" class="btn">Check</button>
+  <button id="btn-apply" class="btn primary">Apply to server</button>
+  <div class="menu-wrap">
+    <button id="btn-menu" class="icon-btn" aria-label="More"><svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg></button>
+    <div id="menu" class="menu" hidden>
+      <button data-act="download">Download world.json</button>
+      <button data-act="import">Import world.json…</button>
+      <button data-act="reload">Reload from server</button>
+      <hr>
+      <button data-act="help">Shortcuts &amp; help</button>
+    </div>
+  </div>
+  <input id="import-file" type="file" accept=".json,application/json" hidden>
+</header>
+
+<aside id="sidebar">
+  <nav id="tabs">
+    <button data-tab="terr" class="active">Territories</button>
+    <button data-tab="res">Resources</button>
+    <button data-tab="opts">Options</button>
+  </nav>
+  <section id="tab-terr" class="tab active">
+    <div class="list-tools">
+      <input id="terr-filter" class="filter" placeholder="Search name, id or resource">
+      <select id="terr-sort">
+        <option value="id">By id</option>
+        <option value="size">Largest</option>
+        <option value="name">Name</option>
+        <option value="issues">Problems first</option>
+      </select>
+    </div>
+    <div id="terr-summary" class="hint"></div>
+    <div class="list" id="terr-list"></div>
+  </section>
+  <section id="tab-res" class="tab">
+    <div class="list-tools">
+      <input id="res-filter" class="filter" placeholder="Search resources">
+      <button id="res-new" class="btn small">New</button>
+    </div>
+    <div class="list" id="res-list"></div>
+    <div id="res-editor"></div>
+  </section>
+  <section id="tab-opts" class="tab">
+    <h3>Painting</h3>
+    <label class="tgl"><input type="checkbox" id="opt-land" checked>Land only (skip water and ungenerated chunks)</label>
+    <label class="tgl"><input type="checkbox" id="opt-wild" checked>Only paint empty land (don't take chunks from other territories)</label>
+    <label class="tgl"><input type="checkbox" id="opt-lock" checked>Lock claimed territories (owned or occupied by towns)</label>
+    <h3>Show</h3>
+    <label class="tgl"><input type="checkbox" id="opt-labels" checked>Territory names</label>
+    <label class="tgl"><input type="checkbox" id="opt-icons" checked>Resource icons</label>
+    <label class="tgl"><input type="checkbox" id="opt-owners" checked>Claimed land (town colors)</label>
+    <label class="tgl"><input type="checkbox" id="opt-grid">Chunk grid</label>
+    <p class="hint">Hold <kbd>Space</kbd> and drag to pan while painting. Scroll to zoom.</p>
+  </section>
+</aside>
+
+<aside id="inspector" hidden></aside>
+
+<footer id="statusbar">
+  <span id="coords">x —  z —</span>
+  <span id="hover-terr"></span>
+  <span id="counts"></span>
+</footer>
+
+<div id="toast" hidden></div>
+<div id="modal-wrap" hidden><div id="modal" role="dialog" aria-modal="true"></div></div>
+
+<script src="vendor/leaflet/leaflet.js"></script>
+<script src="geometry.js"></script>
+<script src="editor.js"></script>
+</body>
+</html>

@@ -9,12 +9,14 @@ commands:
   nodesmap:
     description: NodesMap admin commands
     aliases: [nmap]
-    permission: nodesmap.admin
     usage: /nodesmap help
 
 permissions:
   nodesmap.admin:
     description: Use /nodesmap admin commands
+    default: op
+  nodesmap.editor:
+    description: Open the web map editor (/nodesmap editor)
     default: op
   nodesmap.hidden:
     description: Player is never shown on the web map

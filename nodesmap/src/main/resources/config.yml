@@ -19,6 +19,15 @@ web:
   update-viewer: true
   # Title shown in the browser tab and on the map.
   title: "Nodes Map"
+  # Address players use to open the map, used for editor login links.
+  # e.g. "https://map.myserver.net". Empty = http://<server-ip or localhost>:<port>
+  public-url: ""
+
+editor:
+  # Web map editor for territories and resource nodes (/nodesmap editor).
+  enabled: true
+  # How long an editor login link stays valid.
+  session-minutes: 120
 
 render:
   # Re-render chunks that changed (block place/break, explosions, growth...).
