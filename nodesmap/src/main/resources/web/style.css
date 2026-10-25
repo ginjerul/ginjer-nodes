@@ -145,7 +145,7 @@ body.sidebar-closed #sidebar { transform: translateX(calc(-100% - 20px)); opacit
 .lbl { color: #fff; font-weight: 700; white-space: nowrap; text-shadow: 0 0 3px #000, 0 0 6px rgba(0,0,0,0.8); pointer-events: none; transform: translate(-50%, -50%); text-align: center; line-height: 1.1; }
 .lbl.town { font-size: 12.5px; }
 .lbl.town .cap { color: var(--accent); margin-right: 3px; }
-.lbl.nation { letter-spacing: 0.06em; opacity: 0.95; font-weight: 800; text-shadow: 0 0 2px #000, 0 0 5px rgba(0,0,0,0.85); }
+.lbl.nation { letter-spacing: 0.05em; line-height: 1.12; opacity: 0.95; font-weight: 800; text-shadow: 0 0 2px #000, 0 0 5px rgba(0,0,0,0.85); }
 .lbl.terr { font-size: 10.5px; font-weight: 600; color: rgba(255,255,255,0.75); }
 .lbl .n { display: block; font-size: 10px; font-weight: 600; color: rgba(255,255,255,0.72); letter-spacing: 0; }
 .pin { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: var(--panel-solid); border: 2px solid #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.5); transform: translate(-50%, -50%); }

@@ -484,13 +484,21 @@
       const main = mainLandmass(ids);
       const c = NodesGeom.labelCell(main.ids.map((id) => S.terr.get(id).core));
       if (!c) continue;
-      const px = Math.round(Math.max(11, Math.min(20, 9 + 2.2 * Math.log2(1 + ids.length))));
-      const text = prettyName(n.name).toUpperCase();
-      const towns = n.townList.length;
+      // block-space extent of the main landmass: the name is sized to fit inside it
+      let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+      for (const id of main.ids) {
+        const cs = S.terr.get(id).chunks;
+        for (let i = 0; i < cs.length; i += 2) {
+          if (cs[i] < x0) x0 = cs[i];
+          if (cs[i] > x1) x1 = cs[i];
+          if (cs[i + 1] < z0) z0 = cs[i + 1];
+          if (cs[i + 1] > z1) z1 = cs[i + 1];
+        }
+      }
       labelDefs.push({
         kind: "nation", latlng: chunkCenter(c[0], c[1]), priority: 1e7 + main.chunks,
-        w: textWidth(text, px, 800, 0.06), h: px * 1.15 + (towns > 1 ? 12 : 0),
-        html: `<div class="lbl nation" style="font-size:${px}px;color:${shade(n.color, 0.55)}">${esc(text)}${towns > 1 ? `<span class="n">${towns} towns</span>` : ""}</div>`,
+        text: prettyName(n.name).toUpperCase(), color: shade(n.color, 0.55), towns: n.townList.length,
+        spanX: (x1 - x0 + 1) * 16, spanZ: (z1 - z0 + 1) * 16,
       });
     }
     for (const t of S.towns.values()) {
@@ -522,20 +530,56 @@
     layoutTimer = setTimeout(layoutLabels, 40);
   }
 
+  /**
+   * Fit a nation name inside its land at the current zoom: font between 9 and
+   * 15px, wrapped onto two lines when that fits better.
+   */
+  function fitNation(d, scale) {
+    const areaW = d.spanX * scale * 0.9;
+    const areaH = d.spanZ * scale * 0.9;
+    const words = d.text.split(" ");
+    const options = [[d.text]];
+    if (words.length > 1) {
+      let best = null;
+      for (let i = 1; i < words.length; i++) {
+        const a = words.slice(0, i).join(" "), b = words.slice(i).join(" ");
+        const diff = Math.abs(a.length - b.length);
+        if (!best || diff < best[0]) best = [diff, [a, b]];
+      }
+      options.push(best[1]);
+    }
+    let pick = null;
+    for (const lines of options) {
+      const unit = Math.max(...lines.map((l) => textWidth(l, 10, 800, 0.05))) / 10; // width per px of font
+      const byWidth = areaW / unit;
+      const byHeight = areaH / (lines.length * 1.15);
+      const px = Math.max(9, Math.min(15, Math.floor(Math.min(byWidth, byHeight))));
+      if (!pick || px > pick.px) pick = { lines, px, unit };
+    }
+    const sub = d.towns > 1 && pick.px >= 11;
+    return {
+      w: pick.unit * pick.px,
+      h: pick.lines.length * pick.px * 1.12 + (sub ? 11 : 0),
+      html: `<div class="lbl nation" style="font-size:${pick.px}px;color:${d.color}">${pick.lines.map(esc).join("<br>")}${sub ? `<span class="n">${d.towns} towns</span>` : ""}</div>`,
+    };
+  }
+
   function layoutLabels() {
     G.townLabels.clearLayers(); G.nationLabels.clearLayers(); G.terrLabels.clearLayers();
     const z = map.getZoom();
+    const scale = Math.pow(2, z); // screen pixels per block
     const show = {
       nation: prefs.layers.nationLabels && z <= -3,
       town: prefs.layers.townLabels && z >= -3,
       terr: prefs.layers.terrLabels && z >= -1,
     };
     const size = map.getSize();
-    const pad = 6;
+    const pad = 3;
     const placed = [];
     const group = { nation: G.nationLabels, town: G.townLabels, terr: G.terrLabels };
     for (const d of labelDefs) {
       if (!show[d.kind]) continue;
+      if (d.kind === "nation") Object.assign(d, fitNation(d, scale));
       const p = map.latLngToContainerPoint(d.latlng);
       const x0 = p.x - d.w / 2 - pad, x1 = p.x + d.w / 2 + pad;
       const y0 = p.y - d.h / 2 - pad / 2, y1 = p.y + d.h / 2 + pad / 2;
