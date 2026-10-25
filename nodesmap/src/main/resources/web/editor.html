@@ -20,9 +20,9 @@
   <div id="brand"><span class="brand-mark"></span><span>Map editor</span></div>
 
   <div id="tools" class="toolgroup" role="toolbar" aria-label="Tools">
-    <button data-tool="select" title="Select (V) · Shift+drag to box-select">
+    <button data-tool="select" title="Select (V). Click or right-click a territory, Shift+drag to box-select">
       <svg viewBox="0 0 24 24"><path d="M5 3l14 8-6 2-2 6z"/></svg><span>Select</span><kbd>V</kbd></button>
-    <button data-tool="paint" title="Paint chunks into the selected territory (B)">
+    <button data-tool="paint" title="Brush: paint into the selected territory (B, or tap Space). Right-drag paints, Ctrl+right-drag erases, Shift+move resizes">
       <svg viewBox="0 0 24 24"><path d="M4 20c3 0 5-2 5-5l9-9a2 2 0 0 0-3-3l-9 9c-3 0-5 2-2 8z"/></svg><span>Paint</span><kbd>B</kbd></button>
     <button data-tool="new" title="Paint a brand new territory (N)">
       <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>New</span><kbd>N</kbd></button>
@@ -101,7 +101,7 @@
     <label class="tgl"><input type="checkbox" id="opt-icons" checked>Resource icons</label>
     <label class="tgl"><input type="checkbox" id="opt-owners" checked>Claimed land (town colors)</label>
     <label class="tgl"><input type="checkbox" id="opt-grid">Chunk grid</label>
-    <p class="hint">Hold <kbd>Space</kbd> and drag to pan while painting. Scroll to zoom.</p>
+    <p class="hint">Tap <kbd>Space</kbd> to turn the brush on/off like the old editor (left-drag pans, right-drag paints). Ctrl+right-drag erases, Shift+move resizes the brush, <kbd>A</kbd> starts a new territory. Hold <kbd>Space</kbd> and drag to pan. All controls: ⋯ menu → Shortcuts.</p>
   </section>
 </aside>
 
@@ -110,6 +110,7 @@
 <footer id="statusbar">
   <span id="coords">x —  z —</span>
   <span id="hover-terr"></span>
+  <span id="mode-hint"></span>
   <span id="counts"></span>
 </footer>
 

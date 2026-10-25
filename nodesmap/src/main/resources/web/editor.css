@@ -116,3 +116,6 @@ kbd { font: 600 11px var(--mono); border: 1px solid var(--line-strong); border-r
 }
 #inspector a, .note a { color: var(--accent); text-decoration: none; }
 #inspector a:hover, .note a:hover { text-decoration: underline; }
+#mode-hint { color: #f3d38d; font-family: var(--font); }
+#mode-hint:empty { display: none; }
+.keys kbd { justify-self: start; align-self: start; white-space: nowrap; margin-top: 1px; }

@@ -52,6 +52,7 @@
     tool: "select",
     brush: store.get("brush", 2),
     opt: Object.assign({ land: true, wild: true, lock: true, labels: true, icons: true, owners: true, grid: false }, store.get("opt", {})),
+    classic: false,          // brush turned on with Space: left-drag pans, right-drag paints
   };
 
   // ---------------------------------------------------------------- map
@@ -561,25 +562,59 @@
   // ---------------------------------------------------------------- tools
   let stroke = null;   // active paint stroke
   let spaceDown = false;
+  let spaceAt = 0;         // when Space went down (tap = toggle brush, hold = pan)
+  let spacePanned = false;
   let shiftDown = false;
+  let pendingNew = false;  // "A": the next stroke starts a new territory
+  let prevTool = "select"; // tool to return to when the brush is toggled off
+  let resizeAcc = 0;       // Shift + mouse move brush resizing
   const cursor = L.circle([0, 0], { renderer: R.ui, radius: 8, color: "#fff", weight: 1.5, fill: false, dashArray: "3 3", interactive: false });
   const boxRect = L.rectangle([[0, 0], [0, 0]], { renderer: R.ui, color: "#f3d38d", weight: 1.5, fillOpacity: 0.12, interactive: false });
 
   const PAINT_TOOLS = new Set(["paint", "new", "erase"]);
-  const DRAG_TOOLS = new Set(["paint", "new", "erase", "rect"]);
 
-  function setTool(t) {
+  function setTool(t, classic = false) {
+    if (!PAINT_TOOLS.has(t)) prevTool = t;
+    E.classic = PAINT_TOOLS.has(t) && classic;
     E.tool = t;
+    if (!PAINT_TOOLS.has(t)) setPendingNew(false);
     document.body.className = "editor tool-" + t;
     $$("#tools [data-tool]").forEach((b) => b.classList.toggle("active", b.dataset.tool === t));
     $("#brush").classList.toggle("off", !PAINT_TOOLS.has(t));
     syncDragging();
     if (PAINT_TOOLS.has(t)) G.ui.addLayer(cursor); else G.ui.removeLayer(cursor);
-    if (t === "paint" && E.sel.size !== 1) toast("Paint adds to the selected territory. Select one first, or use New.");
     preloadLand();
+    updateModeHint();
+  }
+  /** Space tap: brush on/off, like the old Dynmap editor's paint mode */
+  function toggleBrush() {
+    if (PAINT_TOOLS.has(E.tool)) {
+      setTool(prevTool && !PAINT_TOOLS.has(prevTool) ? prevTool : "select");
+      toast("Brush off");
+    } else {
+      setTool("paint", true);
+      toast(E.sel.size === 1 ? "Brush on: right-drag paints, Ctrl+right-drag erases" : "Brush on. Right-click a territory to paint into it, or press A to start a new one");
+    }
+  }
+  function setPendingNew(on) {
+    pendingNew = on;
+    cursor.setStyle({ color: on ? "#7ee08a" : "#fff", dashArray: on ? "6 3" : "3 3" });
+    updateModeHint();
+  }
+  function updateModeHint() {
+    const el = $("#mode-hint");
+    if (!el) return;
+    const brush = PAINT_TOOLS.has(E.tool);
+    const btn = E.classic ? "right-drag" : "drag";
+    el.textContent = !brush ? "" :
+      pendingNew ? `Next stroke starts a new territory · ${btn} to paint` :
+      E.tool === "erase" ? `Erasing · ${btn} · Space: brush off` :
+      E.tool === "new" ? `New territory per stroke · ${btn} · Space: brush off` :
+      `Brush · ${btn} paint · Ctrl+${btn} erase · Shift+move: size · A: new · Space: off`;
   }
   function syncDragging() {
-    const paintMode = DRAG_TOOLS.has(E.tool) || stroke || rectStart || (E.tool === "select" && shiftDown);
+    const brushPaints = PAINT_TOOLS.has(E.tool) && !E.classic;
+    const paintMode = brushPaints || E.tool === "rect" || stroke || rectStart || (E.tool === "select" && shiftDown);
     if (paintMode && !spaceDown) map.dragging.disable(); else map.dragging.enable();
     document.body.classList.toggle("panning", spaceDown);
   }
@@ -601,6 +636,14 @@
     const t = id !== undefined ? E.terr.get(id) : null;
     const claim = t && E.claimed.get(t.id);
     $("#hover-terr").textContent = t ? `#${t.id} ${t.name || ""}${claim ? " · " + claim.town : ""}` : "wilderness";
+    const oe = e.originalEvent;
+    if (PAINT_TOOLS.has(E.tool) && oe.shiftKey && !stroke && !oe.buttons) {
+      // Shift + mouse move: resize the brush (old editor behavior); cursor stays put
+      const d = Math.abs(oe.movementX) > Math.abs(oe.movementY) ? oe.movementX : -oe.movementY;
+      resizeAcc += d;
+      if (Math.abs(resizeAcc) >= 14) { setBrush(E.brush + Math.sign(resizeAcc)); resizeAcc = 0; }
+      return;
+    }
     if (PAINT_TOOLS.has(E.tool)) cursor.setLatLng(ll(cx * 16 + 8, cz * 16 + 8));
     if (stroke) strokeTo(cx, cz);
     if (rectStart) {
@@ -611,9 +654,26 @@
   let rectStart = null;
   let rectMode = null; // "fill" | "select"
 
+  map.getContainer().addEventListener("contextmenu", (e) => e.preventDefault());
+  map.on("dragstart", () => { if (spaceDown) spacePanned = true; });
+
+  /** stroke mode for a mouse press while the brush is on */
+  function brushMode(oe) {
+    if (oe.ctrlKey || oe.metaKey || E.tool === "erase") return E.sel.size === 1 && E.tool !== "erase" ? "eraseSel" : "erase";
+    if (E.tool === "new" || pendingNew) return "new";
+    return "paint";
+  }
+
   map.on("mousedown", (e) => {
-    if (e.originalEvent.button !== 0 || spaceDown) return;
+    const oe = e.originalEvent;
+    if (spaceDown) return;
     const [cx, cz] = chunkAt(e.latlng);
+    if (oe.button === 2) return rightDown(cx, cz, oe);
+    if (oe.button !== 0) return;
+    if (PAINT_TOOLS.has(E.tool)) {
+      if (!E.classic) startStroke(cx, cz, brushMode(oe));
+      return;
+    }
     if (E.tool === "select" && e.originalEvent.shiftKey) {
       rectStart = [cx, cz]; rectMode = "select";
       boxRect.setBounds([ll(cx * 16, cz * 16), ll(cx * 16 + 16, cz * 16 + 16)]);
@@ -626,8 +686,34 @@
       G.ui.addLayer(boxRect);
       return;
     }
-    if (PAINT_TOOLS.has(E.tool)) startStroke(cx, cz);
   });
+
+  /**
+   * Right mouse button, as in the old Dynmap editor:
+   *   brush on:  drag paints into the selected territory, Ctrl+drag erases
+   *   brush off: click selects, Shift+click adds/removes, click empty land deselects,
+   *              Ctrl+click adds/removes the resource picked in the Resources tab
+   */
+  function rightDown(cx, cz, oe) {
+    if (PAINT_TOOLS.has(E.tool)) return startStroke(cx, cz, brushMode(oe));
+    const id = E.owner.get(K(cx, cz));
+    if (oe.ctrlKey || oe.metaKey) return toggleResourceAt(id);
+    if (id === undefined) { if (!oe.shiftKey) select([]); return; }
+    if (oe.shiftKey) toggleSel(id); else select([id]);
+  }
+
+  function toggleResourceAt(id) {
+    if (!resSel || !E.resources[resSel]) return toast("Pick a resource in the Resources tab first, then Ctrl+right-click territories", true);
+    if (id === undefined) return;
+    if (isLocked(id)) return toast("That territory is claimed and locked (see Options)", true);
+    const t = E.terr.get(id);
+    const has = t.nodes.includes(resSel);
+    begin(has ? "Remove resource" : "Add resource");
+    touch(id);
+    if (has) t.nodes = t.nodes.filter((n) => n !== resSel); else t.nodes.push(resSel);
+    end();
+    toast(`${has ? "Removed" : "Added"} ${resSel} ${has ? "from" : "to"} #${id}${t.name ? " " + t.name : ""}`);
+  }
   document.addEventListener("mouseup", (e) => {
     if (stroke) endStroke();
     if (rectStart) {
@@ -659,19 +745,31 @@
       select([id]);
     } else if (E.tool === "fill") {
       fillFrom(cx, cz);
+    } else if (PAINT_TOOLS.has(E.tool) && E.classic) {
+      // brush on, left mouse pans: a plain click still picks the territory to paint into
+      if (id === undefined) return;
+      if (e.originalEvent.shiftKey) toggleSel(id); else select([id]);
     }
   });
 
-  function startStroke(cx, cz) {
+  function startStroke(cx, cz, mode) {
     let target = null;
-    if (E.tool === "paint") {
-      if (E.sel.size !== 1) return toast("Select one territory to paint into, or use the New tool", true);
+    if (mode === "paint" || mode === "eraseSel") {
+      if (E.sel.size !== 1) {
+        return toast(mode === "paint" ? "Select one territory to paint into (right-click it), or press A to start a new one" : "Select one territory first", true);
+      }
       target = [...E.sel][0];
       if (isLocked(target)) return toast("That territory is claimed and locked (see Options)", true);
     }
-    begin(E.tool === "erase" ? "Erase" : E.tool === "new" ? "New territory" : "Paint");
-    if (E.tool === "new") { const t = newTerritory(); target = t.id; E.sel.clear(); E.sel.add(target); }
-    stroke = { target, last: null, frame: 0, dirty: new Set() };
+    begin(mode.startsWith("erase") ? "Erase" : mode === "new" ? "New territory" : "Paint");
+    if (mode === "new") {
+      const t = newTerritory();
+      target = t.id;
+      E.sel.clear();
+      E.sel.add(target);
+      setPendingNew(false);
+    }
+    stroke = { mode, target, last: null, frame: 0, dirty: new Set() };
     syncDragging();
     strokeTo(cx, cz);
   }
@@ -679,11 +777,12 @@
     const s = stroke;
     const pts = s.last ? line(s.last[0], s.last[1], cx, cz) : [[cx, cz]];
     s.last = [cx, cz];
-    const erase = E.tool === "erase";
+    const erase = s.mode === "erase" || s.mode === "eraseSel";
     const opts = { onlyWild: !erase && E.opt.wild, landOnly: !erase && E.opt.land };
     for (const [x, z] of pts) {
       for (const k of brushKeys(x, z, E.brush)) {
         const before = E.owner.get(k);
+        if (s.mode === "eraseSel" && before !== s.target) continue;
         if (assign(k, erase ? null : s.target, opts)) {
           s.dirty.add(erase ? before : s.target);
           if (before !== undefined) s.dirty.add(before);
@@ -698,6 +797,7 @@
     if (s.frame) cancelAnimationFrame(s.frame);
     end();
     syncDragging();
+    if (s.mode === "new" && E.terr.has(s.target)) select([s.target]);
   }
   function line(x0, z0, x1, z1) {
     const out = [];
@@ -1327,6 +1427,7 @@
   function buildUi() {
     $$("#tools [data-tool]").forEach((b) => (b.onclick = () => setTool(b.dataset.tool)));
     $("#brush-size").oninput = (e) => setBrush(+e.target.value);
+    $("#brush-size").onchange = (e) => e.target.blur();
     setBrush(E.brush);
     $("#undo").onclick = undo;
     $("#redo").onclick = redo;
@@ -1398,13 +1499,16 @@
         store.set("opt", E.opt);
         drawOverlays();
         preloadLand();
+        syncDragging();
+        updateModeHint();
         refreshUi();
+        el.blur(); // keep Space etc. working as editor shortcuts
       };
     }
     $("#modal-wrap").addEventListener("mousedown", (e) => { if (e.target.id === "modal-wrap") closeModal(); });
 
     document.addEventListener("keydown", (e) => {
-      const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName);
+      const typing = isTyping();
       if (e.key === "Escape") { closeModal(); if (!typing) select([]); return; }
       if (typing) return;
       const mod = e.ctrlKey || e.metaKey;
@@ -1413,8 +1517,17 @@
       if (mod && e.key.toLowerCase() === "s") { e.preventDefault(); check(true); return; }
       if (mod && e.key.toLowerCase() === "a") { e.preventDefault(); select([...E.terr.keys()]); return; }
       if (mod) return;
-      if (e.code === "Space") { if (!spaceDown) { spaceDown = true; syncDragging(); } e.preventDefault(); return; }
-      if (e.key === "Shift") { shiftDown = true; syncDragging(); return; }
+      if (e.code === "Space") {
+        e.preventDefault();
+        if (!spaceDown && !e.repeat) { spaceDown = true; spaceAt = Date.now(); spacePanned = false; syncDragging(); }
+        return;
+      }
+      if (e.key === "Shift") { shiftDown = true; resizeAcc = 0; syncDragging(); return; }
+      if (e.key.toLowerCase() === "a" && PAINT_TOOLS.has(E.tool)) {
+        setPendingNew(!pendingNew);
+        if (pendingNew) toast("Next stroke starts a new territory");
+        return;
+      }
       const tools = { v: "select", b: "paint", n: "new", e: "erase", r: "rect", f: "fill", c: "core" };
       if (tools[e.key.toLowerCase()]) return setTool(tools[e.key.toLowerCase()]);
       if (e.key === "[") return setBrush(E.brush - 1);
@@ -1423,7 +1536,12 @@
       if (e.key.toLowerCase() === "m") return mergeSelected();
     });
     document.addEventListener("keyup", (e) => {
-      if (e.code === "Space") { spaceDown = false; syncDragging(); }
+      if (e.code === "Space") {
+        const tap = spaceDown && !spacePanned && Date.now() - spaceAt < 350;
+        spaceDown = false;
+        syncDragging();
+        if (tap && !isTyping()) toggleBrush();
+      }
       if (e.key === "Shift") { shiftDown = false; syncDragging(); }
     });
     window.addEventListener("blur", () => { spaceDown = false; shiftDown = false; syncDragging(); });
@@ -1431,19 +1549,41 @@
     setTool("select");
   }
 
+  /** true while the user is typing in a text field (checkboxes and sliders don't count) */
+  function isTyping() {
+    const a = document.activeElement;
+    if (!a) return false;
+    if (a.tagName === "TEXTAREA" || a.tagName === "SELECT") return true;
+    if (a.tagName !== "INPUT") return false;
+    return !["checkbox", "radio", "range", "button"].includes(a.type);
+  }
+
   function helpDialog() {
-    modal(`<h2>Shortcuts</h2><div class="keys">
-      <kbd>V</kbd><span>Select: click a territory. Ctrl/⌘-click to add, Shift+drag for a box.</span>
-      <kbd>B</kbd><span>Paint chunks into the selected territory</span>
-      <kbd>N</kbd><span>Paint a new territory (one per stroke)</span>
-      <kbd>E</kbd><span>Erase chunks back to wilderness</span>
+    modal(`<h2>Controls</h2>
+    <div class="section-h">Like the old Dynmap editor</div>
+    <div class="keys">
+      <kbd>Space</kbd><span>Brush on / off (tap). In this mode left-drag pans and right-drag paints. Hold Space and drag to pan any time.</span>
+      <kbd>Right-click</kbd><span>Select a territory. Shift+right-click adds or removes. Right-click empty land to deselect.</span>
+      <kbd>Right-drag</kbd><span>With the brush on: paint chunks into the selected territory</span>
+      <kbd>Ctrl+right-drag</kbd><span>With the brush on: erase chunks from the selected territory</span>
+      <kbd>Shift+move</kbd><span>With the brush on: change brush size</span>
+      <kbd>A</kbd><span>With the brush on: the next stroke starts a new territory</span>
+      <kbd>Ctrl+right-click</kbd><span>Brush off: add/remove the resource picked in the Resources tab</span>
+      <kbd>Left-drag</kbd><span>Pans the map when the brush was turned on with Space. Brushes picked from the toolbar (or B/N/E) paint with left-drag too.</span>
+    </div>
+    <div class="section-h">Tools</div>
+    <div class="keys">
+      <kbd>V</kbd><span>Select. Click a territory, Ctrl/⌘-click to add, Shift+drag for a box.</span>
+      <kbd>B</kbd><span>Brush: paint into the selected territory</span>
+      <kbd>N</kbd><span>Brush: every stroke is a new territory</span>
+      <kbd>E</kbd><span>Brush: erase any chunks back to wilderness</span>
       <kbd>R</kbd><span>Drag a box to fill</span>
       <kbd>F</kbd><span>Fill a connected area of empty land (like an island)</span>
       <kbd>C</kbd><span>Set a territory's core chunk</span>
       <kbd>[ ]</kbd><span>Brush smaller / bigger</span>
-      <kbd>Space</kbd><span>Hold and drag to pan while painting</span>
       <kbd>M</kbd><span>Merge selected</span>
       <kbd>Del</kbd><span>Delete selected</span>
+      <kbd>Esc</kbd><span>Deselect</span>
       <kbd>Ctrl+Z</kbd><span>Undo (Ctrl+Shift+Z to redo)</span>
       <kbd>Ctrl+S</kbd><span>Check &amp; apply to server</span>
     </div>
