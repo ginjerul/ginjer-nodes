@@ -98,7 +98,7 @@ Set `web.enabled: false`, then serve `plugins/NodesMap/web/` as static files. No
 
 ```
 cd nodesmap
-./gradlew build      # -> build/libs/nodesmap-0.1.0.jar
+./gradlew build      # -> build/libs/nodesmap-0.2.0.jar
 ```
 
 Like Nodes, it needs the Kotlin runtime plugin on the server.

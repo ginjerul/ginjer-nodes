@@ -154,28 +154,44 @@ class NodesMapPlugin : JavaPlugin() {
 
     private fun jsonStr(s: String) = "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
-    /** Copy the bundled viewer (resources/web/...) into plugins/NodesMap/web on version change. */
+    /**
+     * Copy the bundled viewer (resources/web/...) into plugins/NodesMap/web.
+     *
+     * Files are refreshed whenever their contents in the jar change (a fingerprint
+     * of every file's checksum), not just when the version number changes, and any
+     * missing file is always restored. With web.update-viewer: false, existing files
+     * are left alone (for customised viewers) but missing ones are still added.
+     */
     private fun extractViewer() {
         val marker = webRoot.resolve(".viewer-version")
-        val current = try {
+        val installed = try {
             Files.readString(marker).trim()
         } catch (_: Exception) {
             ""
         }
-        if (current == description.version && !description.version.endsWith("SNAPSHOT")) return
-        if (current.isNotEmpty() && !cfg.updateViewer) return
 
         JarFile(file).use { jar ->
-            for (entry in jar.entries()) {
-                if (entry.isDirectory || !entry.name.startsWith("web/")) continue
+            val entries = jar.entries().toList().filter { !it.isDirectory && it.name.startsWith("web/") }.sortedBy { it.name }
+            val crc = java.util.zip.CRC32()
+            for (e in entries) {
+                crc.update(e.name.toByteArray())
+                crc.update(e.crc.toString().toByteArray())
+            }
+            val fingerprint = "${description.version}-${crc.value.toString(36)}"
+            val refreshAll = installed != fingerprint && (installed.isEmpty() || cfg.updateViewer)
+
+            var written = 0
+            for (entry in entries) {
                 val target = webRoot.resolve(entry.name.removePrefix("web/")).normalize()
                 if (!target.startsWith(webRoot)) continue
+                if (!refreshAll && Files.exists(target)) continue
                 Files.createDirectories(target.parent)
                 jar.getInputStream(entry).use { Files.copy(it, target, StandardCopyOption.REPLACE_EXISTING) }
+                written++
             }
+            if (refreshAll) Files.writeString(marker, fingerprint)
+            if (written > 0) logger.info("[NodesMap] installed $written viewer file(s) (${description.version})")
         }
-        Files.writeString(marker, description.version)
-        logger.info("[NodesMap] viewer files installed (${description.version})")
     }
 
     // ------------------------------------------------------------------
