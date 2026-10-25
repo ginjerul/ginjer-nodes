@@ -1,6 +1,6 @@
 on:
   push:
-    branches: [ master ]
+    branches: [ master, nodesmap ]
   pull_request:
   workflow_dispatch:
 
@@ -49,6 +49,30 @@ jobs:
           if [ "$NODESMAP" = "failure" ]; then report nodesmap nodesmap-build.log; fi
           exit 1
 
+      # Branch builds: plain .jar downloads (no zip) on a pre-release that's
+      # replaced on every build. Links stay the same:
+      #   https://github.com/<owner>/<repo>/releases/download/dev-<branch>/nodes.jar
+      #   https://github.com/<owner>/<repo>/releases/download/dev-<branch>/nodesmap.jar
+      - name: Publish dev build
+        if: github.ref != 'refs/heads/master' && github.event_name != 'pull_request' && steps.nodes.outcome == 'success' && steps.nodesmap.outcome == 'success'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          TAG="dev-${BRANCH//\//-}"
+          mkdir -p dist
+          echo "nodes/build/libs:"; ls -la nodes/build/libs
+          NODES_JAR=$(ls nodes/build/libs/nodes-*.jar | grep -v -- '-dev' | grep -v -- '-sources' | head -n 1)
+          NODESMAP_JAR=$(ls nodesmap/build/libs/nodesmap-*.jar | head -n 1)
+          cp "$NODES_JAR" dist/nodes.jar
+          cp "$NODESMAP_JAR" dist/nodesmap.jar
+          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "$TAG" dist/nodes.jar dist/nodesmap.jar \
+            --prerelease --target "$GITHUB_SHA" \
+            --title "Dev build: $BRANCH" \
+            --notes "Latest build of the \`$BRANCH\` branch, commit ${GITHUB_SHA::7}. Replaced on every push. Built from $(basename "$NODES_JAR") and $(basename "$NODESMAP_JAR")."
+          echo "Download: https://github.com/${{ github.repository }}/releases/tag/$TAG"
+
       - uses: actions/upload-artifact@v4
         with:
           name: jars
@@ -69,7 +93,7 @@ jobs:
          npm run build
          zip -r dynmap.zip build/*
          
-      - if: github.event_name == 'push'
+      - if: github.event_name == 'push' && github.ref == 'refs/heads/master'
         id: get_version
         run: |
           VERSION=""
@@ -83,7 +107,7 @@ jobs:
           echo "Detected version: $VERSION"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
-      - if: github.event_name == 'push'
+      - if: github.event_name == 'push' && github.ref == 'refs/heads/master'
         id: check_release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -95,7 +119,7 @@ jobs:
             echo "exists=false" >> $GITHUB_OUTPUT
           fi
 
-      - if: github.event_name == 'push' && steps.check_release.outputs.exists == 'false'
+      - if: github.event_name == 'push' && github.ref == 'refs/heads/master' && steps.check_release.outputs.exists == 'false'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.get_version.outputs.version }}
