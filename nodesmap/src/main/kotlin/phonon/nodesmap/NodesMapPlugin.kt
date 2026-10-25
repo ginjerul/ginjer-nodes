@@ -305,6 +305,7 @@ class NodesMapPlugin : JavaPlugin() {
                         reporter?.cancel()
                         val secs = pr.elapsedMs / 1000
                         val diskDone = pr.done - pr.fallback - pr.reasons.filterKeys { it.startsWith("skipped") }.values.sum()
+                        // "drawn anyway" entries are informational: those chunks are in diskDone
                         val head = if (cancelled) {
                             "[Nodes] Map render cancelled after %,d chunks".format(pr.done)
                         } else {

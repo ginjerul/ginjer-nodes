@@ -233,6 +233,7 @@ class RenderScheduler(
                     reader.readRegion(path, rx, rz, { frCancel }, want) { cx, cz, result ->
                         when (result) {
                             is RegionReader.Result.Ok -> {
+                                result.note?.let { frReasons.computeIfAbsent("drawn anyway, marked $it") { AtomicInteger() }.incrementAndGet() }
                                 // backpressure: keep memory bounded while the renderer catches up
                                 while (renderer.queued > 512 && !frCancel) Thread.sleep(4)
                                 renderer.submit(ChunkJob(cx, cz, result.chunk, minY, maxY, null))

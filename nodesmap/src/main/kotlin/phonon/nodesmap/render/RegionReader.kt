@@ -27,7 +27,8 @@ class RegionReader(
     private val maxY: Int,
 ) {
     sealed class Result {
-        class Ok(val chunk: RegionChunk) : Result()
+        /** [note] is set when the chunk was drawn even though it isn't marked fully generated */
+        class Ok(val chunk: RegionChunk, val note: String? = null) : Result()
 
         /** not a fully generated chunk; nothing to draw */
         class Skip(val reason: String) : Result()
@@ -113,6 +114,11 @@ class RegionReader(
 
     // ------------------------------------------------------------------
 
+    companion object {
+        /** generation stages before the surface exists */
+        val NO_TERRAIN = setOf("empty", "structure_starts", "structure_references", "biomes", "noise")
+    }
+
     private class RawSection(val y: Int, val palette: Array<Material>, val data: LongArray?)
 
     private fun parse(nbt: Nbt): Result {
@@ -163,8 +169,12 @@ class RegionReader(
         if (raw.isEmpty()) return if (dataVersion == 0) Result.Fallback("old chunk format") else Result.Skip("empty")
         // some tools leave out yPos; the lowest section tells us
         if (yPos == Int.MIN_VALUE) yPos = minOf(raw.minOf { it.y }, minY shr 4)
+        // Only skip chunks that have no real terrain yet. World tools (Earth maps,
+        // WorldPainter, converters) often save finished terrain under an earlier
+        // status; those are drawn like any other chunk.
         val st = status?.removePrefix("minecraft:")
-        if (st != null && st != "full") return Result.Skip("not fully generated")
+        if (st != null && st in NO_TERRAIN) return Result.Skip("no terrain yet (status $st)")
+        val note = if (st != null && st != "full") "status $st" else null
 
         val minSection = minY shr 4
         val count = (maxY - minY) shr 4
@@ -203,7 +213,8 @@ class RegionReader(
                 heights[i] = top
             }
         }
-        return Result.Ok(RegionChunk(minY, sections, heights))
+        if (note != null && sections.all { it == null || it.isEmpty }) return Result.Skip("empty (status $st)")
+        return Result.Ok(RegionChunk(minY, sections, heights), note)
     }
 
     private fun readSections(nbt: Nbt, out: ArrayList<RawSection>) {
