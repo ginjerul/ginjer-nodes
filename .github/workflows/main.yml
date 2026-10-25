@@ -62,7 +62,9 @@ jobs:
           TAG="dev-${BRANCH//\//-}"
           mkdir -p dist
           echo "nodes/build/libs:"; ls -la nodes/build/libs
-          NODES_JAR=$(ls nodes/build/libs/nodes-*.jar | grep -v -- '-dev' | grep -v -- '-sources' | head -n 1)
+          # same jar the versioned releases ship (plain nodes-<version>.jar)
+          NODES_JAR=$(ls nodes/build/libs/nodes-*.jar | grep -Ev -- '-(dev|reobf|sources|all)\.jar$' | head -n 1)
+          [ -n "$NODES_JAR" ] || NODES_JAR=$(ls nodes/build/libs/nodes-*.jar | head -n 1)
           NODESMAP_JAR=$(ls nodesmap/build/libs/nodesmap-*.jar | head -n 1)
           cp "$NODES_JAR" dist/nodes.jar
           cp "$NODESMAP_JAR" dist/nodesmap.jar
