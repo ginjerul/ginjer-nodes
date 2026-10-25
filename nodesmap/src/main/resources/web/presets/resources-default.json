@@ -5,7 +5,7 @@
   {
    "id": "basic",
    "title": "Basic",
-   "about": "A little of every ore: small hourly income and a small chance of ore when mining stone.",
+   "about": "A little of the common ores (coal, copper, iron, gold, diamond): small hourly income and a small chance of ore when mining stone.",
    "nodes": {
     "basic": {
      "icon": "iron_pickaxe",
@@ -19,22 +19,14 @@
       "copper_ingot": 2,
       "iron_ingot": 1,
       "gold_ingot": 0.5,
-      "redstone": 2,
-      "lapis_lazuli": 1,
-      "quartz": 1,
-      "diamond": 0.2,
-      "emerald": 0.2
+      "diamond": 0.2
      },
      "ore": {
       "coal": 0.01,
       "raw_copper": 0.01,
       "raw_iron": 0.008,
       "raw_gold": 0.004,
-      "redstone": 0.006,
-      "lapis_lazuli": 0.004,
-      "quartz": 0.004,
-      "diamond": 0.001,
-      "emerald": 0.001
+      "diamond": 0.001
      },
      "crops": {},
      "animals": {}
