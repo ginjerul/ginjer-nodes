@@ -64,6 +64,7 @@ class NodesMapPlugin : JavaPlugin() {
         val s = RenderScheduler(this, world, r)
         s.budgetNanos = cfg.snapshotBudgetNanos
         s.concurrentLoads = cfg.fullRenderConcurrentLoads
+        s.readThreads = cfg.fullRenderThreads
         s.start(cfg.batchSeconds)
         scheduler = s
 
@@ -98,7 +99,7 @@ class NodesMapPlugin : JavaPlugin() {
             if (web == null) webRoot.resolve("data").resolve("players.json") else null,
         ).also { it.start(cfg) }
 
-        server.scheduler.runTaskTimerAsynchronously(this, Runnable { publishTileUpdates() }, 100L, 200L)
+        server.scheduler.runTaskTimerAsynchronously(this, Runnable { publishTileUpdates() }, 100L, 100L)
 
         logger.info("[NodesMap] rendering world '${world.name}'. Run /nodesmap fullrender once to draw the whole map.")
     }
@@ -135,7 +136,11 @@ class NodesMapPlugin : JavaPlugin() {
             if (first.second >= cutoff) break
             tileUpdates.pollFirst()
         }
-        val sb = StringBuilder("{\"now\":").append(now).append(",\"updates\":[")
+        val sb = StringBuilder("{\"now\":").append(now)
+        scheduler?.fullRenderProgress()?.let { p ->
+            sb.append(",\"render\":{\"done\":").append(p.done).append(",\"total\":").append(p.total).append('}')
+        }
+        sb.append(",\"updates\":[")
         var first = true
         for ((k, t) in tileUpdates) {
             if (!first) sb.append(',')
@@ -219,7 +224,7 @@ class NodesMapPlugin : JavaPlugin() {
                 sender.sendMessage("$a[NodesMap]$g world: ${ChatColor.WHITE}${world.name}")
                 sender.sendMessage("$g  waiting to snapshot: ${ChatColor.WHITE}${s.pendingCount}$g, changed (next batch): ${ChatColor.WHITE}${s.dirtyCount}")
                 sender.sendMessage("$g  render queue: ${ChatColor.WHITE}${r.queued}$g, chunks drawn: ${ChatColor.WHITE}${r.chunksRendered.get()}$g, tiles written: ${ChatColor.WHITE}${r.tilesWritten.get()}")
-                if (s.fullRenderActive) sender.sendMessage("$g  full render: ${ChatColor.WHITE}${s.fullRenderTotal - s.pendingCount}/${s.fullRenderTotal}")
+                s.fullRenderProgress()?.let { sender.sendMessage("$g  full render: ${ChatColor.WHITE}${progressText(it)}") }
                 sender.sendMessage("$g  web: ${ChatColor.WHITE}${if (web != null) "http://${cfg.webBind}:${cfg.webPort}/" else "off (serve plugins/NodesMap/web yourself)"}")
             }
             "fullrender" -> {
@@ -227,10 +232,46 @@ class NodesMapPlugin : JavaPlugin() {
                 val p = sender as? Player
                 val cx = if (radius != null && p != null) p.location.blockX shr 4 else null
                 val cz = if (radius != null && p != null) p.location.blockZ shr 4 else null
-                sender.sendMessage("$a[NodesMap]$g scanning region files...")
-                s.fullRender(cx, cz, radius) { n ->
-                    sender.sendMessage("$a[NodesMap]$g queued ${ChatColor.WHITE}$n$g chunks. Check progress with /nodesmap status")
-                }
+                sender.sendMessage("$a[NodesMap]$g reading region files...")
+                var reporter: org.bukkit.scheduler.BukkitTask? = null
+                s.fullRender(
+                    cx,
+                    cz,
+                    radius,
+                    started = { n ->
+                        if (n < 0) {
+                            sender.sendMessage("$a[NodesMap]$g a full render is already running. /nodesmap status to watch it, /nodesmap cancel to stop it.")
+                        } else {
+                            sender.sendMessage("$a[NodesMap]$g drawing ${ChatColor.WHITE}%,d$g chunks in the background. Progress shows here every 10s.".format(n))
+                            reporter = server.scheduler.runTaskTimer(
+                                this,
+                                Runnable {
+                                    val pr = s.fullRenderProgress() ?: return@Runnable
+                                    val line = "$a[NodesMap]$g full render ${ChatColor.WHITE}${progressText(pr)}"
+                                    if (sender is Player) {
+                                        if (sender.isOnline) sender.sendActionBar(Component.text(ChatColor.stripColor(line) ?: line, NamedTextColor.AQUA))
+                                    } else {
+                                        sender.sendMessage(line)
+                                    }
+                                },
+                                200L,
+                                200L,
+                            )
+                        }
+                    },
+                    finished = { pr, cancelled ->
+                        reporter?.cancel()
+                        val secs = pr.elapsedMs / 1000
+                        val msg = if (cancelled) {
+                            "$a[NodesMap]$g full render cancelled after ${ChatColor.WHITE}%,d$g chunks".format(pr.done)
+                        } else {
+                            "$a[NodesMap]$g full render done: ${ChatColor.WHITE}%,d$g chunks in ${secs / 60}m ${secs % 60}s".format(pr.done) +
+                                if (pr.fallback > 0) " (${pr.fallback} older-format chunks are being loaded by the server)" else ""
+                        }
+                        logger.info(ChatColor.stripColor(msg))
+                        if (sender is Player && sender.isOnline) sender.sendMessage(msg)
+                    },
+                )
             }
             "render" -> {
                 val p = sender as? Player ?: run {
@@ -272,6 +313,7 @@ class NodesMapPlugin : JavaPlugin() {
                 r.settings = settingsOf(cfg)
                 s.budgetNanos = cfg.snapshotBudgetNanos
                 s.concurrentLoads = cfg.fullRenderConcurrentLoads
+                s.readThreads = cfg.fullRenderThreads
                 s.restartBatch(cfg.batchSeconds)
                 players?.start(cfg)
                 editor?.sessionMinutes = cfg.editorSessionMinutes
@@ -291,6 +333,19 @@ class NodesMapPlugin : JavaPlugin() {
             }
         }
         return true
+    }
+
+    private fun progressText(p: RenderScheduler.Progress): String {
+        if (p.total <= 0) return "counting chunks..."
+        val pct = p.done * 100 / p.total
+        val rate = if (p.elapsedMs > 0) p.done * 1000L / p.elapsedMs else 0
+        val left = if (rate > 0) (p.total - p.done) / rate else -1
+        val eta = when {
+            left < 0 -> ""
+            left < 60 -> ", under a minute left"
+            else -> ", about ${(left + 59) / 60} min left"
+        }
+        return "%d%% (%,d / %,d chunks, %,d/s%s)".format(pct, p.done, p.total, rate, eta)
     }
 
     private fun editorCommand(sender: CommandSender, args: Array<out String>) {

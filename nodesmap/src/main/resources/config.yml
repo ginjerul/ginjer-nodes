@@ -36,7 +36,12 @@ render:
   batch-seconds: 15
   # Max main-thread milliseconds per tick spent taking chunk snapshots.
   snapshot-budget-ms: 2.0
-  # Max chunks being loaded asynchronously at once during a full render.
+  # Full renders read the world's region files directly on background threads,
+  # without the server loading any chunks. Threads used for that (default: half
+  # your CPU cores, max 4). Lower it if a render slows your server down.
+  full-render-threads: 2
+  # Chunks the reader can't decode (made in pre-1.18 versions and never loaded
+  # since, or LZ4-compressed) are loaded by the server instead, this many at once.
   full-render-concurrent-loads: 12
   # Number of zoomed-out levels to generate (each halves resolution).
   # 5 levels = whole 16k x 16k map fits on a laptop screen.

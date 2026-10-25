@@ -1,6 +1,5 @@
 package phonon.nodesmap.render
 
-import org.bukkit.ChunkSnapshot
 import org.bukkit.Material
 import java.awt.image.BufferedImage
 import java.nio.file.Files
@@ -16,7 +15,7 @@ import javax.imageio.ImageIO
 class ChunkJob(
     val cx: Int,
     val cz: Int,
-    val snapshot: ChunkSnapshot,
+    val source: ColumnSource,
     val minY: Int,
     /** exclusive */
     val maxY: Int,
@@ -48,7 +47,7 @@ class TileRenderer(
         const val TILE = 512
         private const val REGION_CACHE_SIZE = 12
         private const val FLUSH_INTERVAL_MS = 4_000L
-        private const val PYRAMID_INTERVAL_MS = 45_000L
+        private const val PYRAMID_INTERVAL_MS = 12_000L
         private const val UNKNOWN: Short = Short.MIN_VALUE
 
         fun key(x: Int, z: Int): Long = (x.toLong() shl 32) or (z.toLong() and 0xFFFFFFFFL)
@@ -139,16 +138,16 @@ class TileRenderer(
         val ox = Math.floorMod(job.cx, 32) * 16
         val oz = Math.floorMod(job.cz, 32) * 16
         val s = settings
-        val snap = job.snapshot
+        val snap = job.source
 
         for (z in 0 until 16) {
             for (x in 0 until 16) {
                 val idx = (oz + z) * TILE + (ox + x)
-                var y = snap.getHighestBlockYAt(x, z).coerceAtMost(job.maxY - 1)
+                var y = snap.topY(x, z).coerceAtMost(job.maxY - 1)
                 var color = BlockColors.TRANSPARENT
                 var mat: Material = Material.AIR
                 while (y >= job.minY) {
-                    mat = snap.getBlockType(x, y, z)
+                    mat = snap.type(x, y, z)
                     color = BlockColors.color(mat)
                     if (color != BlockColors.TRANSPARENT) break
                     y--
@@ -166,7 +165,7 @@ class TileRenderer(
                     var fy = y
                     var floor = color
                     while (fy > job.minY) {
-                        val m = snap.getBlockType(x, fy, z)
+                        val m = snap.type(x, fy, z)
                         if (!BlockColors.isWater(m)) {
                             val c = BlockColors.color(m)
                             if (c != BlockColors.TRANSPARENT) {

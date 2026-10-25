@@ -10,7 +10,7 @@ A lightweight live web map built specifically for Nodes. It replaces Dynmap + th
 
 1. Build both plugins (see *Building*), then put `nodes-*.jar` and `nodesmap-*.jar` in `plugins/`.
 2. Start the server. Open `http://<server-ip>:8100/`.
-3. Run `/nodesmap fullrender` once to draw the existing world. After that, the map keeps itself up to date.
+3. Run `/nodesmap fullrender` once to draw the existing world. It reads the region files in the background and shows progress every 10s (also `/nodesmap status`, and a "Drawing map %" note on the web map). After that, the map keeps itself up to date.
 
 Nodes detects NodesMap automatically and starts exporting map data. You can remove Dynmap.
 
@@ -63,7 +63,8 @@ The design rule: **the main thread never draws, encodes, or writes anything.**
 | Work | Where | Cost |
 |---|---|---|
 | Noticing changes | block events | a heightmap lookup + set insert; changes more than 2 blocks below the surface (mining, caves) are ignored |
-| Chunk snapshots | main thread | time-boxed per tick (`render.snapshot-budget-ms`, default 2 ms); unloaded chunks are loaded with Paper's async loader and never generated |
+| Full render | background threads read the world's region files directly | the server loads no chunks; ~5,000+ chunks/s per thread. Only chunks still in a pre-1.18 format (or LZ4) are loaded by the server, a few at a time |
+| Changed chunks | main thread | snapshots, time-boxed per tick (`render.snapshot-budget-ms`, default 2 ms); never generates chunks |
 | Drawing tiles, zoom levels, PNG encoding | 1 low-priority background thread | ~2,000+ chunks/s on one core |
 | Changed chunks | batched | released every `render.batch-seconds` (15 s), so a chunk edited 500 times is drawn once |
 | Players | main thread, every 20 ticks | one pass over online players; served from memory |
@@ -98,7 +99,7 @@ Set `web.enabled: false`, then serve `plugins/NodesMap/web/` as static files. No
 
 ```
 cd nodesmap
-./gradlew build      # -> build/libs/nodesmap-0.2.0.jar
+./gradlew build      # -> build/libs/nodesmap-0.3.0.jar
 ```
 
 Like Nodes, it needs the Kotlin runtime plugin on the server.

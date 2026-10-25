@@ -180,6 +180,7 @@ body.sidebar-closed #sidebar { transform: translateX(calc(-100% - 20px)); opacit
 #statusbar { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); display: flex; align-items: center; gap: 14px; padding: 6px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 999px; z-index: 998; font: 12px var(--mono); color: var(--muted); white-space: nowrap; }
 #hover-terr:empty { display: none; }
 #hover-terr { color: var(--text); font-family: var(--font); }
+#render-progress { color: var(--accent); font-family: var(--font); }
 #live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); }
 #live-dot.on { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
 #live-dot.err { background: var(--war); }

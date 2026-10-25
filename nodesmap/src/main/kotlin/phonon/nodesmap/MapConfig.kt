@@ -18,6 +18,7 @@ data class MapConfig(
     val batchSeconds: Int,
     val snapshotBudgetNanos: Long,
     val fullRenderConcurrentLoads: Int,
+    val fullRenderThreads: Int,
     val zoomOutLevels: Int,
     val shading: Double,
     val waterDepth: Boolean,
@@ -44,6 +45,10 @@ data class MapConfig(
             batchSeconds = c.getInt("render.batch-seconds", 15).coerceIn(1, 3600),
             snapshotBudgetNanos = (c.getDouble("render.snapshot-budget-ms", 2.0).coerceIn(0.1, 40.0) * 1_000_000).toLong(),
             fullRenderConcurrentLoads = c.getInt("render.full-render-concurrent-loads", 12).coerceIn(1, 64),
+            fullRenderThreads = c.getInt(
+                "render.full-render-threads",
+                (Runtime.getRuntime().availableProcessors() / 2).coerceIn(1, 4),
+            ).coerceIn(1, 16),
             zoomOutLevels = c.getInt("render.zoom-out-levels", 5).coerceIn(0, 8),
             shading = c.getDouble("render.shading", 0.85).coerceIn(0.0, 1.0),
             waterDepth = c.getBoolean("render.water-depth", true),

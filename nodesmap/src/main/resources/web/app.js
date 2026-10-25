@@ -202,7 +202,8 @@
     pollPlayers();
     setInterval(pollVersions, 2500);
     setInterval(pollPlayers, 2000);
-    setInterval(pollTiles, 15000);
+    pollTiles();
+    setInterval(pollTiles, 8000);
     setInterval(tickTimers, 1000);
   }
 
@@ -250,6 +251,13 @@
   async function pollTiles() {
     let d;
     try { d = await getJSON("data/tiles.json"); } catch { return; }
+    const rp = $("#render-progress");
+    if (d.render && d.render.total > 0) {
+      rp.hidden = false;
+      rp.textContent = `Drawing map ${Math.floor((d.render.done / d.render.total) * 100)}%`;
+    } else {
+      rp.hidden = true;
+    }
     if (!S.tilesSince) { S.tilesSince = d.now; return; }
     for (const [key, ts] of d.updates || []) {
       if (ts <= S.tilesSince) continue;
