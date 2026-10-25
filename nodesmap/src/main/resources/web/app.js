@@ -195,6 +195,7 @@
     for (const r of Object.values(R)) map.addLayer(r); // create svg containers up front (patterns live in them)
     for (const g of Object.values(G)) g.addTo(map);
     buildUi();
+    if (S.info.players === false) setPlayersEnabled(false);
     syncLayerVisibility();
 
     await pollVersions();
@@ -230,8 +231,20 @@
     try {
       const d = await getJSON("data/players.json");
       S.players = d.players || [];
+      setPlayersEnabled(!d.disabled);
       if (prefs.layers.players) drawPlayers();
     } catch { /* ignore */ }
+  }
+
+  /** the server can turn player markers off entirely (/nodesmap players off) */
+  function setPlayersEnabled(on) {
+    if (S.playersOn === on) return;
+    S.playersOn = on;
+    const row = document.querySelector('#layer-toggles input[data-layer="players"]')?.closest("label");
+    if (row) row.hidden = !on;
+    const opt = document.querySelector('.sort[data-list="towns"] option[value="online"]');
+    if (opt) opt.hidden = !on;
+    if (!on) G.players.clearLayers();
   }
 
   async function pollTiles() {

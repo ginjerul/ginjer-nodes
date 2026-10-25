@@ -49,6 +49,7 @@ Set `web.public-url` if players reach the map through a domain or reverse proxy,
 | `/nodesmap status` | Render queue, progress, web address |
 | `/nodesmap fullrender [radius]` | Draw every generated chunk (or only within `radius` chunks of you) |
 | `/nodesmap render [radius]` | Redraw the loaded chunks around you (default 8) |
+| `/nodesmap players [on\|off]` | Show or hide players on the web map, live (saved to config) |
 | `/nodesmap cancel` | Drop everything queued |
 | `/nodesmap reload` | Reload config (web server/world changes need a restart) |
 | `/nodesmap editor [revoke]` | Get a login link for the map editor (`nodesmap.editor`) |

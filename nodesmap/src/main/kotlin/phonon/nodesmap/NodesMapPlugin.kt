@@ -119,7 +119,7 @@ class NodesMapPlugin : JavaPlugin() {
         val nodes = server.pluginManager.getPlugin("nodes") != null
         val json = """{"title":${jsonStr(cfg.title)},"world":${jsonStr(world.name)},""" +
             """"tileSize":${TileRenderer.TILE},"zoomOutLevels":${cfg.zoomOutLevels},""" +
-            """"spawn":{"x":${spawn.blockX},"z":${spawn.blockZ}},"nodes":$nodes,""" +
+            """"spawn":{"x":${spawn.blockX},"z":${spawn.blockZ}},"nodes":$nodes,"players":${cfg.playersShow},""" +
             """"version":${jsonStr(description.version)}}"""
         web?.put("/data/map.json", json)
         try {
@@ -225,6 +225,27 @@ class NodesMapPlugin : JavaPlugin() {
                 val n = s.renderLoadedAround(p.location.blockX shr 4, p.location.blockZ shr 4, radius)
                 sender.sendMessage("$a[NodesMap]$g queued ${ChatColor.WHITE}$n$g loaded chunks around you")
             }
+            "players" -> {
+                val arg = args.getOrNull(1)?.lowercase()
+                val show = when (arg) {
+                    "on", "show", "true" -> true
+                    "off", "hide", "false" -> false
+                    null -> !cfg.playersShow
+                    else -> {
+                        sender.sendMessage("$g usage: /nodesmap players [on|off]")
+                        return true
+                    }
+                }
+                config.set("players.show", show)
+                saveConfig()
+                cfg = MapConfig.load(config)
+                players?.start(cfg)
+                publishMapInfo()
+                sender.sendMessage(
+                    "$a[NodesMap]$g players are now ${if (show) "${ChatColor.GREEN}shown" else "${ChatColor.RED}hidden"}$g on the web map" +
+                        if (show) "" else " (open maps clear them within a few seconds)",
+                )
+            }
             "cancel" -> {
                 s.cancelAll()
                 sender.sendMessage("$a[NodesMap]$g cancelled all pending renders")
@@ -247,6 +268,7 @@ class NodesMapPlugin : JavaPlugin() {
                 sender.sendMessage("$g  /nodesmap status")
                 sender.sendMessage("$g  /nodesmap fullrender [radiusChunks]${ChatColor.DARK_GRAY} - draw every generated chunk")
                 sender.sendMessage("$g  /nodesmap render [radiusChunks]${ChatColor.DARK_GRAY} - redraw loaded chunks around you")
+                sender.sendMessage("$g  /nodesmap players [on|off]${ChatColor.DARK_GRAY} - show or hide players on the web map (now ${if (cfg.playersShow) "on" else "off"})")
                 sender.sendMessage("$g  /nodesmap cancel")
                 sender.sendMessage("$g  /nodesmap reload")
                 sender.sendMessage("$g  /nodesmap editor [revoke]${ChatColor.DARK_GRAY} - get a login link for the map editor")
@@ -296,11 +318,12 @@ class NodesMapPlugin : JavaPlugin() {
     override fun onTabComplete(sender: CommandSender, command: Command, alias: String, args: Array<out String>): List<String> {
         if (args.size == 1) {
             val opts = ArrayList<String>()
-            if (sender.hasPermission("nodesmap.admin")) opts += listOf("status", "fullrender", "render", "cancel", "reload")
+            if (sender.hasPermission("nodesmap.admin")) opts += listOf("status", "fullrender", "render", "players", "cancel", "reload")
             if (sender.hasPermission("nodesmap.editor")) opts += "editor"
             return opts.filter { it.startsWith(args[0].lowercase()) }
         }
         if (args.size == 2 && args[0].equals("editor", true)) return listOf("revoke").filter { it.startsWith(args[1].lowercase()) }
+        if (args.size == 2 && args[0].equals("players", true)) return listOf("on", "off").filter { it.startsWith(args[1].lowercase()) }
         return emptyList()
     }
 }

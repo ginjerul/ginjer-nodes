@@ -1,3 +1,4 @@
+[hidden] { display: none !important; }
 :root {
   --bg: #12151b;
   --panel: rgba(20, 24, 31, 0.94);

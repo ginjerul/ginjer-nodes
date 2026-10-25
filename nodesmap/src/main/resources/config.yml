@@ -49,6 +49,7 @@ render:
   chunk-grid: false
 
 players:
+  # Show players on the web map. Toggle live with /nodesmap players on|off
   show: true
   update-ticks: 20
   hide-sneaking: true
