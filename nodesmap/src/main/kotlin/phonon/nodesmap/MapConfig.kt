@@ -44,7 +44,7 @@ data class MapConfig(
             liveUpdates = c.getBoolean("render.live-updates", true),
             batchSeconds = c.getInt("render.batch-seconds", 15).coerceIn(1, 3600),
             snapshotBudgetNanos = (c.getDouble("render.snapshot-budget-ms", 2.0).coerceIn(0.1, 40.0) * 1_000_000).toLong(),
-            fullRenderConcurrentLoads = c.getInt("render.full-render-concurrent-loads", 12).coerceIn(1, 64),
+            fullRenderConcurrentLoads = c.getInt("render.full-render-concurrent-loads", 24).coerceIn(1, 128),
             fullRenderThreads = c.getInt(
                 "render.full-render-threads",
                 (Runtime.getRuntime().availableProcessors() / 2).coerceIn(1, 4),

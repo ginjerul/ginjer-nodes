@@ -40,7 +40,18 @@ class RenderScheduler(
     var readThreads: Int = 2
 
     // full render progress (written by reader threads)
-    class Progress(val done: Int, val total: Int, val fallback: Int, val elapsedMs: Long)
+    class Progress(
+        val done: Int,
+        val total: Int,
+        val fallback: Int,
+        val elapsedMs: Long,
+        /** why chunks weren't drawn from disk: reason -> count */
+        val reasons: Map<String, Int> = emptyMap(),
+    )
+
+    private val frReasons = ConcurrentHashMap<String, AtomicInteger>()
+
+    private fun reasons(): Map<String, Int> = frReasons.mapValues { it.value.get() }
 
     private val frTotal = AtomicInteger(0)
     private val frDone = AtomicInteger(0)
@@ -184,6 +195,7 @@ class RenderScheduler(
         frTotal.set(0)
         frDone.set(0)
         frFallback.set(0)
+        frReasons.clear()
         frStarted = System.currentTimeMillis()
 
         val dir = regionFolder(world)
@@ -228,8 +240,11 @@ class RenderScheduler(
                             is RegionReader.Result.Fallback -> {
                                 fallbacks.add(TileRenderer.key(cx, cz))
                                 frFallback.incrementAndGet()
+                                frReasons.computeIfAbsent("server loads: ${result.reason}") { AtomicInteger() }.incrementAndGet()
                             }
-                            is RegionReader.Result.Skip -> {}
+                            is RegionReader.Result.Skip -> {
+                                frReasons.computeIfAbsent("skipped: ${result.reason}") { AtomicInteger() }.incrementAndGet()
+                            }
                         }
                         frDone.incrementAndGet()
                     }
@@ -256,7 +271,7 @@ class RenderScheduler(
                             if (want(c.x, c.z)) enqueue(TileRenderer.key(c.x, c.z))
                         }
                     }
-                    val p = Progress(frDone.get(), frTotal.get(), frFallback.get(), System.currentTimeMillis() - frStarted)
+                    val p = Progress(frDone.get(), frTotal.get(), frFallback.get(), System.currentTimeMillis() - frStarted, reasons())
                     fullRenderActive = false
                     finished(p, cancelled)
                 },

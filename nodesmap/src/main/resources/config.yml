@@ -42,7 +42,7 @@ render:
   full-render-threads: 2
   # Chunks the reader can't decode (made in pre-1.18 versions and never loaded
   # since, or LZ4-compressed) are loaded by the server instead, this many at once.
-  full-render-concurrent-loads: 12
+  full-render-concurrent-loads: 24
   # Number of zoomed-out levels to generate (each halves resolution).
   # 5 levels = whole 16k x 16k map fits on a laptop screen.
   zoom-out-levels: 5

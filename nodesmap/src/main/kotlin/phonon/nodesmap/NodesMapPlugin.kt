@@ -266,7 +266,7 @@ class NodesMapPlugin : JavaPlugin() {
                 line(sender, "Web map", if (web != null) mapUrl() + "/" else "off (serving plugins/NodesMap/web yourself)")
                 line(sender, "Players on map", if (cfg.playersShow) "shown" else "hidden")
                 line(sender, "Full render", s.fullRenderProgress()?.let { progressText(it) } ?: "not running")
-                line(sender, "Waiting", "${s.pendingCount} chunks, ${s.dirtyCount} changed (next batch)")
+                line(sender, "Server loading", "${s.pendingCount} chunks (${s.dirtyCount} more changed, next batch)")
                 line(sender, "Renderer", "${r.queued} queued, ${r.chunksRendered.get()} chunks drawn, ${r.tilesWritten.get()} tiles written")
             }
             "fullrender" -> {
@@ -304,14 +304,46 @@ class NodesMapPlugin : JavaPlugin() {
                     finished = { pr, cancelled ->
                         reporter?.cancel()
                         val secs = pr.elapsedMs / 1000
-                        val text = if (cancelled) {
+                        val diskDone = pr.done - pr.fallback - pr.reasons.filterKeys { it.startsWith("skipped") }.values.sum()
+                        val head = if (cancelled) {
                             "[Nodes] Map render cancelled after %,d chunks".format(pr.done)
                         } else {
-                            "[Nodes] Map render done: %,d chunks in ${secs / 60}m ${secs % 60}s".format(pr.done) +
-                                if (pr.fallback > 0) " (${pr.fallback} older-format chunks are being loaded by the server)" else ""
+                            "[Nodes] Map: drew %,d chunks from disk in ${secs / 60}m ${secs % 60}s".format(diskDone)
                         }
-                        logger.info(text.removePrefix("[Nodes] "))
-                        if (sender is Player && sender.isOnline) msg(sender, text)
+                        val notify = { text: String ->
+                            logger.info(text.removePrefix("[Nodes] "))
+                            if (sender is Player && sender.isOnline) msg(sender, text)
+                        }
+                        notify(head)
+                        for ((reason, n) in pr.reasons.entries.sortedByDescending { it.value }) {
+                            notify("  %,d chunks ${reason}".format(n))
+                        }
+                        if (!cancelled && pr.fallback > 0) {
+                            notify("[Nodes] Map: the server is now loading %,d chunks it couldn't read from disk. This is slower; progress every 10s".format(pr.fallback))
+                            if (pr.reasons.keys.any { it.contains("1.18") || it.contains("old chunk format") }) {
+                                notify("[Nodes] Tip: your world has chunks saved in a pre-1.18 format. Starting the server once with --forceUpgrade converts them all, so future renders are fast")
+                            }
+                            // follow the server-side loads until they're all drawn
+                            var tracker: org.bukkit.scheduler.BukkitTask? = null
+                            tracker = server.scheduler.runTaskTimer(
+                                this,
+                                Runnable {
+                                    val left = s.pendingCount
+                                    if (left == 0 && r.queued == 0) {
+                                        tracker?.cancel()
+                                        notify("[Nodes] Map render finished: the server loaded the remaining chunks")
+                                    } else if (sender is Player && sender.isOnline) {
+                                        sender.sendActionBar(Component.text("[Nodes] Map: server loading chunks, %,d left".format(left), NamedTextColor.AQUA))
+                                    } else if (sender !is Player) {
+                                        msg(sender, "[Nodes] Map: server loading chunks, %,d left".format(left))
+                                    }
+                                },
+                                200L,
+                                200L,
+                            )
+                        } else if (!cancelled) {
+                            notify("[Nodes] Map render finished")
+                        }
                     },
                 )
             }

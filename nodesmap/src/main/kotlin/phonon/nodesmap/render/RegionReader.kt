@@ -30,10 +30,10 @@ class RegionReader(
         class Ok(val chunk: RegionChunk) : Result()
 
         /** not a fully generated chunk; nothing to draw */
-        object Skip : Result()
+        class Skip(val reason: String) : Result()
 
         /** can't read it here; ask the server to load it */
-        object Fallback : Result()
+        class Fallback(val reason: String) : Result()
     }
 
     /** chunk coordinates present in a region file, from its header only */
@@ -83,8 +83,8 @@ class RegionReader(
                 if (!want(cx, cz)) continue
                 val result = try {
                     readChunk(raf, (loc ushr 8).toLong(), loc and 0xFF)
-                } catch (_: Exception) {
-                    Result.Fallback
+                } catch (e: Exception) {
+                    Result.Fallback("unreadable chunk data (${e.javaClass.simpleName})")
                 }
                 emit(cx, cz, result)
             }
@@ -93,19 +93,20 @@ class RegionReader(
     }
 
     private fun readChunk(raf: RandomAccessFile, sectorOffset: Long, sectors: Int): Result {
-        if (sectorOffset < 2) return Result.Fallback
+        if (sectorOffset < 2) return Result.Fallback("bad region header")
         raf.seek(sectorOffset * 4096L)
         val length = raf.readInt()
-        if (length <= 1 || length > sectors * 4096) return Result.Fallback
+        if (length <= 1 || length > sectors * 4096) return Result.Fallback("bad chunk length")
         val type = raf.readUnsignedByte()
-        if (type and 0x80 != 0) return Result.Fallback // stored in an external .mcc file
+        if (type and 0x80 != 0) return Result.Fallback("oversized chunk (.mcc file)")
         val bytes = ByteArray(length - 1)
         raf.readFully(bytes)
         val stream: InputStream = when (type) {
             1 -> GZIPInputStream(ByteArrayInputStream(bytes), 8192)
             2 -> InflaterInputStream(ByteArrayInputStream(bytes), java.util.zip.Inflater(), 8192)
             3 -> ByteArrayInputStream(bytes)
-            else -> return Result.Fallback // LZ4 or custom compression
+            4 -> return Result.Fallback("LZ4 compression")
+            else -> return Result.Fallback("compression type $type")
         }
         DataInputStream(stream.buffered(16384)).use { return parse(Nbt(it)) }
     }
@@ -115,7 +116,7 @@ class RegionReader(
     private class RawSection(val y: Int, val palette: Array<Material>, val data: LongArray?)
 
     private fun parse(nbt: Nbt): Result {
-        if (nbt.readUnsignedByte() != Nbt.COMPOUND) return Result.Fallback
+        if (nbt.readUnsignedByte() != Nbt.COMPOUND) return Result.Fallback("not a chunk")
         nbt.readUTF()
 
         var dataVersion = 0
@@ -134,8 +135,8 @@ class RegionReader(
                     status = nbt.readUTF()
                     true
                 }
-                name == "yPos" && type == Nbt.INT -> {
-                    yPos = nbt.readInt()
+                name == "yPos" && (type == Nbt.INT || type == Nbt.BYTE) -> {
+                    yPos = if (type == Nbt.INT) nbt.readInt() else nbt.readByte().toInt()
                     true
                 }
                 name == "sections" && type == Nbt.LIST -> {
@@ -158,9 +159,12 @@ class RegionReader(
         }
 
         // 1.18+ chunk format (2860 = 1.18). Older chunks get upgraded by the server when loaded.
-        if (dataVersion < 2860 || yPos == Int.MIN_VALUE) return Result.Fallback
-        val st = status ?: return Result.Fallback
-        if (st != "minecraft:full" && st != "full") return Result.Skip
+        if (dataVersion in 1 until 2860) return Result.Fallback("saved before 1.18")
+        if (raw.isEmpty()) return if (dataVersion == 0) Result.Fallback("old chunk format") else Result.Skip("empty")
+        // some tools leave out yPos; the lowest section tells us
+        if (yPos == Int.MIN_VALUE) yPos = minOf(raw.minOf { it.y }, minY shr 4)
+        val st = status?.removePrefix("minecraft:")
+        if (st != null && st != "full") return Result.Skip("not fully generated")
 
         val minSection = minY shr 4
         val count = (maxY - minY) shr 4
@@ -215,8 +219,8 @@ class RegionReader(
             var data: LongArray? = null
             nbt.compound { name, type ->
                 when {
-                    name == "Y" && type == Nbt.BYTE -> {
-                        y = nbt.readByte().toInt()
+                    name == "Y" && (type == Nbt.BYTE || type == Nbt.INT) -> {
+                        y = if (type == Nbt.BYTE) nbt.readByte().toInt() else nbt.readInt()
                         true
                     }
                     name == "block_states" && type == Nbt.COMPOUND -> {
