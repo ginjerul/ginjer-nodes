@@ -117,14 +117,14 @@ class TileRenderer(
             } catch (_: InterruptedException) {
                 break
             } catch (e: Throwable) {
-                logger.warning("[NodesMap] render error: $e")
+                logger.warning("render error: $e")
             }
         }
         try {
             flushRegions()
             buildPyramid()
         } catch (e: Throwable) {
-            logger.warning("[NodesMap] final flush failed: $e")
+            logger.warning("final flush failed: $e")
         }
     }
 

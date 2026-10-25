@@ -87,7 +87,7 @@ class EditorApi(
             bridge = b
             b
         } catch (e: Exception) {
-            logger.warning("[NodesMap] this Nodes version has no map editor support: $e")
+            logger.warning("this Nodes version has no map editor support: $e")
             null
         }
     }
@@ -121,7 +121,7 @@ class EditorApi(
                 val json = String(req.body, StandardCharsets.UTF_8)
                 val out = b.apply.invoke(null, json, !apply, force, s.user) as String
                 if (apply && out.contains("\"applied\":true")) {
-                    logger.info("[NodesMap] ${s.user} applied a world edit from the web editor")
+                    logger.info("${s.user} applied a world edit from the web editor")
                 }
                 ApiResponse(200, out)
             }

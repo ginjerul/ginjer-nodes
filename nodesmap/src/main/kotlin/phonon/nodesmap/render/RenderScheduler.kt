@@ -239,7 +239,7 @@ class RenderScheduler(
                 try {
                     f.get()
                 } catch (e: Exception) {
-                    plugin.logger.warning("[NodesMap] reading a region failed: ${e.cause ?: e}")
+                    plugin.logger.warning("reading a region failed: ${e.cause ?: e}")
                 }
             }
             pool.shutdown()

@@ -650,6 +650,9 @@ public class NodesAdminCommand :
         Message.print(sender, "/nodesadmin announce <message>${ChatColor.WHITE}: Announce for all players")
         Message.print(sender, "/nodesadmin plot list|delete <name>${ChatColor.WHITE}: Manage plots")
         Message.print(sender, "/nodesadmin rallycap <nation> <n|-1>${ChatColor.WHITE}: Manage rallycaps")
+        if (org.bukkit.Bukkit.getPluginManager().getPlugin("NodesMap") != null) {
+            Message.print(sender, "/nodesmap${ChatColor.WHITE}: Web map rendering and editor (see \"/nodesmap help\")")
+        }
         return
     }
 

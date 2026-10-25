@@ -42,10 +42,14 @@ In the editor, "Lock claimed territories" (on by default) also stops you from pa
 
 Set `web.public-url` if players reach the map through a domain or reverse proxy, so the editor link points there. Editing over plain HTTP sends the session token unencrypted, so use HTTPS (a reverse proxy) if your map is public.
 
-## Commands (`nodesmap.admin`, op by default)
+## Commands
+
+`/nodesmap help` shows only the commands you're allowed to use. Admin commands need `nodesmap.admin` (op by default).
+
 
 | Command | What it does |
 |---|---|
+| `/nodesmap link` | Clickable link to the web map. Everyone can use it (`nodesmap.link`) |
 | `/nodesmap status` | Render queue, progress, web address |
 | `/nodesmap fullrender [radius]` | Draw every generated chunk (or only within `radius` chunks of you) |
 | `/nodesmap render [radius]` | Redraw the loaded chunks around you (default 8) |
