@@ -19,6 +19,7 @@ import org.bukkit.plugin.Plugin
 import org.bukkit.scheduler.BukkitTask
 import phonon.nodes.Config
 import phonon.nodes.Nodes
+import phonon.nodes.fortify.Fortifications
 import phonon.nodes.mining.MiningTowers
 import phonon.nodes.objects.Territory
 import phonon.nodes.objects.Town
@@ -30,7 +31,6 @@ import phonon.nodes.war.FlagWar
 import phonon.nodes.war.Raid
 import phonon.nodes.war.WarTimer
 import phonon.nodes.war.Warzone
-import phonon.nodes.fortify.Fortifications
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
@@ -109,8 +109,16 @@ public object MapExporter {
                         obj {
                             key("id").num(t.id.toInt())
                             key("name").str(t.name)
-                            key("core").arr { num(t.core.x); num(t.core.z) }
-                            key("chunks").arr { for (c in t.chunks) { num(c.x); num(c.z) } }
+                            key("core").arr {
+                                num(t.core.x)
+                                num(t.core.z)
+                            }
+                            key("chunks").arr {
+                                for (c in t.chunks) {
+                                    num(c.x)
+                                    num(c.z)
+                                }
+                            }
                             key("neighbors").arr { for (n in t.neighbors.toIntArray()) num(n) }
                             key("resources").arr { for (r in t.resourceNodes) str(r) }
                             key("cost").num(t.cost)
@@ -191,43 +199,52 @@ public object MapExporter {
             val j = Json(64 * 1024)
             j.obj {
                 key("towns").arr {
-                    for (t in towns) obj {
-                        key("name").str(t.name)
-                        key("color").str(t.color)
-                        key("home").num(t.home)
-                        key("leader").strOrNull(t.leader)
-                        key("officers").strs(t.officers)
-                        key("residents").strs(t.residents)
-                        key("territories").ints(t.territories)
-                        key("annexed").ints(t.annexed)
-                        key("captured").ints(t.captured)
-                        key("outposts").arr {
-                            for (o in t.outposts) obj {
-                                key("name").str(o.name)
-                                key("x").num(o.x)
-                                key("z").num(o.z)
-                                key("territory").num(o.territory)
+                    for (t in towns) {
+                        obj {
+                            key("name").str(t.name)
+                            key("color").str(t.color)
+                            key("home").num(t.home)
+                            key("leader").strOrNull(t.leader)
+                            key("officers").strs(t.officers)
+                            key("residents").strs(t.residents)
+                            key("territories").ints(t.territories)
+                            key("annexed").ints(t.annexed)
+                            key("captured").ints(t.captured)
+                            key("outposts").arr {
+                                for (o in t.outposts) {
+                                    obj {
+                                        key("name").str(o.name)
+                                        key("x").num(o.x)
+                                        key("z").num(o.z)
+                                        key("territory").num(o.territory)
+                                    }
+                                }
                             }
+                            key("nation").strOrNull(t.nation)
+                            key("allies").strs(t.allies)
+                            key("enemies").strs(t.enemies)
+                            key("claims").arr {
+                                num(t.claimsUsed)
+                                num(t.claimsMax)
+                            }
+                            key("open").bool(t.open)
+                            key("overlord").strOrNull(t.overlord)
+                            key("vassals").strs(t.vassals)
+                            key("supplied")
+                            if (t.supplied != null) ints(t.supplied) else raw("null")
                         }
-                        key("nation").strOrNull(t.nation)
-                        key("allies").strs(t.allies)
-                        key("enemies").strs(t.enemies)
-                        key("claims").arr { num(t.claimsUsed); num(t.claimsMax) }
-                        key("open").bool(t.open)
-                        key("overlord").strOrNull(t.overlord)
-                        key("vassals").strs(t.vassals)
-                        key("supplied")
-                        if (t.supplied != null) ints(t.supplied) else raw("null")
                     }
                 }
                 key("nations").arr {
-                    for (n in nations) obj {
-                        key("name").str(n.name)
-                        key("color").str(n.color)
-                        key("capital").str(n.capital)
-                        key("towns").strs(n.towns)
-                        key("allies").strs(n.allies)
-                        key("enemies").strs(n.enemies)
+                    for (n in nations) {
+                        obj {
+                            key("name").str(n.name)
+                            key("color").str(n.color)
+                            key("capital").str(n.capital)
+                            key("towns").strs(n.towns)
+                            key("allies").strs(n.allies)
+                            key("enemies").strs(n.enemies)
+                        }
                     }
                 }
                 key("forts").obj { for ((id, lvl) in forts) key(id.toString()).num(lvl) }
@@ -272,27 +289,63 @@ public object MapExporter {
             val j = Json(8 * 1024)
             j.obj {
                 key("ports").arr {
-                    for ((p, groups, pub) in ports) obj {
-                        key("name").str(p.name); key("x").num(p.locX); key("z").num(p.locZ)
-                        key("groups").strs(groups); key("public").bool(pub)
+                    for ((p, groups, pub) in ports) {
+                        obj {
+                            key("name").str(p.name)
+                            key("x").num(p.locX)
+                            key("z").num(p.locZ)
+                            key("groups").strs(groups)
+                            key("public").bool(pub)
+                        }
                     }
                 }
                 key("towers").arr {
-                    for ((pt, info) in towers) obj {
-                        key("id").str(pt.id); key("x").num(pt.x); key("y").num(pt.y); key("z").num(pt.z)
-                        key("cooldownSeconds").num(info.first)
-                        key("rewards").arr { for ((m, a) in info.second) obj { key("material").str(m); key("amount").num(a) } }
+                    for ((pt, info) in towers) {
+                        obj {
+                            key("id").str(pt.id)
+                            key("x").num(pt.x)
+                            key("y").num(pt.y)
+                            key("z").num(pt.z)
+                            key("cooldownSeconds").num(info.first)
+                            key("rewards").arr {
+                                for ((m, a) in info.second) {
+                                    obj {
+                                        key("material").str(m)
+                                        key("amount").num(a)
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
                 key("refineries").arr {
-                    for ((pt, interval, outs) in refineries) obj {
-                        key("id").str(pt.id); key("x").num(pt.x); key("y").num(pt.y); key("z").num(pt.z)
-                        key("intervalMs").num(interval)
-                        key("outputs").arr { for ((m, a) in outs) obj { key("material").str(m); key("amount").num(a) } }
+                    for ((pt, interval, outs) in refineries) {
+                        obj {
+                            key("id").str(pt.id)
+                            key("x").num(pt.x)
+                            key("y").num(pt.y)
+                            key("z").num(pt.z)
+                            key("intervalMs").num(interval)
+                            key("outputs").arr {
+                                for ((m, a) in outs) {
+                                    obj {
+                                        key("material").str(m)
+                                        key("amount").num(a)
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
                 key("dropPoints").arr {
-                    for (d in drops) obj { key("id").str(d.id); key("x").num(d.x); key("y").num(d.y); key("z").num(d.z) }
+                    for (d in drops) {
+                        obj {
+                            key("id").str(d.id)
+                            key("x").num(d.x)
+                            key("y").num(d.y)
+                            key("z").num(d.z)
+                        }
+                    }
                 }
             }
             j.toString()
@@ -345,27 +398,55 @@ public object MapExporter {
             j.obj {
                 // snapshot time, only while flags tick, so a quiet live.json stays byte-identical
                 if (attacks.isNotEmpty()) key("at").num(now)
-                key("war").obj { key("enabled").bool(warOn); key("endsAt").num(warEnds) }
+                key("war").obj {
+                    key("enabled").bool(warOn)
+                    key("endsAt").num(warEnds)
+                }
                 key("attacks").arr {
-                    for (a in attacks) obj {
-                        key("cx").num(a.cx); key("cz").num(a.cz)
-                        key("town").str(a.town); key("attacker").strOrNull(a.attacker)
-                        key("progress").num(a.progress); key("remainingMs").num(a.remainingMs)
-                        key("fx").num(a.fx); key("fy").num(a.fy); key("fz").num(a.fz)
+                    for (a in attacks) {
+                        obj {
+                            key("cx").num(a.cx)
+                            key("cz").num(a.cz)
+                            key("town").str(a.town)
+                            key("attacker").strOrNull(a.attacker)
+                            key("progress").num(a.progress)
+                            key("remainingMs").num(a.remainingMs)
+                            key("fx").num(a.fx)
+                            key("fy").num(a.fy)
+                            key("fz").num(a.fz)
+                        }
                     }
                 }
-                key("occupied").arr { for ((x, z, t) in occupied) arr { num(x); num(z); str(t) } }
+                key("occupied").arr {
+                    for ((x, z, t) in occupied) {
+                        arr {
+                            num(x)
+                            num(z)
+                            str(t)
+                        }
+                    }
+                }
                 key("warzones").arr {
-                    for (z in zones) obj {
-                        key("town").str(z.town); key("enabled").bool(z.enabled); key("endsAt").num(z.endsAt)
-                        key("holder").strOrNull(z.holder)
-                        key("scores").obj { for ((n, ms) in z.scores) key(n).num(ms) }
+                    for (z in zones) {
+                        obj {
+                            key("town").str(z.town)
+                            key("enabled").bool(z.enabled)
+                            key("endsAt").num(z.endsAt)
+                            key("holder").strOrNull(z.holder)
+                            key("scores").obj { for ((n, ms) in z.scores) key(n).num(ms) }
+                        }
                     }
                 }
                 key("raids").arr {
-                    for (r in raids) obj {
-                        key("territory").num(r.territory); key("attacker").str(r.attacker); key("defender").str(r.defender)
-                        key("phase").str(r.phase); key("prepEndsAt").num(r.prepEndsAt); key("liveEndsAt").num(r.liveEndsAt)
+                    for (r in raids) {
+                        obj {
+                            key("territory").num(r.territory)
+                            key("attacker").str(r.attacker)
+                            key("defender").str(r.defender)
+                            key("phase").str(r.phase)
+                            key("prepEndsAt").num(r.prepEndsAt)
+                            key("liveEndsAt").num(r.liveEndsAt)
+                        }
                     }
                 }
                 key("supplyDrop")
@@ -380,8 +461,12 @@ public object MapExporter {
                             raw("null")
                         } else {
                             obj {
-                                key("id").str(a[0] as String); key("x").num(a[1] as Int); key("z").num(a[2] as Int)
-                                key("landsAt").num(a[3] as Long); key("expiresAt").num(a[4] as Long); key("landed").bool(a[5] as Boolean)
+                                key("id").str(a[0] as String)
+                                key("x").num(a[1] as Int)
+                                key("z").num(a[2] as Int)
+                                key("landsAt").num(a[3] as Long)
+                                key("expiresAt").num(a[4] as Long)
+                                key("landed").bool(a[5] as Boolean)
                             }
                         }
                     }
@@ -454,17 +539,40 @@ internal class Json(capacity: Int) {
     }
 
     inline fun obj(f: Json.() -> Unit): Json {
-        beginObj(); f(); endObj(); return this
+        beginObj()
+        f()
+        endObj()
+        return this
     }
 
     inline fun arr(f: Json.() -> Unit): Json {
-        beginArr(); f(); endArr(); return this
+        beginArr()
+        f()
+        endArr()
+        return this
     }
 
-    fun beginObj() { valueStart(); sb.append('{'); first.add(true) }
-    fun endObj() { first.removeAt(first.size - 1); sb.append('}') }
-    fun beginArr() { valueStart(); sb.append('['); first.add(true) }
-    fun endArr() { first.removeAt(first.size - 1); sb.append(']') }
+    fun beginObj() {
+        valueStart()
+        sb.append('{')
+        first.add(true)
+    }
+
+    fun endObj() {
+        first.removeAt(first.size - 1)
+        sb.append('}')
+    }
+
+    fun beginArr() {
+        valueStart()
+        sb.append('[')
+        first.add(true)
+    }
+
+    fun endArr() {
+        first.removeAt(first.size - 1)
+        sb.append(']')
+    }
 
     private var afterKey = false
 
@@ -480,14 +588,46 @@ internal class Json(capacity: Int) {
         return this
     }
 
-    fun str(s: String): Json { valueStart(); quote(s); return this }
+    fun str(s: String): Json {
+        valueStart()
+        quote(s)
+        return this
+    }
+
     fun strOrNull(s: String?): Json = if (s == null) raw("null") else str(s)
-    fun num(n: Int): Json { valueStart(); sb.append(n); return this }
-    fun num(n: Long): Json { valueStart(); sb.append(n); return this }
-    fun num(n: Double): Json { valueStart(); sb.append(if (n.isFinite()) String.format(java.util.Locale.ROOT, "%.4f", n).trimEnd('0').trimEnd('.') else "0"); return this }
-    fun bool(b: Boolean): Json { valueStart(); sb.append(b); return this }
-    fun raw(s: String): Json { valueStart(); sb.append(s); return this }
+
+    fun num(n: Int): Json {
+        valueStart()
+        sb.append(n)
+        return this
+    }
+
+    fun num(n: Long): Json {
+        valueStart()
+        sb.append(n)
+        return this
+    }
+
+    fun num(n: Double): Json {
+        valueStart()
+        sb.append(if (n.isFinite()) String.format(java.util.Locale.ROOT, "%.4f", n).trimEnd('0').trimEnd('.') else "0")
+        return this
+    }
+
+    fun bool(b: Boolean): Json {
+        valueStart()
+        sb.append(b)
+        return this
+    }
+
+    fun raw(s: String): Json {
+        valueStart()
+        sb.append(s)
+        return this
+    }
+
     fun strs(l: List<String>): Json = arr { for (s in l) str(s) }
+
     fun ints(a: IntArray): Json = arr { for (i in a) num(i) }
 
     private fun quote(s: String) {

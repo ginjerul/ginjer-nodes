@@ -37,12 +37,16 @@ jobs:
       # surface compiler/lint errors as annotations so they show on the run summary
       - name: Report build errors
         if: steps.nodes.outcome == 'failure' || steps.nodesmap.outcome == 'failure'
+        env:
+          NODES: ${{ steps.nodes.outcome }}
+          NODESMAP: ${{ steps.nodesmap.outcome }}
         run: |
-          for f in nodes-build.log nodesmap-build.log; do
-            [ -f "$f" ] || continue
-            msg=$(grep -E "^e: |^w: .*\.kt|What went wrong|Lint error|\.kt:[0-9]+:[0-9]+|Could not resolve|> Task .*FAILED|^> " "$f" | head -120 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
-            if [ -n "$msg" ]; then echo "::error title=$f::$msg"; fi
-          done
+          report() {
+            msg=$(grep -E "^e: |What went wrong|Lint error|\.kt:[0-9]+:[0-9]+ [A-Z]|Could not resolve|> Task .*FAILED" "$2" | grep -v "^w: " | head -120 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=$1 build failed::$msg"
+          }
+          if [ "$NODES" = "failure" ]; then report nodes nodes-build.log; fi
+          if [ "$NODESMAP" = "failure" ]; then report nodesmap nodesmap-build.log; fi
           exit 1
 
       - uses: actions/upload-artifact@v4
