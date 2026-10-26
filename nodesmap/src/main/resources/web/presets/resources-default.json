@@ -231,7 +231,7 @@
   {
    "id": "tiers",
    "title": "Defense tiers",
-   "about": "Make territories harder to capture: each tier makes flag attacks take 1.1\u00d7 longer than the tier before (tier 1 = 1.1\u00d7, tier 5 = 1.61\u00d7, tier 10 = 2.59\u00d7). Higher tiers cost more claims.",
+   "about": "Make territories harder to capture: tier 1 makes flag attacks take 1.1\u00d7 as long, tier 2 1.2\u00d7, up to tier 10 at 2\u00d7. Higher tiers cost more claims.",
    "nodes": {
     "tier_1": {
      "icon": "tier_1",
@@ -257,7 +257,7 @@
      "ore": {},
      "crops": {},
      "animals": {},
-     "attacker_time_multiplier": 1.21
+     "attacker_time_multiplier": 1.2
     },
     "tier_3": {
      "icon": "tier_3",
@@ -270,7 +270,7 @@
      "ore": {},
      "crops": {},
      "animals": {},
-     "attacker_time_multiplier": 1.331
+     "attacker_time_multiplier": 1.3
     },
     "tier_4": {
      "icon": "tier_4",
@@ -283,7 +283,7 @@
      "ore": {},
      "crops": {},
      "animals": {},
-     "attacker_time_multiplier": 1.4641
+     "attacker_time_multiplier": 1.4
     },
     "tier_5": {
      "icon": "tier_5",
@@ -296,7 +296,7 @@
      "ore": {},
      "crops": {},
      "animals": {},
-     "attacker_time_multiplier": 1.6105
+     "attacker_time_multiplier": 1.5
     },
     "tier_6": {
      "icon": "tier_6",
@@ -309,7 +309,7 @@
      "ore": {},
      "crops": {},
      "animals": {},
-     "attacker_time_multiplier": 1.7716
+     "attacker_time_multiplier": 1.6
     },
     "tier_7": {
      "icon": "tier_7",
@@ -322,7 +322,7 @@
      "ore": {},
      "crops": {},
      "animals": {},
-     "attacker_time_multiplier": 1.9487
+     "attacker_time_multiplier": 1.7
     },
     "tier_8": {
      "icon": "tier_8",
@@ -335,7 +335,7 @@
      "ore": {},
      "crops": {},
      "animals": {},
-     "attacker_time_multiplier": 2.1436
+     "attacker_time_multiplier": 1.8
     },
     "tier_9": {
      "icon": "tier_9",
@@ -348,7 +348,7 @@
      "ore": {},
      "crops": {},
      "animals": {},
-     "attacker_time_multiplier": 2.3579
+     "attacker_time_multiplier": 1.9
     },
     "tier_10": {
      "icon": "tier_10",
@@ -361,7 +361,7 @@
      "ore": {},
      "crops": {},
      "animals": {},
-     "attacker_time_multiplier": 2.5937
+     "attacker_time_multiplier": 2.0
     }
    }
   }
