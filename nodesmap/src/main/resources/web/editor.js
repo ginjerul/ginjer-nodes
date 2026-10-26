@@ -51,7 +51,7 @@
     savedVersion: 0, version: 0,
     tool: "select",
     brush: store.get("brush", 2),
-    opt: Object.assign({ land: true, wild: true, lock: true, labels: true, icons: true, owners: true, grid: false }, store.get("opt", {})),
+    opt: Object.assign({ land: true, wild: true, lock: true, labels: true, icons: true, owners: true, grid: false, colorBy: "nation" }, store.get("opt", {})),
     classic: false,          // brush turned on with Space: left-drag pans, right-drag paints
   };
 
@@ -136,9 +136,12 @@
     E.claimed.clear();
     try {
       const st = await (await fetch("data/nodes/state.json", { cache: "no-cache" })).json();
+      const nationColor = new Map((st.nations || []).map((n) => [n.name, n.color]));
       for (const t of st.towns || []) {
-        for (const id of t.territories || []) E.claimed.set(id, { town: t.name, color: t.color, kind: "owned" });
-        for (const id of t.captured || []) if (!E.claimed.has(id)) E.claimed.set(id, { town: t.name, color: t.color, kind: "occupied" });
+        const nation = t.nation || null;
+        const ncolor = (nation && nationColor.get(nation)) || t.color;
+        for (const id of t.territories || []) E.claimed.set(id, { town: t.name, color: t.color, nation, ncolor, kind: "owned" });
+        for (const id of t.captured || []) if (!E.claimed.has(id)) E.claimed.set(id, { town: t.name, color: t.color, nation, ncolor, kind: "occupied" });
       }
     } catch { /* no live data */ }
   }
@@ -429,7 +432,8 @@
   }
 
   // ---------------------------------------------------------------- editing primitives
-  function isLocked(id) { return E.opt.lock && E.claimed.has(id); }
+  /** "Lock claimed" protects the land (chunks) of claimed territories; names, resources and cores stay editable */
+  function isLocked(id) { return E.opt.lock && E.claimed.has(id) && E.claimed.get(id).kind === "owned"; }
 
   function newTerritory() {
     const id = E.nextId++;
@@ -472,9 +476,23 @@
   }
 
   // ---------------------------------------------------------------- drawing
+  const prettyName = (s) => String(s ?? "").replace(/_/g, " ");
+  const NO_OWNER = "#9aa0a8";
+
+  /** fill color: the owning nation's color (like the public map), or the 6 territory colors */
+  function terrColor(t) {
+    if (E.opt.colorBy === "territory") return PALETTE[((t.color % 6) + 6) % 6];
+    const c = E.claimed.get(t.id);
+    return c ? c.ncolor : NO_OWNER;
+  }
+
   function terrStyle(t) {
     const sel = E.sel.has(t.id);
-    const base = PALETTE[((t.color % 6) + 6) % 6];
+    const base = terrColor(t);
+    if (E.opt.colorBy !== "territory") {
+      const owned = E.claimed.has(t.id);
+      return { renderer: R.terr, fillColor: base, fillOpacity: sel ? 0.62 : owned ? 0.42 : 0.12, color: sel ? "#ffffff" : owned ? "rgba(10,12,16,0.45)" : "rgba(255,255,255,0.35)", weight: sel ? 2.5 : 1, interactive: false };
+    }
     return { renderer: R.terr, fillColor: base, fillOpacity: sel ? 0.55 : 0.32, color: sel ? "#ffffff" : "rgba(10,12,16,0.55)", weight: sel ? 2.5 : 1, interactive: false };
   }
   function ringsOf(t) {
@@ -518,17 +536,23 @@
     const b = map.getBounds().pad(0.2);
     if (E.opt.owners) {
       // one outline per town around its claimed territories
-      const byTown = new Map();
+      // outline each nation (or town without a nation) around all its land
+      const byNation = E.opt.colorBy !== "territory";
+      const groups = new Map();
       for (const [id, c] of E.claimed) {
         const t = E.terr.get(id);
-        if (!t) continue;
-        if (!byTown.has(c.town)) byTown.set(c.town, { color: c.color, cells: [] });
-        const arr = byTown.get(c.town).cells;
+        if (!t || c.kind !== "owned") continue;
+        const key = byNation && c.nation ? "n:" + c.nation : "t:" + c.town;
+        if (!groups.has(key)) groups.set(key, { color: byNation ? c.ncolor : c.color, cells: [] });
+        const arr = groups.get(key).cells;
         for (const k of t.chunks) arr.push(KX(k), KZ(k));
       }
-      for (const [, g] of byTown) {
+      for (const [, g] of groups) {
         const rings = NodesGeom.outline(g.cells, 16).map((r) => r.map(([x, zz]) => ll(x, zz)));
-        if (rings.length) G.claim.addLayer(L.polygon(rings, { renderer: R.claim, fill: true, fillColor: g.color, fillOpacity: 0.18, color: g.color, weight: 3, dashArray: "8 5", interactive: false }));
+        if (!rings.length) continue;
+        G.claim.addLayer(L.polygon(rings, byNation
+          ? { renderer: R.claim, fill: false, color: g.color, weight: 2.5, opacity: 0.95, interactive: false }
+          : { renderer: R.claim, fill: true, fillColor: g.color, fillOpacity: 0.18, color: g.color, weight: 3, dashArray: "8 5", interactive: false }));
       }
     }
     for (const t of E.terr.values()) {
@@ -715,7 +739,6 @@
   function toggleResourceAt(id) {
     if (!resSel || !E.resources[resSel]) return toast("Pick a resource in the Resources tab first, then Ctrl+right-click territories", true);
     if (id === undefined) return;
-    if (isLocked(id)) return toast("That territory is claimed and locked (see Options)", true);
     const t = E.terr.get(id);
     const has = t.nodes.includes(resSel);
     begin(has ? "Remove resource" : "Add resource");
@@ -747,7 +770,6 @@
       else select([id]);
     } else if (E.tool === "core") {
       if (id === undefined) return toast("That chunk isn't in a territory");
-      if (isLocked(id)) return toast("That territory is claimed and locked (see Options)", true);
       begin("Set core");
       touch(id);
       E.terr.get(id).core = [cx, cz];
@@ -1082,8 +1104,8 @@
   }
 
   function distribute(resource, count) {
-    const ids = [...E.sel].filter((id) => !isLocked(id) && !E.terr.get(id).nodes.includes(resource));
-    if (!ids.length) return toast("Every selected territory already has it (or is locked)", true);
+    const ids = [...E.sel].filter((id) => !E.terr.get(id).nodes.includes(resource));
+    if (!ids.length) return toast("Every selected territory already has it", true);
     const rnd = mulberry32((Date.now() & 0xffff) + ids.length);
     for (let i = ids.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [ids[i], ids[j]] = [ids[j], ids[i]]; }
     const pick = ids.slice(0, Math.min(count, ids.length));
@@ -1223,7 +1245,7 @@
       const c = E.claimed.get(t.id);
       const icons = t.nodes.slice(0, 5).map((n) => { const u = iconUrl(n); return u ? `<img src="${esc(u)}" alt="" title="${esc(n)}">` : `<span>${esc(n)}</span>`; }).join("");
       const split = pieces.get(t.id) > 1 ? `<span class="warn" title="split into separate pieces">⚠</span>` : "";
-      return `<div class="trow ${E.sel.has(t.id) ? "sel" : ""}" data-id="${t.id}"><span class="sw" style="background:${PALETTE[t.color % 6] || "#777"}"></span><div><div class="nm">${c ? `<span class="lock" title="claimed by ${esc(c.town)}">🔒</span> ` : ""}${esc(t.name || "Unnamed")} <span style="color:var(--faint);font-weight:400">#${t.id}</span> ${split}</div><div class="sub">${c ? esc(c.town) + (icons ? " · " : "") : ""}${icons}</div></div><span class="stat">${t.chunks.size}</span></div>`;
+      return `<div class="trow ${E.sel.has(t.id) ? "sel" : ""}" data-id="${t.id}"><span class="sw" style="background:${terrColor(t)}"></span><div><div class="nm">${c ? `<span class="lock" title="claimed by ${esc(prettyName(c.town))}">🔒</span> ` : ""}${esc(t.name || "Unnamed")} <span style="color:var(--faint);font-weight:400">#${t.id}</span> ${split}</div><div class="sub">${c ? esc(prettyName(c.nation || c.town)) + (icons ? " · " : "") : ""}${icons}</div></div><span class="stat">${t.chunks.size}</span></div>`;
     }).join("") + (list.length > shown.length ? `<div class="hint">…${list.length - shown.length} more, search to narrow down</div>` : "") + (!list.length ? `<div class="empty">${E.terr.size ? "Nothing matches" : "No territories yet. Use New (N) to paint one."}</div>` : "");
   }
 
@@ -1331,7 +1353,7 @@
       el.innerHTML = `
         <div class="info-kicker">Territory #${t.id}</div>
         <div class="field"><span>Name</span><input id="in-name" value="${esc(t.name)}" placeholder="Unnamed"></div>
-        ${c ? `<div class="note ${locked ? "warn" : ""}">${c.kind === "occupied" ? "Occupied" : "Claimed"} by <b>${esc(c.town)}</b>.${locked ? " Locked: its land and resources can't be changed (Options → Lock claimed)." : " Changes need confirming on apply."}</div>` : ""}
+        ${c ? `<div class="note">${c.kind === "occupied" ? "Occupied" : "Claimed"} by <b>${esc(prettyName(c.town))}</b>${c.nation ? ` (${esc(prettyName(c.nation))})` : ""}.${locked ? " Its land is locked (Options → Lock claimed land); name and resources can still be edited." : ""} Changes need confirming on apply.</div>` : ""}
         ${pieces > 1 ? `<div class="note warn">This territory is in ${pieces} separate pieces. <a href="#" id="in-split">Split them up</a></div>` : ""}
         <dl class="kv">
           <dt>Chunks</dt><dd>${t.chunks.size}</dd>
@@ -1341,23 +1363,21 @@
           <dt>Neighbors</dt><dd>${neighbors.size}${edge ? " · borders wilderness" : ""}</dd>
         </dl>
         <div class="section-h">Resources</div>
-        <div class="chips">${t.nodes.map((n) => { const u = iconUrl(n); return `<span class="chip plain">${u ? `<img src="${esc(u)}" alt="">` : ""}${esc(n)}${E.resources[n] ? "" : " ⚠"}${locked ? "" : `<span class="x" data-rm="${esc(n)}" title="Remove">×</span>`}</span>`; }).join("") || `<span class="hint" style="margin:0">None</span>`}</div>
-        ${locked ? "" : `<div class="field" style="margin-top:8px"><select id="in-add"><option value="">Add a resource…</option>${resOptions}</select></div>`}
+        <div class="chips">${t.nodes.map((n) => { const u = iconUrl(n); return `<span class="chip plain">${u ? `<img src="${esc(u)}" alt="">` : ""}${esc(n)}${E.resources[n] ? "" : " ⚠"}<span class="x" data-rm="${esc(n)}" title="Remove">×</span></span>`; }).join("") || `<span class="hint" style="margin:0">None</span>`}</div>
+        <div class="field" style="margin-top:8px"><select id="in-add"><option value="">Add a resource…</option>${resOptions}</select></div>
         <div class="actions">${locked ? "" : `<button class="btn small danger" id="in-del">Delete</button>`}<button class="btn small" id="in-zoom">Zoom to</button></div>`;
       const name = $("#in-name");
       name.onchange = () => { begin("Rename"); touch(t.id); t.name = name.value.trim(); end(); };
       $("#in-core").onclick = (e) => { e.preventDefault(); setTool("core"); toast("Click a chunk inside the territory to make it the core"); };
       $("#in-zoom").onclick = () => zoomTo([t.id]);
       if ($("#in-split")) $("#in-split").onclick = (e) => { e.preventDefault(); splitDisconnected(); };
-      if (!locked) {
-        $("#in-del").onclick = deleteSelected;
-        $("#in-add").onchange = (e) => {
-          const v = e.target.value;
-          if (!v || t.nodes.includes(v)) return;
-          begin("Add resource"); touch(t.id); t.nodes.push(v); end();
-        };
-        $$("[data-rm]", el).forEach((x) => (x.onclick = () => { begin("Remove resource"); touch(t.id); t.nodes = t.nodes.filter((n) => n !== x.dataset.rm); end(); }));
-      }
+      if (!locked) $("#in-del").onclick = deleteSelected;
+      $("#in-add").onchange = (e) => {
+        const v = e.target.value;
+        if (!v || t.nodes.includes(v)) return;
+        begin("Add resource"); touch(t.id); t.nodes.push(v); end();
+      };
+      $$("[data-rm]", el).forEach((x) => (x.onclick = () => { begin("Remove resource"); touch(t.id); t.nodes = t.nodes.filter((n) => n !== x.dataset.rm); end(); }));
       return;
     }
     let chunks = 0;
@@ -1436,7 +1456,7 @@
         <div class="list" style="margin-left:15px">${Object.entries(g.nodes).map(([n, d]) => line(n, d)).join("")}</div>`).join("")}
       <h3 style="margin:14px 0 6px;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--faint)">Options</h3>
       <label class="tgl"><input type="checkbox" id="pk-replace">Replace nodes that already exist with the same name</label>
-      <label class="tgl"><input type="checkbox" id="pk-basic">Give every unlocked territory the <b>basic</b> node</label>
+      <label class="tgl"><input type="checkbox" id="pk-basic">Give every territory the <b>basic</b> node</label>
       <div class="foot"><button class="btn" data-close>Cancel</button><button class="btn primary" id="pk-go">Add nodes</button></div>`);
     $("#pk-go").onclick = () => {
       const groups = new Set($$(".pk-g").filter((c) => c.checked).map((c) => c.dataset.g));
@@ -1457,7 +1477,7 @@
       let given = 0;
       if (giveBasic && E.resources.basic) {
         for (const t of E.terr.values()) {
-          if (isLocked(t.id) || t.nodes.includes("basic")) continue;
+          if (t.nodes.includes("basic")) continue;
           touch(t.id);
           t.nodes.unshift("basic");
           given++;
@@ -1583,6 +1603,17 @@
         el.blur(); // keep Space etc. working as editor shortcuts
       };
     }
+    const colorBy = () => $$("#color-by button").forEach((b) => b.classList.toggle("active", b.dataset.v === E.opt.colorBy));
+    $$("#color-by button").forEach((b) => (b.onclick = () => {
+      E.opt.colorBy = b.dataset.v;
+      store.set("opt", E.opt);
+      colorBy();
+      restyle();
+      drawOverlays();
+      renderTerrList();
+      b.blur();
+    }));
+    colorBy();
     $("#modal-wrap").addEventListener("mousedown", (e) => { if (e.target.id === "modal-wrap") closeModal(); });
 
     document.addEventListener("keydown", (e) => {

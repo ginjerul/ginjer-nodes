@@ -96,11 +96,16 @@
     <h3>Painting</h3>
     <label class="tgl"><input type="checkbox" id="opt-land" checked>Land only (skip water and ungenerated chunks)</label>
     <label class="tgl"><input type="checkbox" id="opt-wild" checked>Only paint empty land (don't take chunks from other territories)</label>
-    <label class="tgl"><input type="checkbox" id="opt-lock" checked>Lock claimed territories (owned or occupied by towns)</label>
+    <label class="tgl"><input type="checkbox" id="opt-lock" checked>Lock claimed land (painting and erasing skip land owned by towns; names and resources stay editable)</label>
+    <h3>Color territories by</h3>
+    <div class="seg" id="color-by" style="grid-template-columns:1fr 1fr">
+      <button data-v="nation">Nation (like the map)</button>
+      <button data-v="territory">Territory colors</button>
+    </div>
     <h3>Show</h3>
     <label class="tgl"><input type="checkbox" id="opt-labels" checked>Territory names</label>
     <label class="tgl"><input type="checkbox" id="opt-icons" checked>Resource icons</label>
-    <label class="tgl"><input type="checkbox" id="opt-owners" checked>Claimed land (town colors)</label>
+    <label class="tgl"><input type="checkbox" id="opt-owners" checked>Nation and town borders</label>
     <label class="tgl"><input type="checkbox" id="opt-grid">Chunk grid</label>
     <p class="hint">Tap <kbd>Space</kbd> to turn the brush on/off like the old editor (left-drag pans, right-drag paints). Ctrl+right-drag erases, Shift+move resizes the brush, <kbd>A</kbd> starts a new territory. Hold <kbd>Space</kbd> and drag to pan. All controls: ⋯ menu → Shortcuts.</p>
   </section>
