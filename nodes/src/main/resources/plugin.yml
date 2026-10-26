@@ -115,6 +115,10 @@ commands:
     aliases: [vassals]
     permission: nodes.command.vassal
     usage: /vassal help
+  surrender:
+    description: Join another nation with your town
+    permission: nodes.command.surrender
+    usage: /surrender <nation>
   supplydrop:
     description: Supply drops
     aliases: [sd]
@@ -223,6 +227,9 @@ permissions:
     default: op
   nodes.command.vassal:
     description: Use /vassal
+    default: true
+  nodes.command.surrender:
+    description: Use /surrender
     default: true
   nodes.vassal.admin:
     description: Release any vassal
