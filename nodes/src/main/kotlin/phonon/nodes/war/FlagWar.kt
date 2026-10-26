@@ -54,6 +54,7 @@ import phonon.nodes.event.WarAttackFinishEvent
 import phonon.nodes.event.WarAttackStartEvent
 import phonon.nodes.fortify.Fortifications
 import phonon.nodes.objects.Coord
+import phonon.nodes.objects.Nation
 import phonon.nodes.objects.Territory
 import phonon.nodes.objects.TerritoryChunk
 import phonon.nodes.objects.Town
@@ -890,6 +891,20 @@ public object FlagWar {
         phonon.nodes.util.DiscordRelay.flagWar(
             "**[Flag]** Capture by $name at (${attack.flagBase.x}, ${attack.flagBase.y}, ${attack.flagBase.z}) was **defended/cancelled**",
         )
+    }
+
+    /** Cancels capture attacks between [town] and towns of [nation]; used when [town] surrenders into [nation]. */
+    internal fun cancelAttacksForSurrender(town: Town, nation: Nation) {
+        for (attack in FlagWar.chunkToAttacker.values.toList()) {
+            if (attack.cancelled) continue
+            val defender = Nodes.getTerritoryChunkFromCoord(attack.coord)?.territory?.town ?: continue
+            val attackingTown = attack.town
+            val involved = (attackingTown === town && defender.nation === nation) ||
+                (defender === town && attackingTown.nation === nation)
+            if (involved) {
+                FlagWar.cancelAttack(attack)
+            }
+        }
     }
 
     internal fun finishAttack(attack: Attack) {

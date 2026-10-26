@@ -23,6 +23,7 @@ import phonon.nodes.commands.RaidCommand
 import phonon.nodes.commands.RefineryCommand
 import phonon.nodes.commands.StatsCommand
 import phonon.nodes.commands.SupplyDropCommand
+import phonon.nodes.commands.SurrenderCommand
 import phonon.nodes.commands.TerritoryCommand
 import phonon.nodes.commands.TownChatCommand
 import phonon.nodes.commands.TownCommand
@@ -68,6 +69,7 @@ import phonon.nodes.refinery.RefineryGuiListener
 import phonon.nodes.stats.PlayerStats
 import phonon.nodes.supply.SupplyDropListener
 import phonon.nodes.supply.SupplyDrops
+import phonon.nodes.surrender.Surrender
 import phonon.nodes.utils.loadLongFromFile
 import phonon.nodes.vassal.Vassals
 import phonon.nodes.war.Raid
@@ -194,6 +196,9 @@ public class NodesPlugin : JavaPlugin() {
         val vassalCmd = VassalCommand()
         this.getCommand("vassal")?.setExecutor(vassalCmd)
         this.getCommand("vassal")?.setTabCompleter(vassalCmd)
+        val surrenderCmd = SurrenderCommand()
+        this.getCommand("surrender")?.setExecutor(surrenderCmd)
+        this.getCommand("surrender")?.setTabCompleter(surrenderCmd)
         this.getCommand("t")?.setTabCompleter(this.getCommand("town")?.getExecutor() as TabCompleter)
         this.getCommand("n")?.setTabCompleter(this.getCommand("nation")?.getExecutor() as TabCompleter)
         this.getCommand("nd")?.setTabCompleter(this.getCommand("nodes")?.getExecutor() as TabCompleter)
@@ -224,7 +229,11 @@ public class NodesPlugin : JavaPlugin() {
         KillShop.load()
         SupplyDrops.load()
         Vassals.load()
+        Surrender.load()
         Fortifications.load()
+
+        // web map export (after every system above has loaded its state)
+        phonon.nodes.map.MapExporter.start(this)
 
         val timeEnd = System.currentTimeMillis()
         val timeLoad = timeEnd - timeStart
@@ -235,6 +244,7 @@ public class NodesPlugin : JavaPlugin() {
 
     override fun onDisable() {
         logger.info("ginjer is the goat but disabled")
+        phonon.nodes.map.MapExporter.stop()
         Warzone.shutdown()
         Raid.shutdown()
         MiningBoost.shutdown()
@@ -246,6 +256,7 @@ public class NodesPlugin : JavaPlugin() {
         KillShop.shutdown()
         SupplyDrops.shutdown()
         Vassals.save()
+        Surrender.save()
         Fortifications.flushOpenTreasuries()
         Fortifications.save()
 
