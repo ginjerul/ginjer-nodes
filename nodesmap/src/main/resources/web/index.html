@@ -29,7 +29,6 @@
     <button data-tab="towns" class="active">Towns</button>
     <button data-tab="nations">Nations</button>
     <button data-tab="war">War</button>
-    <button data-tab="layers">Map</button>
   </nav>
   <section id="tab-towns" class="tab active">
     <div class="list-tools">
@@ -56,15 +55,20 @@
     <div class="list" id="list-nations"></div>
   </section>
   <section id="tab-war" class="tab"><div id="war-panel"></div></section>
-  <section id="tab-layers" class="tab">
-    <h3>Color territories by</h3>
+</aside>
+
+<div id="view" class="view">
+  <button id="view-head" aria-expanded="true" title="Map view settings">
+    <svg viewBox="0 0 24 24"><path d="M12 3l9 5-9 5-9-5zM3 13l9 5 9-5"/></svg>
+    <span>View</span>
+    <svg class="chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+  </button>
+  <div id="view-body">
     <div id="modes" class="seg"></div>
     <div id="mode-extra"></div>
-    <h3>Show</h3>
     <div id="layer-toggles"></div>
-    <p class="hint">Settings are remembered in this browser.</p>
-  </section>
-</aside>
+  </div>
+</div>
 
 <aside id="info" hidden>
   <button id="info-close" class="icon-btn" aria-label="Close">

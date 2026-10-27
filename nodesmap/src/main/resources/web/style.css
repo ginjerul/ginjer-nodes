@@ -91,7 +91,23 @@ body.sidebar-closed #sidebar { transform: translateX(calc(-100% - 20px)); opacit
 .seg button.active { border-color: var(--accent); color: var(--text); background: var(--accent-soft); }
 #mode-extra { margin-top: 8px; }
 #mode-extra select { width: 100%; }
-#layer-toggles { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; }
+/* ---------- View box (always on the map, like Dynmap's layer list) ---------- */
+.view { position: absolute; top: calc(var(--top-h) + 20px); right: 10px; width: 236px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; z-index: 999; backdrop-filter: blur(8px); }
+#view-head { display: flex; align-items: center; gap: 8px; width: 100%; padding: 9px 12px; border: 0; background: transparent; color: var(--text); font-weight: 650; font-size: 13px; cursor: pointer; border-radius: 12px; }
+#view-head:hover { background: rgba(255,255,255,0.04); }
+#view-head svg { width: 16px; height: 16px; color: var(--muted); }
+#view-head .chev { margin-left: auto; transition: transform 0.15s; }
+.view.closed #view-head .chev { transform: rotate(-90deg); }
+.view.closed { width: auto; }
+.view.closed #view-body { display: none; }
+#view-body { padding: 0 10px 8px; }
+#view .seg { gap: 3px; }
+#view .seg button { padding: 5px 2px; font-size: 12px; }
+#view #mode-extra:empty { display: none; }
+#view .chips { gap: 4px; }
+#view .chip { font-size: 11.5px; }
+#layer-toggles { display: flex; flex-direction: column; margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--line); }
+#layer-toggles .tgl { padding: 3px 2px; font-size: 13px; }
 .tgl { display: flex; align-items: center; gap: 8px; padding: 5px 2px; cursor: pointer; color: var(--muted); user-select: none; }
 .tgl input { accent-color: var(--accent); width: 15px; height: 15px; margin: 0; }
 .tgl:hover { color: var(--text); }
@@ -99,7 +115,7 @@ body.sidebar-closed #sidebar { transform: translateX(calc(-100% - 20px)); opacit
 
 /* ---------- info panel ---------- */
 #info {
-  position: absolute; top: calc(var(--top-h) + 20px); right: 10px; width: 340px; max-height: calc(100% - var(--top-h) - 60px);
+  position: absolute; top: calc(var(--top-h) + 30px + var(--view-h, 0px)); right: 10px; width: 340px; max-height: calc(100% - var(--top-h) - 70px - var(--view-h, 0px));
   overflow: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; z-index: 999; padding: 16px;
 }
 #info-close { position: absolute; top: 8px; right: 8px; }
@@ -192,6 +208,7 @@ body.sidebar-closed #sidebar { transform: translateX(calc(-100% - 20px)); opacit
   #war-pill { display: none !important; }
   #info { left: 10px; right: 10px; width: auto; top: auto; bottom: 46px; max-height: 55vh; }
   #sidebar { bottom: 46px; }
+  .view { z-index: 998; }
   #statusbar { left: 10px; right: 10px; transform: none; justify-content: center; }
   .leaflet-control-zoom { display: none; }
 }

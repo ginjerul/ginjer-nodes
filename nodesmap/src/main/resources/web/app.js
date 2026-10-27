@@ -76,6 +76,18 @@
     ["towns", "Towns"], ["nations", "Nations"], ["diplomacy", "Diplomacy"],
     ["resources", "Resource"], ["supply", "Supply"], ["plain", "Terrain"],
   ];
+  /** what the View box shows: one checkbox per group, each switching one or more layers */
+  const GROUPS = [
+    ["Territory colors", ["territories"]],
+    ["Borders", ["borders"]],
+    ["Town & nation names", ["townLabels", "nationLabels"]],
+    ["Territory names", ["terrLabels"]],
+    ["Resources", ["resources"]],
+    ["Players", ["players"]],
+    ["War", ["war", "warzones", "raids"]],
+    ["Buildings", ["forts", "outposts", "ports", "towers", "refineries", "drops"]],
+    ["Chunk grid", ["chunks"]],
+  ];
   const LAYERS = [
     ["territories", "Territory fill", true],
     ["borders", "Town borders", true],
@@ -101,6 +113,7 @@
     resource: store.get("resource", ""),
     layers: Object.assign(Object.fromEntries(LAYERS.map(([k, , d]) => [k, d])), store.get("layers", {})),
     sidebar: store.get("sidebar", window.innerWidth > 760),
+    view: store.get("view", window.innerWidth > 760),
   };
 
   // ---------------------------------------------------------------- map
@@ -241,7 +254,7 @@
   function setPlayersEnabled(on) {
     if (S.playersOn === on) return;
     S.playersOn = on;
-    const row = document.querySelector('#layer-toggles input[data-layer="players"]')?.closest("label");
+    const row = document.querySelector('#layer-toggles input[data-group="Players"]')?.closest("label");
     if (row) row.hidden = !on;
     const opt = document.querySelector('.sort[data-list="towns"] option[value="online"]');
     if (opt) opt.hidden = !on;
@@ -1172,27 +1185,54 @@
     document.body.classList.toggle("sidebar-closed", !open);
   }
 
+  function setView(open) {
+    prefs.view = open; store.set("view", open);
+    $("#view").classList.toggle("closed", !open);
+    $("#view-head").setAttribute("aria-expanded", open);
+  }
+
   function buildUi() {
     setSidebar(prefs.sidebar);
     $("#menu-btn").onclick = () => setSidebar(!prefs.sidebar);
     $$("#tabs button").forEach((b) => (b.onclick = () => openTab(b.dataset.tab)));
     $("#war-pill").onclick = () => openTab("war");
+    setView(prefs.view);
+    $("#view-head").onclick = () => setView(!prefs.view);
+    // keep the info panel just below the View box
+    const placeInfo = () => document.body.style.setProperty("--view-h", $("#view").offsetHeight + "px");
+    if (window.ResizeObserver) new ResizeObserver(placeInfo).observe($("#view"));
+    placeInfo();
+    for (const el of [$("#view"), $("#sidebar"), $("#info")]) {
+      L.DomEvent.disableClickPropagation(el);
+      L.DomEvent.disableScrollPropagation(el);
+    }
     $("#info-close").onclick = () => { $("#info").hidden = true; infoTarget = null; };
 
     $("#modes").innerHTML = MODES.map(([k, l]) => `<button data-mode="${k}" class="${k === prefs.mode ? "active" : ""}">${l}</button>`).join("");
     $$("#modes button").forEach((b) => (b.onclick = () => setMode(b.dataset.mode)));
 
-    $("#layer-toggles").innerHTML = LAYERS.map(([k, l]) => `<label class="tgl"><input type="checkbox" data-layer="${k}" ${prefs.layers[k] ? "checked" : ""}>${l}</label>`).join("");
+    $("#layer-toggles").innerHTML = GROUPS.map(([l]) => `<label class="tgl"><input type="checkbox" data-group="${l}">${l}</label>`).join("");
+    const syncChecks = () => $$("#layer-toggles input").forEach((i) => {
+      const keys = GROUPS.find(([l]) => l === i.dataset.group)[1];
+      const on = keys.filter((k) => prefs.layers[k]).length;
+      i.checked = on > 0;
+      i.indeterminate = on > 0 && on < keys.length;
+    });
+    syncChecks();
     $$("#layer-toggles input").forEach((i) => (i.onchange = () => {
-      prefs.layers[i.dataset.layer] = i.checked;
+      const keys = GROUPS.find(([l]) => l === i.dataset.group)[1];
+      for (const k of keys) prefs.layers[k] = i.checked;
       store.set("layers", prefs.layers);
-      if (["territories", "war"].includes(i.dataset.layer)) styleTerritories();
-      if (i.dataset.layer === "war") drawWar();
-      if (["warzones", "raids"].includes(i.dataset.layer)) drawZones();
-      if (i.dataset.layer === "players") drawPlayers();
-      if (i.dataset.layer === "chunks") drawChunkGrid();
+      syncChecks();
+      const has = (...ks) => ks.some((k) => keys.includes(k));
+      if (has("territories", "war")) styleTerritories();
+      if (has("war")) drawWar();
+      if (has("warzones", "raids")) drawZones();
+      if (has("players")) drawPlayers();
+      if (has("chunks")) drawChunkGrid();
       syncLayerVisibility();
       scheduleLayout();
+      i.blur();
     }));
 
     $$(".filter, .sort").forEach((el) => (el.oninput = renderLists));
