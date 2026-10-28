@@ -377,6 +377,9 @@ public class NodesAdminCommand :
                     if (args.size == 2) {
                         return filterByStart(WAR_SUBCOMMANDS, args[1])
                     }
+                    if (args.size == 3 && (args[1].equals("enable", true) || args[1].equals("skirmish", true))) {
+                        return filterByStart(listOf("30m", "1h", "2h", "3h", "6h", "12h", "24h", "48h", "72h"), args[2])
+                    }
                 }
                 "miningboost" -> {
                     if (args.size == 2) {
@@ -737,20 +740,42 @@ public class NodesAdminCommand :
      * @command /nodesadmin war [enable|disable]
      * Enables/disables war
      */
+    /** War/skirmish length: needs a unit, e.g. 2h, 90m, 1h30m, 2d. */
+    private fun parseWarDuration(sender: CommandSender, input: String): Long? {
+        if (input.trim().toLongOrNull() != null) {
+            Message.error(sender, "Add a unit to the duration: ${input.trim()}h for hours, ${input.trim()}m for minutes, ${input.trim()}d for days")
+            return null
+        }
+        val ms = phonon.nodes.mining.MiningBoost.parseDurationMs(input)
+        if (ms == null) {
+            Message.error(sender, "Invalid duration \"$input\". Use e.g. 2h, 90m, 1h30m or 2d")
+        }
+        return ms
+    }
+
+    private fun formatWarDuration(ms: Long): String {
+        val totalMin = ms / 60_000L
+        val d = totalMin / 1440
+        val h = (totalMin % 1440) / 60
+        val m = totalMin % 60
+        val parts = ArrayList<String>()
+        if (d > 0) parts.add("${d}d")
+        if (h > 0) parts.add("${h}h")
+        if (m > 0) parts.add("${m}m")
+        if (parts.isEmpty()) parts.add("${ms / 1000L}s")
+        return parts.joinToString(" ")
+    }
+
     private fun war(sender: CommandSender, args: Array<String>) {
         if (args.size < 2) {
             Nodes.war.printInfo(sender, true)
-            Message.print(sender, "Usage: /nda war enable [duration] | skirmish [duration] | disable")
+            Message.print(sender, "Usage: /nda war enable [duration] | skirmish [duration] | disable  (duration like 2h, 90m, 1h30m, 2d)")
         } else {
             val function = args[1].lowercase()
             when (function) {
                 "enable" -> {
                     val durationMs = if (args.size >= 3) {
-                        phonon.nodes.mining.MiningBoost.parseDurationMs(args[2])
-                            ?: run {
-                                Message.error(sender, "Invalid duration (e.g. 72h, 2h, 90m)")
-                                return
-                            }
+                        parseWarDuration(sender, args[2]) ?: return
                     } else {
                         null
                     }
@@ -760,12 +785,11 @@ public class NodesAdminCommand :
 
                     if (durationMs != null) {
                         phonon.nodes.war.WarTimer.scheduleDisable(durationMs, "War time expired")
-                        phonon.nodes.util.DiscordRelay.war("**[War]** Nodes war **disabled** (timer ended)")
 
+                        val durationLabel = formatWarDuration(durationMs)
                         Message.broadcast(
-                            "${ChatColor.DARK_RED}${ChatColor.BOLD}Nodes war enabled for ${args[2]}",
+                            "${ChatColor.DARK_RED}${ChatColor.BOLD}Nodes war enabled for $durationLabel",
                         )
-                        val durationLabel = args[2]
                         phonon.nodes.util.DiscordRelay.war(
                             "**[War]** Nodes war **enabled** for **$durationLabel**",
                         )
@@ -781,11 +805,7 @@ public class NodesAdminCommand :
 
                 "skirmish" -> {
                     val durationMs = if (args.size >= 3) {
-                        phonon.nodes.mining.MiningBoost.parseDurationMs(args[2])
-                            ?: run {
-                                Message.error(sender, "Invalid duration (e.g. 72h, 2h, 90m)")
-                                return
-                            }
+                        parseWarDuration(sender, args[2]) ?: return
                     } else {
                         null
                     }
@@ -796,7 +816,7 @@ public class NodesAdminCommand :
                     if (durationMs != null) {
                         phonon.nodes.war.WarTimer.scheduleDisable(durationMs, "Skirmish time expired")
                         Message.broadcast(
-                            "${ChatColor.DARK_RED}${ChatColor.BOLD}Border skirmishes enabled for ${args[2]}",
+                            "${ChatColor.DARK_RED}${ChatColor.BOLD}Border skirmishes enabled for ${formatWarDuration(durationMs)}",
                         )
                     } else {
                         phonon.nodes.war.WarTimer.cancel()

@@ -66,6 +66,7 @@ object WarTimer {
                     Nodes.disableWar()
                     WarStats.endWarSessionAndSave()
                     Message.broadcast("${ChatColor.BOLD}[War] Disabled — $reason")
+                    phonon.nodes.util.DiscordRelay.war("**[War]** Nodes war **disabled** (timer ended)")
                 }
                 cancel()
             },
