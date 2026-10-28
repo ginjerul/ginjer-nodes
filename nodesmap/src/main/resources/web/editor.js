@@ -1239,8 +1239,6 @@
   function localIssues() {
     const out = [];
     for (const t of E.terr.values()) {
-      const pieces = components(t.chunks).length;
-      if (pieces > 1) out.push(`#${t.id} ${t.name ? `"${t.name}" ` : ""}is split into ${pieces} separate pieces`);
       for (const n of t.nodes) if (!E.resources[n]) out.push(`#${t.id} uses resource "${n}" which doesn't exist`);
     }
     return out;
@@ -1338,8 +1336,7 @@
     const sort = $("#terr-sort").value;
     let list = [...E.terr.values()];
     if (q) list = list.filter((t) => String(t.id) === q || t.name.toLowerCase().includes(q) || t.nodes.some((n) => n.toLowerCase().includes(q)) || (E.claimed.get(t.id)?.town || "").toLowerCase().includes(q));
-    const pieces = new Map(list.map((t) => [t.id, components(t.chunks).length]));
-    const issues = (t) => (pieces.get(t.id) > 1 ? 1 : 0) + t.nodes.filter((n) => !E.resources[n]).length;
+    const issues = (t) => t.nodes.filter((n) => !E.resources[n]).length;
     const sorters = { id: (a, b) => a.id - b.id, size: (a, b) => b.chunks.size - a.chunks.size, name: (a, b) => (a.name || "~").localeCompare(b.name || "~"), issues: (a, b) => issues(b) - issues(a) || a.id - b.id };
     list.sort(sorters[sort] || sorters.id);
     const shown = list.slice(0, 400);
@@ -1347,8 +1344,7 @@
     $("#terr-list").innerHTML = shown.map((t) => {
       const c = E.claimed.get(t.id);
       const icons = t.nodes.slice(0, 5).map((n) => { const u = iconUrl(n); return u ? `<img src="${esc(u)}" alt="" data-tipres="${esc(n)}">` : `<span data-tipres="${esc(n)}">${esc(n)}</span>`; }).join("");
-      const split = pieces.get(t.id) > 1 ? `<span class="warn" title="split into separate pieces">⚠</span>` : "";
-      return `<div class="trow ${E.sel.has(t.id) ? "sel" : ""}" data-id="${t.id}"><span class="sw" style="background:${terrColor(t)}"></span><div><div class="nm">${c ? `<span class="lock" title="claimed by ${esc(prettyName(c.town))}">🔒</span> ` : ""}${t.name ? `${esc(t.name)} <span style="color:var(--faint);font-weight:400">#${t.id}</span>` : `Territory #${t.id}`} ${split}</div><div class="sub">${c && c.kind === "owned" ? esc(prettyName(c.nation || c.town)) + (icons || c.occ ? " · " : "") : ""}${c && c.occ ? `<span class="occ">⚔ ${esc(prettyName(c.occ.town))}</span>` + (icons ? " · " : "") : ""}${icons}</div></div><span class="stat">${t.chunks.size}</span></div>`;
+      return `<div class="trow ${E.sel.has(t.id) ? "sel" : ""}" data-id="${t.id}"><span class="sw" style="background:${terrColor(t)}"></span><div><div class="nm">${c ? `<span class="lock" title="claimed by ${esc(prettyName(c.town))}">🔒</span> ` : ""}${t.name ? `${esc(t.name)} <span style="color:var(--faint);font-weight:400">#${t.id}</span>` : `Territory #${t.id}`}</div><div class="sub">${c && c.kind === "owned" ? esc(prettyName(c.nation || c.town)) + (icons || c.occ ? " · " : "") : ""}${c && c.occ ? `<span class="occ">⚔ ${esc(prettyName(c.occ.town))}</span>` + (icons ? " · " : "") : ""}${icons}</div></div><span class="stat">${t.chunks.size}</span></div>`;
     }).join("") + (list.length > shown.length ? `<div class="hint">…${list.length - shown.length} more, search to narrow down</div>` : "") + (!list.length ? `<div class="empty">${E.terr.size ? "Nothing matches" : "No territories yet. Use New (N) to paint one."}</div>` : "");
   }
 
@@ -1459,14 +1455,12 @@
       const c = E.claimed.get(t.id);
       const locked = isLocked(t.id);
       const { neighbors, edge } = neighborsOf(t);
-      const pieces = components(t.chunks).length;
       el.innerHTML = `
         <div class="info-kicker">Territory #${t.id}</div>
         <div class="field"><span>Name</span><input id="in-name" value="${esc(t.name)}" placeholder="No name (optional)"></div>
         ${c && c.occ ? `<div class="note err">⚔ Occupied by <b>${esc(prettyName(c.occ.town))}</b>${c.occ.nation ? ` (${esc(prettyName(c.occ.nation))})` : ""}${c.kind === "owned" ? `, taken from ${esc(prettyName(c.town))}` : ""}.</div>` : ""}
         ${occCount(t) && !(c && c.occ) ? `<div class="note warn">⚔ ${occCount(t)} of its ${t.chunks.size} chunks are occupied by flags: ${esc(occTowns(t))}</div>` : ""}
         ${c && c.kind === "owned" ? `<div class="note">Claimed by <b>${E.townsOnline ? `<a href="#" id="in-town">${esc(prettyName(c.town))}</a>` : esc(prettyName(c.town))}</b>${c.nation ? ` (${esc(prettyName(c.nation))})` : ""}.${locked ? " Its land is locked (Options → Lock claimed land); name and resources can still be edited." : ""} Changes need confirming on apply.</div>` : ""}
-        ${pieces > 1 ? `<div class="note warn">This territory is in ${pieces} separate pieces. <a href="#" id="in-split">Split them up</a></div>` : ""}
         <dl class="kv">
           <dt>Chunks</dt><dd>${t.chunks.size}</dd>
           <dt>Claim cost</dt><dd>${terrCost(t)}</dd>
@@ -1490,7 +1484,6 @@
       };
       $("#in-zoom").onclick = () => zoomTo([t.id]);
       if ($("#in-town")) $("#in-town").onclick = (e) => { e.preventDefault(); pickTown(c.town, false); };
-      if ($("#in-split")) $("#in-split").onclick = (e) => { e.preventDefault(); splitDisconnected(); };
       if (!locked) $("#in-del").onclick = deleteSelected;
       $("#in-add").onchange = (e) => {
         const v = e.target.value;
