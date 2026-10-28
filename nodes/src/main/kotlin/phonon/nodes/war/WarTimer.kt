@@ -9,6 +9,7 @@ import org.bukkit.entity.Player
 import org.bukkit.scheduler.BukkitTask
 import phonon.nodes.Message
 import phonon.nodes.Nodes
+import phonon.nodes.mining.MiningBoost
 import phonon.nodes.stats.WarStats
 
 /**
@@ -136,43 +137,11 @@ object WarTimer {
         }
     }
 
-    /**
-     * Looks up MiningBoost without a hard import, so WarTimer always compiles.
-     * Tries common package names.
-     */
-    private fun isGlobalMiningBoostActive(): Boolean {
-        return try {
-            val clazz = sequenceOf(
-                "phonon.nodes.mining.MiningBoost",
-                "phonon.nodes.MiningBoost",
-            ).firstNotNullOfOrNull { name ->
-                try {
-                    Class.forName(name)
-                } catch (_: ClassNotFoundException) {
-                    null
-                }
-            } ?: return false
-
-            val instance = clazz.kotlin.objectInstance
-                ?: clazz.getField("INSTANCE").get(null)
-
-            val globalField = clazz.getDeclaredField("global").also { it.isAccessible = true }
-            val global = globalField.get(instance) ?: return false
-
-            val isActive = global.javaClass.methods.firstOrNull {
-                it.name == "isActive" && it.parameterCount == 0
-            } ?: global.javaClass.methods.firstOrNull {
-                it.name == "isActive" && it.parameterCount == 1
-            }
-
-            when {
-                isActive == null -> false
-                isActive.parameterCount == 0 -> isActive.invoke(global) as Boolean
-                else -> isActive.invoke(global, System.currentTimeMillis()) as Boolean
-            }
-        } catch (_: Exception) {
-            false
-        }
+    /** Whether a server-wide mining boost is running (shown on the war boss bar). */
+    private fun isGlobalMiningBoostActive(): Boolean = try {
+        MiningBoost.global.isActive()
+    } catch (_: Throwable) {
+        false
     }
 
     private fun formatLeft(ms: Long): String {
