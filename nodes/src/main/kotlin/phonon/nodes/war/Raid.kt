@@ -6,6 +6,7 @@ import org.bukkit.scheduler.BukkitTask
 import phonon.nodes.Config
 import phonon.nodes.Message
 import phonon.nodes.Nodes
+import phonon.nodes.objects.Nation
 import phonon.nodes.objects.Territory
 import phonon.nodes.objects.TerritoryId
 import phonon.nodes.objects.Town
@@ -197,6 +198,25 @@ object Raid {
             DiscordRelay.raid("**[Raid]** ${state.attacker.name} cancelled the raid on ${state.defender.name}")
         }
         return null
+    }
+
+    /** Ends raids between [town] and towns of [nation] without rewards; used when [town] surrenders into [nation]. */
+    fun cancelForSurrender(town: Town, nation: Nation) {
+        val states = byTerritory.values.filter { state ->
+            (state.attacker === town && state.defender.nation === nation) ||
+                (state.defender === town && state.attacker.nation === nation)
+        }
+        for (state in states) {
+            byTerritory.remove(state.territoryId.toInt())
+            clearRaidCombat(state)
+            Message.broadcast(
+                "${ChatColor.GOLD}[Raid] The raid between ${state.attacker.name} and ${state.defender.name} " +
+                    "ended: ${town.name} surrendered (no reward)",
+            )
+            DiscordRelay.raid(
+                "**[Raid]** ${town.name} surrendered, ending the raid between ${state.attacker.name} and ${state.defender.name}",
+            )
+        }
     }
 
     fun onCoreCaptured(attackerTown: Town, territory: Territory) {

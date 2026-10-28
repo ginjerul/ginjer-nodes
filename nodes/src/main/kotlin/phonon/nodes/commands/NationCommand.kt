@@ -19,6 +19,7 @@ import phonon.nodes.constants.ErrorNationExists
 import phonon.nodes.constants.ErrorPlayerHasNation
 import phonon.nodes.constants.ErrorTownHasNation
 import phonon.nodes.objects.Nation
+import phonon.nodes.surrender.Surrender
 import phonon.nodes.utils.sanitizeString
 import phonon.nodes.utils.string.filterByStart
 import phonon.nodes.utils.string.filterNation
@@ -326,6 +327,11 @@ public class NationCommand :
 
         if (Nodes.war.enabled == true && Config.canLeaveNationDuringWar == false) {
             Message.error(player, "Cannot leave your nation during war")
+            return
+        }
+
+        Surrender.cooldownMessage(town)?.let {
+            Message.error(player, it)
             return
         }
 
