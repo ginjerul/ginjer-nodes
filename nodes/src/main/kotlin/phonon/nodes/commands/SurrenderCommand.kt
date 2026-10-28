@@ -48,7 +48,7 @@ class SurrenderCommand :
     private fun printHelp(sender: CommandSender) {
         Message.print(sender, "${ChatColor.BOLD}[Nodes] Surrender commands:")
         Message.print(sender, "/surrender <nation>${ChatColor.WHITE}: Join that nation with your town (leader)")
-        Message.print(sender, "${ChatColor.GRAY}Territories and income stay. Wars with that nation end. Cooldown 1 day.")
+        Message.print(sender, "${ChatColor.GRAY}Territories and income stay. You inherit that nation's wars and alliances. Cooldown 1 day.")
         Message.print(sender, "${ChatColor.GRAY}Vassals cannot surrender.")
     }
 
