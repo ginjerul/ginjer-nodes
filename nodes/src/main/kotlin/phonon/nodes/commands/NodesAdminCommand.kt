@@ -53,6 +53,7 @@ private val SUBCOMMANDS: List<String> = listOf(
     "help",
     "reload",
     "war",
+    "surrender",
     "port",
     "portgroup",
     "resident",
@@ -326,6 +327,7 @@ public class NodesAdminCommand :
             "help" -> printHelp(sender)
             "reload" -> reload(sender, args)
             "war" -> war(sender, args)
+            "surrender" -> adminSurrender(sender, args)
             "miningboost" -> miningBoost(sender, args)
             "stats" -> adminStats(sender, args)
             "announce" -> adminAnnounce(sender, args)
@@ -379,6 +381,14 @@ public class NodesAdminCommand :
                     }
                     if (args.size == 3 && (args[1].equals("enable", true) || args[1].equals("skirmish", true))) {
                         return filterByStart(listOf("30m", "1h", "2h", "3h", "6h", "12h", "24h", "48h", "72h"), args[2])
+                    }
+                }
+                "surrender" -> {
+                    if (args.size == 2) {
+                        return filterByStart(listOf("reset"), args[1])
+                    }
+                    if (args.size == 3) {
+                        return filterTown(args[2])
                     }
                 }
                 "miningboost" -> {
@@ -634,6 +644,7 @@ public class NodesAdminCommand :
         Message.print(sender, "${ChatColor.BOLD}[Nodes] Admin commands:")
         Message.print(sender, "/nodesadmin reload${ChatColor.WHITE}: Reloads modules of plugin")
         Message.print(sender, "/nodesadmin war${ChatColor.WHITE}: Enable/disable war")
+        Message.print(sender, "/nodesadmin surrender reset <town>${ChatColor.WHITE}: Clear a town's surrender cooldown")
         Message.print(sender, "/nodesadmin town${ChatColor.WHITE}: Manage towns (see \"/nodesadmin town help\")")
         Message.print(sender, "/nodesadmin nation${ChatColor.WHITE}: Manage nations (see \"/nodesadmin nation help\")")
         Message.print(sender, "/nodesadmin portgroup${ChatColor.WHITE}: Manage port groups (see \"/nodesadmin portgroup help\")")
@@ -764,6 +775,23 @@ public class NodesAdminCommand :
         if (m > 0) parts.add("${m}m")
         if (parts.isEmpty()) parts.add("${ms / 1000L}s")
         return parts.joinToString(" ")
+    }
+
+    private fun adminSurrender(sender: CommandSender, args: Array<String>) {
+        if (args.size < 3 || !args[1].equals("reset", true)) {
+            Message.print(sender, "Usage: /nda surrender reset <town>")
+            return
+        }
+        val town = Nodes.getTownFromName(args[2])
+        if (town == null) {
+            Message.error(sender, "Town not found: ${args[2]}")
+            return
+        }
+        if (phonon.nodes.surrender.Surrender.resetCooldown(town)) {
+            Message.print(sender, "Surrender cooldown of ${town.name} cleared")
+        } else {
+            Message.print(sender, "${town.name} has no surrender cooldown")
+        }
     }
 
     private fun war(sender: CommandSender, args: Array<String>) {
