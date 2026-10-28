@@ -82,6 +82,7 @@
     ["Borders", ["borders"]],
     ["Town & nation names", ["townLabels", "nationLabels"]],
     ["Territory names", ["terrLabels"]],
+    ["Territory IDs", ["terrIds"]],
     ["Resources", ["resources"]],
     ["Players", ["players"]],
     ["War", ["war", "warzones", "raids"]],
@@ -94,6 +95,7 @@
     ["townLabels", "Town names", true],
     ["nationLabels", "Nation names", true],
     ["terrLabels", "Territory names", false],
+    ["terrIds", "Territory IDs", false],
     ["resources", "Resource icons", true],
     ["players", "Players", true],
     ["war", "War flags", true],
@@ -138,7 +140,7 @@
   };
 
   const G = {}; // layer groups by name
-  for (const k of ["terr", "occ", "borders", "zones", "townLabels", "nationLabels", "terrLabels", "resources", "players", "flags", "raids", "forts", "outposts", "ports", "towers", "refineries", "drops", "grid"]) {
+  for (const k of ["terr", "occ", "borders", "zones", "townLabels", "nationLabels", "terrLabels", "terrIds", "resources", "players", "flags", "raids", "forts", "outposts", "ports", "towers", "refineries", "drops", "grid"]) {
     G[k] = L.layerGroup();
   }
   const terrPolys = new Map(); // id -> L.Polygon
@@ -533,6 +535,14 @@
         html: `<div class="lbl terr">${esc(t.name)}</div>`,
       });
     }
+    for (const t of S.terr.values()) {
+      const txt = "#" + t.id;
+      labelDefs.push({
+        kind: "terrid", latlng: ll(t.core[0] * 16 + 8, t.core[1] * 16 + 8), priority: (t.chunks.length >> 1) - 1000,
+        w: textWidth(txt, 10.5, 600, 0), h: 13,
+        html: `<div class="lbl terr id">${txt}</div>`,
+      });
+    }
     labelDefs.sort((a, b) => b.priority - a.priority);
     layoutLabels();
   }
@@ -578,18 +588,19 @@
   }
 
   function layoutLabels() {
-    G.townLabels.clearLayers(); G.nationLabels.clearLayers(); G.terrLabels.clearLayers();
+    G.townLabels.clearLayers(); G.nationLabels.clearLayers(); G.terrLabels.clearLayers(); G.terrIds.clearLayers();
     const z = map.getZoom();
     const scale = Math.pow(2, z); // screen pixels per block
     const show = {
       nation: prefs.layers.nationLabels && z <= -3,
       town: prefs.layers.townLabels && z >= -3,
       terr: prefs.layers.terrLabels && z >= -1,
+      terrid: prefs.layers.terrIds && z >= -2,
     };
     const size = map.getSize();
     const pad = 3;
     const placed = [];
-    const group = { nation: G.nationLabels, town: G.townLabels, terr: G.terrLabels };
+    const group = { nation: G.nationLabels, town: G.townLabels, terr: G.terrLabels, terrid: G.terrIds };
     for (const d of labelDefs) {
       if (!show[d.kind]) continue;
       if (d.kind === "nation") Object.assign(d, fitNation(d, scale));
@@ -1188,6 +1199,7 @@
       townLabels: true, // layoutLabels decides what fits at each zoom
       nationLabels: true,
       terrLabels: true,
+      terrIds: true,
       resources: prefs.layers.resources && z >= -1,
       players: prefs.layers.players,
       occ: prefs.layers.war, flags: prefs.layers.war,

@@ -1,10 +1,15 @@
 package phonon.nodesmap.editor
 
+import com.google.gson.JsonArray
+import com.google.gson.JsonObject
+import com.google.gson.JsonParser
 import org.bukkit.Server
 import phonon.nodesmap.web.WebServer.ApiRequest
 import phonon.nodesmap.web.WebServer.ApiResponse
+import java.io.File
 import java.lang.reflect.Method
 import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.Base64
 import java.util.UUID
@@ -26,18 +31,69 @@ class EditorApi(
     private val server: Server,
     private val logger: Logger,
     @Volatile var sessionMinutes: Int,
+    private val sessionFile: File? = null,
 ) {
     class Session(val user: String, val uuid: UUID?, val expiresAt: Long)
 
+    // keyed by SHA-256 of the token, so the saved file can't be used to log in
     private val sessions = ConcurrentHashMap<String, Session>()
     private val random = SecureRandom()
+
+    private fun hash(token: String): String =
+        MessageDigest.getInstance("SHA-256").digest(token.toByteArray(StandardCharsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
+
+    init {
+        load()
+    }
+
+    private fun load() {
+        val f = sessionFile ?: return
+        if (!f.exists()) return
+        try {
+            val now = System.currentTimeMillis()
+            f.reader().use { r ->
+                for (el in JsonParser.parseReader(r).asJsonObject.getAsJsonArray("sessions")) {
+                    val o = el.asJsonObject
+                    val exp = o.get("expiresAt").asLong
+                    if (exp < now) continue
+                    val uuid = o.get("uuid")?.takeIf { !it.isJsonNull }?.asString?.let { UUID.fromString(it) }
+                    sessions[o.get("hash").asString] = Session(o.get("user").asString, uuid, exp)
+                }
+            }
+        } catch (e: Exception) {
+            logger.warning("[NodesMap] could not read editor sessions: ${e.message}")
+        }
+    }
+
+    private fun save() {
+        val f = sessionFile ?: return
+        try {
+            val arr = JsonArray()
+            for ((h, s) in sessions) {
+                val o = JsonObject()
+                o.addProperty("hash", h)
+                o.addProperty("user", s.user)
+                o.addProperty("uuid", s.uuid?.toString())
+                o.addProperty("expiresAt", s.expiresAt)
+                arr.add(o)
+            }
+            val root = JsonObject()
+            root.add("sessions", arr)
+            f.parentFile?.mkdirs()
+            f.writeText(root.toString())
+        } catch (e: Exception) {
+            logger.warning("[NodesMap] could not save editor sessions: ${e.message}")
+        }
+    }
 
     fun createSession(user: String, uuid: UUID?): String {
         purge()
         val bytes = ByteArray(32)
         random.nextBytes(bytes)
         val token = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
-        sessions[token] = Session(user, uuid, System.currentTimeMillis() + sessionMinutes * 60_000L)
+        sessions[hash(token)] = Session(user, uuid, System.currentTimeMillis() + sessionMinutes * 60_000L)
+        save()
         return token
     }
 
@@ -49,6 +105,7 @@ class EditorApi(
         } else {
             sessions.values.removeIf { it.user.equals(user, ignoreCase = true) }
         }
+        save()
         return before - sessions.size
     }
 
@@ -59,9 +116,10 @@ class EditorApi(
 
     private fun session(token: String?): Session? {
         if (token == null) return null
-        val s = sessions[token] ?: return null
+        val key = hash(token)
+        val s = sessions[key] ?: return null
         if (s.expiresAt < System.currentTimeMillis()) {
-            sessions.remove(token)
+            sessions.remove(key)
             return null
         }
         return s

@@ -26,8 +26,9 @@ web:
 editor:
   # Web map editor for territories and resource nodes (/nodesmap editor).
   enabled: true
-  # How long an editor login link stays valid.
-  session-minutes: 120
+  # How long an editor login link stays valid. Logins are saved, so they
+  # survive server restarts until they expire (1440 = 24 hours).
+  session-minutes: 1440
 
 render:
   # Re-render chunks that changed (block place/break, explosions, growth...).

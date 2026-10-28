@@ -82,14 +82,23 @@
   }
 
   // ---------------------------------------------------------------- loading
+  const TOKEN_KEY = "nodesmap.token";
+  // localStorage so the login survives closing the browser (the server keeps it for 24h)
+  function saveToken(t) {
+    try { localStorage.setItem(TOKEN_KEY, t); } catch { /* ignore */ }
+  }
+  function forgetToken() {
+    try { localStorage.removeItem(TOKEN_KEY); } catch { /* ignore */ }
+    try { sessionStorage.removeItem(TOKEN_KEY); } catch { /* ignore */ }
+  }
   function readToken() {
     const m = location.hash.match(/token=([A-Za-z0-9_-]+)/);
     if (m) {
-      try { sessionStorage.setItem("nodesmap.token", m[1]); } catch { /* ignore */ }
+      saveToken(m[1]);
       history.replaceState(null, "", location.pathname + location.search);
       return m[1];
     }
-    try { return sessionStorage.getItem("nodesmap.token"); } catch { return null; }
+    try { return localStorage.getItem(TOKEN_KEY) || sessionStorage.getItem(TOKEN_KEY); } catch { return null; }
   }
 
   async function init() {
@@ -120,6 +129,7 @@
     } catch (e) {
       modal(`<h2>Session expired</h2><p>${esc(e.message)}</p><div class="foot"><button class="btn" data-close>Edit a file offline</button></div>`);
       E.token = null;
+      forgetToken();
       setSaveState();
       return;
     }

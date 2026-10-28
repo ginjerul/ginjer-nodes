@@ -74,7 +74,7 @@ class NodesMapPlugin : JavaPlugin() {
 
         if (cfg.webEnabled) {
             try {
-                val ed = EditorApi(server, logger, cfg.editorSessionMinutes)
+                val ed = EditorApi(server, logger, cfg.editorSessionMinutes, java.io.File(dataFolder, "editor-sessions.json"))
                 editor = ed
                 web = WebServer(webRoot, cfg.webBind, cfg.webPort, cfg.webThreads, logger).also {
                     it.api = { req ->
