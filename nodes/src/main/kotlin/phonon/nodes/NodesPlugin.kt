@@ -229,6 +229,9 @@ public class NodesPlugin : JavaPlugin() {
         // web map export (after every system above has loaded its state)
         phonon.nodes.map.MapExporter.start(this)
 
+        // a timed war keeps counting down across restarts (boss bar + auto end)
+        server.scheduler.runTask(this, Runnable { phonon.nodes.war.WarTimer.restore() })
+
         val timeEnd = System.currentTimeMillis()
         val timeLoad = timeEnd - timeStart
         logger.info("Enabled in ${timeLoad}ms")

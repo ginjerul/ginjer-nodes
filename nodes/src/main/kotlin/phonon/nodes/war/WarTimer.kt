@@ -1,5 +1,7 @@
 package phonon.nodes.war
 
+import com.google.gson.JsonObject
+import com.google.gson.JsonParser
 import org.bukkit.Bukkit
 import org.bukkit.ChatColor
 import org.bukkit.boss.BarColor
@@ -7,15 +9,23 @@ import org.bukkit.boss.BarStyle
 import org.bukkit.boss.BossBar
 import org.bukkit.entity.Player
 import org.bukkit.scheduler.BukkitTask
+import phonon.nodes.Config
 import phonon.nodes.Message
 import phonon.nodes.Nodes
 import phonon.nodes.mining.MiningBoost
 import phonon.nodes.stats.WarStats
+import java.nio.file.Files
+import java.nio.file.Path
+import java.nio.file.Paths
 
 /**
  * Schedules automatic war/skirmish disable and shows a boss bar countdown.
+ * The timer is saved to warTimer.json so it survives server restarts.
  */
 object WarTimer {
+    private val file: Path get() = Paths.get(Config.pathPlugin, "warTimer.json")
+    private var reason: String = ""
+
     private var endTask: BukkitTask? = null
     private var tickTask: BukkitTask? = null
 
@@ -26,6 +36,10 @@ object WarTimer {
     private var bossBar: BossBar? = null
 
     fun cancel() {
+        try {
+            Files.deleteIfExists(file)
+        } catch (_: Exception) {
+        }
         endTask?.cancel()
         endTask = null
         tickTask?.cancel()
@@ -41,12 +55,66 @@ object WarTimer {
     fun endsAt(): Long = if (isTimed()) endsAtMs else 0L
 
     fun scheduleDisable(durationMs: Long, reason: String, barLabel: String = "War") {
+        val total = durationMs.coerceAtLeast(1L)
+        start(System.currentTimeMillis() + total, total, reason, barLabel)
+        save()
+    }
+
+    /**
+     * After a restart: pick the saved timer back up. If it ran out while the
+     * server was off, end the war now.
+     */
+    fun restore() {
+        if (!Files.exists(file)) return
+        val o: JsonObject = try {
+            JsonParser.parseString(Files.readString(file)).asJsonObject
+        } catch (e: Exception) {
+            Nodes.plugin?.logger?.warning("[Nodes] couldn't read warTimer.json: ${e.message}")
+            return
+        }
+        val ends = o.get("endsAt")?.asLong ?: 0L
+        val total = o.get("total")?.asLong ?: 1L
+        val why = o.get("reason")?.asString ?: "War time expired"
+        val bar = o.get("label")?.asString ?: "War"
+        if (!Nodes.war.enabled) {
+            cancel()
+            return
+        }
+        if (ends <= System.currentTimeMillis()) {
+            Nodes.disableWar()
+            WarStats.endWarSessionAndSave()
+            Message.broadcast("${ChatColor.BOLD}[War] Disabled — $why (ran out while the server was offline)")
+            phonon.nodes.util.DiscordRelay.war("**[War]** Nodes war **disabled** (timer ended)")
+            cancel()
+            return
+        }
+        start(ends, total, why, bar)
+        save()
+        Nodes.plugin?.logger?.info("[Nodes] war timer restored: ${formatLeft(ends - System.currentTimeMillis())} left")
+    }
+
+    private fun save() {
+        try {
+            val o = JsonObject()
+            o.addProperty("endsAt", endsAtMs)
+            o.addProperty("total", totalDurationMs)
+            o.addProperty("label", label)
+            o.addProperty("reason", reason)
+            Files.writeString(file, o.toString())
+        } catch (e: Exception) {
+            Nodes.plugin?.logger?.warning("[Nodes] couldn't save warTimer.json: ${e.message}")
+        }
+    }
+
+    private fun start(endsAt: Long, total: Long, why: String, barLabel: String) {
         cancel()
         val plugin = Nodes.plugin ?: return
 
         label = barLabel
-        totalDurationMs = durationMs.coerceAtLeast(1L)
-        endsAtMs = System.currentTimeMillis() + totalDurationMs
+        reason = why
+        totalDurationMs = total
+        endsAtMs = endsAt
+        val durationMs = (endsAt - System.currentTimeMillis()).coerceAtLeast(1L)
 
         ensureBossBar()
         refreshBossBar()
@@ -65,7 +133,7 @@ object WarTimer {
                 if (Nodes.war.enabled) {
                     Nodes.disableWar()
                     WarStats.endWarSessionAndSave()
-                    Message.broadcast("${ChatColor.BOLD}[War] Disabled — $reason")
+                    Message.broadcast("${ChatColor.BOLD}[War] Disabled — $why")
                     phonon.nodes.util.DiscordRelay.war("**[War]** Nodes war **disabled** (timer ended)")
                 }
                 cancel()

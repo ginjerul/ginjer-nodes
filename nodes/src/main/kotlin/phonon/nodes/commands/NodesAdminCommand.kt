@@ -814,7 +814,7 @@ public class NodesAdminCommand :
                     // War KDR is only tracked for full war, so no war session here
 
                     if (durationMs != null) {
-                        phonon.nodes.war.WarTimer.scheduleDisable(durationMs, "Skirmish time expired")
+                        phonon.nodes.war.WarTimer.scheduleDisable(durationMs, "Skirmish time expired", "Skirmish")
                         Message.broadcast(
                             "${ChatColor.DARK_RED}${ChatColor.BOLD}Border skirmishes enabled for ${formatWarDuration(durationMs)}",
                         )
