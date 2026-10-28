@@ -223,12 +223,20 @@
     return { neighbors: out, edge };
   }
 
+  /**
+   * Keep a territory's core valid. Cores you placed yourself (Core tool, or
+   * loaded from the server) stay put while they're inside the territory;
+   * cores of territories you're painting follow the middle as the shape grows.
+   */
   function fixCore(t) {
     if (!t.chunks.size) { t.core = null; return; }
-    if (t.core && t.chunks.has(K(t.core[0], t.core[1]))) return;
+    if (!t.coreAuto && t.core && t.chunks.has(K(t.core[0], t.core[1]))) return;
+    t.core = coreFor(t);
+  }
+  function coreFor(t) {
     const cells = [];
     for (const k of t.chunks) cells.push([KX(k), KZ(k)]);
-    t.core = NodesGeom.labelCell(cells);
+    return NodesGeom.centerCell(cells);
   }
 
   function components(chunks) {
@@ -351,7 +359,7 @@
   function snap(id) {
     const t = E.terr.get(id);
     if (!t) return null;
-    return { id, name: t.name, color: t.color, core: t.core ? [...t.core] : null, chunks: new Set(t.chunks), nodes: [...t.nodes], extra: JSON.parse(JSON.stringify(t.extra)) };
+    return { id, name: t.name, color: t.color, core: t.core ? [...t.core] : null, coreAuto: !!t.coreAuto, chunks: new Set(t.chunks), nodes: [...t.nodes], extra: JSON.parse(JSON.stringify(t.extra)) };
   }
   function begin(label) {
     op = { label, before: new Map(), res: null };
@@ -400,7 +408,7 @@
   function sameSnap(a, b) {
     if (!a || !b) return a === b;
     if (a.name !== b.name || a.chunks.size !== b.chunks.size || a.nodes.join() !== b.nodes.join()) return false;
-    if (String(a.core) !== String(b.core)) return false;
+    if (String(a.core) !== String(b.core) || !!a.coreAuto !== !!b.coreAuto) return false;
     for (const k of a.chunks) if (!b.chunks.has(k)) return false;
     return true;
   }
@@ -414,7 +422,7 @@
     }
     for (const [id, s] of states) {
       if (!s) { E.sel.delete(id); continue; }
-      const t = { id, name: s.name, color: s.color, core: s.core ? [...s.core] : null, chunks: new Set(s.chunks), nodes: [...s.nodes], extra: JSON.parse(JSON.stringify(s.extra)) };
+      const t = { id, name: s.name, color: s.color, core: s.core ? [...s.core] : null, coreAuto: !!s.coreAuto, chunks: new Set(s.chunks), nodes: [...s.nodes], extra: JSON.parse(JSON.stringify(s.extra)) };
       E.terr.set(id, t);
       for (const k of t.chunks) E.owner.set(k, id);
       E.nextId = Math.max(E.nextId, id + 1);
@@ -450,7 +458,7 @@
   function newTerritory() {
     const id = E.nextId++;
     touch(id);
-    const t = { id, name: "", color: -1, core: null, chunks: new Set(), nodes: [], extra: {} };
+    const t = { id, name: "", color: -1, core: null, coreAuto: true, chunks: new Set(), nodes: [], extra: {} };
     E.terr.set(id, t);
     return t;
   }
@@ -794,6 +802,7 @@
       begin("Set core");
       touch(id);
       E.terr.get(id).core = [cx, cz];
+      E.terr.get(id).coreAuto = false;
       end();
       select([id]);
     } else if (E.tool === "fill") {
@@ -954,6 +963,7 @@
       for (const n of o.nodes) if (!t.nodes.includes(n)) t.nodes.push(n);
       if (!t.name && o.name) t.name = o.name;
     }
+    t.coreAuto = true;
     end();
     select([into]);
     toast(`Merged ${ids.length} territories into #${into}`);
@@ -1265,7 +1275,7 @@
     $("#terr-summary").textContent = q ? `${list.length} match${list.length === 1 ? "" : "es"}` : "";
     $("#terr-list").innerHTML = shown.map((t) => {
       const c = E.claimed.get(t.id);
-      const icons = t.nodes.slice(0, 5).map((n) => { const u = iconUrl(n); return u ? `<img src="${esc(u)}" alt="" title="${esc(n)}">` : `<span>${esc(n)}</span>`; }).join("");
+      const icons = t.nodes.slice(0, 5).map((n) => { const u = iconUrl(n); return u ? `<img src="${esc(u)}" alt="" data-tipres="${esc(n)}">` : `<span data-tipres="${esc(n)}">${esc(n)}</span>`; }).join("");
       const split = pieces.get(t.id) > 1 ? `<span class="warn" title="split into separate pieces">⚠</span>` : "";
       return `<div class="trow ${E.sel.has(t.id) ? "sel" : ""}" data-id="${t.id}"><span class="sw" style="background:${terrColor(t)}"></span><div><div class="nm">${c ? `<span class="lock" title="claimed by ${esc(prettyName(c.town))}">🔒</span> ` : ""}${esc(t.name || "Unnamed")} <span style="color:var(--faint);font-weight:400">#${t.id}</span> ${split}</div><div class="sub">${c ? esc(prettyName(c.nation || c.town)) + (icons ? " · " : "") : ""}${icons}</div></div><span class="stat">${t.chunks.size}</span></div>`;
     }).join("") + (list.length > shown.length ? `<div class="hint">…${list.length - shown.length} more, search to narrow down</div>` : "") + (!list.length ? `<div class="empty">${E.terr.size ? "Nothing matches" : "No territories yet. Use New (N) to paint one."}</div>` : "");
@@ -1281,7 +1291,7 @@
       const u = iconUrl(n);
       const am = E.resources[n]?.attacker_time_multiplier;
       const tag = typeof am === "number" && am !== 1 ? ` <span class="badge" style="padding:1px 6px;font-size:11px">capture ×${am}</span>` : "";
-      return `<div class="trow ${n === resSel ? "sel" : ""}" data-res="${esc(n)}">${u ? `<img src="${esc(u)}" alt="" style="width:16px;height:16px;image-rendering:pixelated">` : `<span class="sw" style="background:#555"></span>`}<div class="nm">${esc(n)}${tag}</div><span class="stat">${resCount(n)}</span></div>`;
+      return `<div class="trow ${n === resSel ? "sel" : ""}" data-res="${esc(n)}" data-tipres="${esc(n)}">${u ? `<img src="${esc(u)}" alt="" style="width:16px;height:16px;image-rendering:pixelated">` : `<span class="sw" style="background:#555"></span>`}<div class="nm">${esc(n)}${tag}</div><span class="stat">${resCount(n)}</span></div>`;
     }).join("") || `<div class="empty">No resource nodes yet</div>`;
     renderResEditor();
   }
@@ -1381,16 +1391,23 @@
           <dt>Chunks</dt><dd>${t.chunks.size}</dd>
           <dt>Claim cost</dt><dd>${terrCost(t)}</dd>
           ${attackMult(t) !== 1 ? `<dt>Capture time</dt><dd>×${+attackMult(t).toFixed(2)}</dd>` : ""}
-          <dt>Core chunk</dt><dd>${t.core ? t.core.join(", ") : "—"} <a href="#" id="in-core" title="Pick a new core on the map">change</a></dd>
+          <dt>Core chunk</dt><dd>${t.core ? t.core.join(", ") : "—"} <a href="#" id="in-core" title="Pick a new core on the map">change</a> · <a href="#" id="in-center" title="Move the core to the middle of the territory">center</a></dd>
           <dt>Neighbors</dt><dd>${neighbors.size}${edge ? " · borders wilderness" : ""}</dd>
         </dl>
         <div class="section-h">Resources</div>
-        <div class="chips">${t.nodes.map((n) => { const u = iconUrl(n); return `<span class="chip plain">${u ? `<img src="${esc(u)}" alt="">` : ""}${esc(n)}${E.resources[n] ? "" : " ⚠"}<span class="x" data-rm="${esc(n)}" title="Remove">×</span></span>`; }).join("") || `<span class="hint" style="margin:0">None</span>`}</div>
+        <div class="chips">${t.nodes.map((n) => { const u = iconUrl(n); return `<span class="chip plain" data-tipres="${esc(n)}">${u ? `<img src="${esc(u)}" alt="">` : ""}${esc(n)}${E.resources[n] ? "" : " ⚠"}<span class="x" data-rm="${esc(n)}" title="Remove">×</span></span>`; }).join("") || `<span class="hint" style="margin:0">None</span>`}</div>
         <div class="field" style="margin-top:8px"><select id="in-add"><option value="">Add a resource…</option>${resOptions}</select></div>
         <div class="actions">${locked ? "" : `<button class="btn small danger" id="in-del">Delete</button>`}<button class="btn small" id="in-zoom">Zoom to</button></div>`;
       const name = $("#in-name");
       name.onchange = () => { begin("Rename"); touch(t.id); t.name = name.value.trim(); end(); };
       $("#in-core").onclick = (e) => { e.preventDefault(); setTool("core"); toast("Click a chunk inside the territory to make it the core"); };
+      $("#in-center").onclick = (e) => {
+        e.preventDefault();
+        const c = coreFor(t);
+        if (t.core && c && t.core[0] === c[0] && t.core[1] === c[1]) return toast("The core is already in the middle");
+        begin("Center core"); touch(t.id); t.core = c; t.coreAuto = false; end();
+        toast(`Core moved to ${c.join(", ")}`);
+      };
       $("#in-zoom").onclick = () => zoomTo([t.id]);
       if ($("#in-town")) $("#in-town").onclick = (e) => { e.preventDefault(); pickTown(c.town, false); };
       if ($("#in-split")) $("#in-split").onclick = (e) => { e.preventDefault(); splitDisconnected(); };
@@ -1415,6 +1432,7 @@
         <button class="btn small" id="ms-gen">Regenerate…</button>
         <button class="btn small" id="ms-dist">Add resource…</button>
         <button class="btn small" id="ms-split">Split pieces</button>
+        <button class="btn small" id="ms-center" title="Move each selected territory's core to its middle">Center cores</button>
         <button class="btn small" id="ms-zoom">Zoom to</button>
         <button class="btn small danger" id="ms-del">Delete all</button>
       </div>
@@ -1422,6 +1440,18 @@
     $("#ms-merge").onclick = mergeSelected;
     $("#ms-del").onclick = deleteSelected;
     $("#ms-split").onclick = splitDisconnected;
+    $("#ms-center").onclick = () => {
+      begin("Center cores");
+      let n = 0;
+      for (const id of ids) {
+        const t = E.terr.get(id);
+        const c = coreFor(t);
+        if (!c || (t.core && t.core[0] === c[0] && t.core[1] === c[1])) continue;
+        touch(id); t.core = c; t.coreAuto = false; n++;
+      }
+      end();
+      toast(n ? `Moved ${n} core${n === 1 ? "" : "s"} to the middle` : "All cores are already in the middle");
+    };
     $("#ms-zoom").onclick = () => zoomTo(ids);
     $("#ms-gen").onclick = () => generateDialog();
     $("#ms-dist").onclick = () => distributeDialog();
@@ -1777,8 +1807,42 @@
     $("#player-names").innerHTML = d.players.map((p) => `<option value="${esc(p)}">`).join("");
   }
 
+  // ---------------------------------------------------------------- resource hover (like the old Dynmap editor)
+  function resTipHtml(n) {
+    const r = E.resources[n];
+    if (!r) return `<b>${esc(n)}</b><div class="tip-warn">Not defined: add it in the Resources tab or remove it</div>`;
+    const u = iconUrl(n);
+    return `<div class="tip-h">${u ? `<img src="${esc(u)}" alt="">` : ""}<b>${esc(n)}</b><span>${resCount(n)} territories</span></div><pre>${esc(JSON.stringify(r, null, 2))}</pre>`;
+  }
+  function setupResTips() {
+    const tip = document.createElement("div");
+    tip.id = "res-tip";
+    tip.hidden = true;
+    document.body.appendChild(tip);
+    let cur = null;
+    const place = (e) => {
+      const pad = 14, w = tip.offsetWidth, h = tip.offsetHeight;
+      let x = e.clientX + pad, y = e.clientY + pad;
+      if (x + w > innerWidth - 8) x = Math.max(8, e.clientX - w - pad);
+      if (y + h > innerHeight - 8) y = Math.max(8, innerHeight - h - 8);
+      tip.style.left = x + "px"; tip.style.top = y + "px";
+    };
+    document.addEventListener("mouseover", (e) => {
+      const el = e.target.closest("[data-tipres]");
+      if (el === cur) return;
+      cur = el;
+      if (!el) { tip.hidden = true; return; }
+      tip.innerHTML = resTipHtml(el.dataset.tipres);
+      tip.hidden = false;
+      place(e);
+    });
+    document.addEventListener("mousemove", (e) => { if (cur) place(e); });
+    document.addEventListener("mousedown", () => { tip.hidden = true; cur = null; }, true);
+  }
+
   // ---------------------------------------------------------------- wiring
   function buildUi() {
+    setupResTips();
     $$("#tools [data-tool]").forEach((b) => (b.onclick = () => setTool(b.dataset.tool)));
     $("#brush-size").oninput = (e) => setBrush(+e.target.value);
     $("#brush-size").onchange = (e) => e.target.blur();
