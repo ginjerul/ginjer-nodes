@@ -1277,7 +1277,7 @@
       const c = E.claimed.get(t.id);
       const icons = t.nodes.slice(0, 5).map((n) => { const u = iconUrl(n); return u ? `<img src="${esc(u)}" alt="" data-tipres="${esc(n)}">` : `<span data-tipres="${esc(n)}">${esc(n)}</span>`; }).join("");
       const split = pieces.get(t.id) > 1 ? `<span class="warn" title="split into separate pieces">⚠</span>` : "";
-      return `<div class="trow ${E.sel.has(t.id) ? "sel" : ""}" data-id="${t.id}"><span class="sw" style="background:${terrColor(t)}"></span><div><div class="nm">${c ? `<span class="lock" title="claimed by ${esc(prettyName(c.town))}">🔒</span> ` : ""}${esc(t.name || "Unnamed")} <span style="color:var(--faint);font-weight:400">#${t.id}</span> ${split}</div><div class="sub">${c ? esc(prettyName(c.nation || c.town)) + (icons ? " · " : "") : ""}${icons}</div></div><span class="stat">${t.chunks.size}</span></div>`;
+      return `<div class="trow ${E.sel.has(t.id) ? "sel" : ""}" data-id="${t.id}"><span class="sw" style="background:${terrColor(t)}"></span><div><div class="nm">${c ? `<span class="lock" title="claimed by ${esc(prettyName(c.town))}">🔒</span> ` : ""}${t.name ? `${esc(t.name)} <span style="color:var(--faint);font-weight:400">#${t.id}</span>` : `Territory #${t.id}`} ${split}</div><div class="sub">${c ? esc(prettyName(c.nation || c.town)) + (icons ? " · " : "") : ""}${icons}</div></div><span class="stat">${t.chunks.size}</span></div>`;
     }).join("") + (list.length > shown.length ? `<div class="hint">…${list.length - shown.length} more, search to narrow down</div>` : "") + (!list.length ? `<div class="empty">${E.terr.size ? "Nothing matches" : "No territories yet. Use New (N) to paint one."}</div>` : "");
   }
 
@@ -1384,7 +1384,7 @@
       const pieces = components(t.chunks).length;
       el.innerHTML = `
         <div class="info-kicker">Territory #${t.id}</div>
-        <div class="field"><span>Name</span><input id="in-name" value="${esc(t.name)}" placeholder="Unnamed"></div>
+        <div class="field"><span>Name</span><input id="in-name" value="${esc(t.name)}" placeholder="No name (optional)"></div>
         ${c ? `<div class="note">${c.kind === "occupied" ? "Occupied" : "Claimed"} by <b>${E.townsOnline ? `<a href="#" id="in-town">${esc(prettyName(c.town))}</a>` : esc(prettyName(c.town))}</b>${c.nation ? ` (${esc(prettyName(c.nation))})` : ""}.${locked ? " Its land is locked (Options → Lock claimed land); name and resources can still be edited." : ""} Changes need confirming on apply.</div>` : ""}
         ${pieces > 1 ? `<div class="note warn">This territory is in ${pieces} separate pieces. <a href="#" id="in-split">Split them up</a></div>` : ""}
         <dl class="kv">

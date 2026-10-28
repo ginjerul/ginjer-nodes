@@ -681,7 +681,7 @@
       const t = S.terr.get(+id);
       if (!t || !lvl) continue;
       const town = S.owner.get(+id);
-      const m = pin("fort", `F${lvl}`, ll(t.core[0] * 16 + 15, t.core[1] * 16 + 1), `<b>Fortification level ${lvl}</b><br>${esc(t.name || "Territory " + t.id)}`, () => showTerritory(t.id));
+      const m = pin("fort", `F${lvl}`, ll(t.core[0] * 16 + 15, t.core[1] * 16 + 1), `<b>Fortification level ${lvl}</b><br>${esc(t.name || "Territory #" + t.id)}`, () => showTerritory(t.id));
       m.options.icon.options.html = `<div class="pin fort" style="background:${town ? shade(town.color, -0.35) : "#333"}">F${lvl}</div>`;
       G.forts.addLayer(m);
     }
@@ -754,7 +754,7 @@
         pane: "flags",
         icon: L.divIcon({ className: "", iconSize: null, html: `<div class="flag" style="--c:${color};--p:${pct}"><div class="ring"></div><div class="core">${pct}</div></div>` }),
       });
-      m.bindTooltip(() => `<b>${esc(a.town)}</b> attacking ${esc(terr ? terr.name || "territory " + terr.id : "chunk")}<br>by ${esc(a.attacker || "?")} · ${pct}% · ${fmtDur(attackRemaining(a))} left`, { className: "nm-tip", direction: "top", offset: [0, -18] });
+      m.bindTooltip(() => `<b>${esc(a.town)}</b> attacking ${esc(terr ? terr.name || "territory #" + terr.id : "chunk")}<br>by ${esc(a.attacker || "?")} · ${pct}% · ${fmtDur(attackRemaining(a))} left`, { className: "nm-tip", direction: "top", offset: [0, -18] });
       if (terr) m.on("click", () => showTerritory(terr.id));
       G.flags.addLayer(m);
     }
@@ -949,8 +949,8 @@
     if (t.atk && t.atk !== 1) badges.push(`<span class="badge ${t.atk > 1 ? "ok" : "war"}" title="Flag attacks here take ${+t.atk.toFixed(2)}× as long">${t.atk > 1 ? "Fortified" : "Weak"}: capture ×${+t.atk.toFixed(2)}</span>`);
     const res = t.resources.map((r) => { const u = resIconUrl(r); return `<div class="res" data-tipres="${esc(r)}">${u ? `<img src="${esc(u)}" alt="">` : ""}${esc(prettyName(r))}</div>`; }).join("");
     openInfo(`
-      <div class="info-kicker">Territory #${t.id}</div>
-      <h2 class="info-title">${esc(t.name || "Unnamed territory")}</h2>
+      <div class="info-kicker">${t.name ? `Territory #${t.id}` : "Territory"}</div>
+      <h2 class="info-title">${t.name ? esc(t.name) : `#${t.id}`}</h2>
       <div class="info-sub">${town ? `Owned by ${townChip(town.name)}${town.nation ? " " + nationChip(town.nation) : ""}` : "Unclaimed"}</div>
       ${badges.length ? `<div class="badges">${badges.join("")}</div>` : ""}
       <dl class="kv">
@@ -1085,7 +1085,7 @@
     const t = S.terr.get(id);
     if (!t) return;
     const town = S.owner.get(id);
-    $("#hover-terr").innerHTML = `${esc(t.name || "Territory " + t.id)}${town ? " · " + esc(prettyName(town.name)) : ""}<span class="mouse-hint">${town ? "click: town · right-click: territory" : "click: territory"}</span>`;
+    $("#hover-terr").innerHTML = `${esc(t.name || "Territory #" + t.id)}${town ? " · " + esc(prettyName(town.name)) : ""}<span class="mouse-hint">${town ? "click: town · right-click: territory" : "click: territory"}</span>`;
   }
   // territory clicks: O(1) chunk lookup instead of thousands of interactive svg paths
   // left click: the town that owns the land (or the territory if nobody does); right click / long press: the territory
