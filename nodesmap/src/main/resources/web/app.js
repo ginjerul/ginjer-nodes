@@ -620,11 +620,11 @@
   function drawResources() {
     G.resources.clearLayers();
     for (const t of S.terr.values()) {
-      const urls = t.resources.map(resIconUrl).filter(Boolean).slice(0, 3);
-      if (!urls.length) continue;
+      const icons = t.resources.map((r) => [r, resIconUrl(r)]).filter(([, u]) => u).slice(0, 3);
+      if (!icons.length) continue;
       G.resources.addLayer(L.marker(ll(t.core[0] * 16 + 8, t.core[1] * 16 + 8), {
         pane: "labels", interactive: false, keyboard: false,
-        icon: L.divIcon({ className: "", iconSize: null, html: `<div class="res-stack" style="margin-top:18px">${urls.map((u) => `<img src="${esc(u)}" alt="">`).join("")}</div>` }),
+        icon: L.divIcon({ className: "", iconSize: null, html: `<div class="res-stack" style="margin-top:18px">${icons.map(([r, u]) => `<img src="${esc(u)}" alt="" data-tipres="${esc(r)}">`).join("")}</div>` }),
       }));
     }
   }
@@ -947,7 +947,7 @@
     if (town && town.supplied) badges.push(supplyCut(id, town) ? `<span class="badge war">Supply cut</span>` : `<span class="badge ok">Supplied</span>`);
     if (t.wild) badges.push(`<span class="badge">Borders wilderness</span>`);
     if (t.atk && t.atk !== 1) badges.push(`<span class="badge ${t.atk > 1 ? "ok" : "war"}" title="Flag attacks here take ${+t.atk.toFixed(2)}× as long">${t.atk > 1 ? "Fortified" : "Weak"}: capture ×${+t.atk.toFixed(2)}</span>`);
-    const res = t.resources.map((r) => { const u = resIconUrl(r); return `<div class="res">${u ? `<img src="${esc(u)}" alt="">` : ""}${esc(r)}</div>`; }).join("");
+    const res = t.resources.map((r) => { const u = resIconUrl(r); return `<div class="res" data-tipres="${esc(r)}">${u ? `<img src="${esc(u)}" alt="">` : ""}${esc(prettyName(r))}</div>`; }).join("");
     openInfo(`
       <div class="info-kicker">Territory #${t.id}</div>
       <h2 class="info-title">${esc(t.name || "Unnamed territory")}</h2>
@@ -1085,13 +1085,21 @@
     const t = S.terr.get(id);
     if (!t) return;
     const town = S.owner.get(id);
-    $("#hover-terr").textContent = `${t.name || "Territory " + t.id}${town ? " · " + town.name : ""}`;
+    $("#hover-terr").innerHTML = `${esc(t.name || "Territory " + t.id)}${town ? " · " + esc(prettyName(town.name)) : ""}<span class="mouse-hint">${town ? "click: town · right-click: territory" : "click: territory"}</span>`;
   }
   // territory clicks: O(1) chunk lookup instead of thousands of interactive svg paths
+  // left click: the town that owns the land (or the territory if nobody does); right click / long press: the territory
+  const terrAt = (latlng) => S.chunkTerr.get(NodesGeom.key(Math.floor(latlng.lng) >> 4, Math.floor(latlng.lat) >> 4));
   map.on("click", (e) => {
-    const id = S.chunkTerr.get(NodesGeom.key(Math.floor(e.latlng.lng) >> 4, Math.floor(e.latlng.lat) >> 4));
-    if (id !== undefined) showTerritory(id);
+    const id = terrAt(e.latlng);
+    const town = id !== undefined ? S.owner.get(id) : null;
+    if (town) showTown(town.name);
+    else if (id !== undefined) showTerritory(id);
     else { $("#info").hidden = true; infoTarget = null; }
+  });
+  map.on("contextmenu", (e) => {
+    const id = terrAt(e.latlng);
+    if (id !== undefined) showTerritory(id);
   });
   map.on("mousemove", (e) => {
     const x = Math.floor(e.latlng.lng), z = Math.floor(e.latlng.lat);
@@ -1115,6 +1123,61 @@
   map.on("zoomend", syncLayerVisibility);
   map.on("moveend zoomend resize", scheduleLayout);
   window.addEventListener("hashchange", applyHash);
+
+  // ---------------------------------------------------------------- resource hover cards
+  const RES_KEYS = { income: "Income", ore: "Mining drops", crops: "Crops", animals: "Animals" };
+  function fmtItem(k) { return prettyName(String(k).toLowerCase()); }
+  function resTipHtml(n) {
+    const r = S.resources[n] || {};
+    const u = resIconUrl(n);
+    let count = 0;
+    for (const t of S.terr.values()) if (t.resources.includes(n)) count++;
+    const rows = [];
+    for (const [k, label] of Object.entries(RES_KEYS)) {
+      const v = r[k];
+      if (!v || typeof v !== "object" || !Object.keys(v).length) continue;
+      const items = Object.entries(v).map(([item, amt]) => {
+        const a = Array.isArray(amt) ? `${+(amt[0] * 100).toFixed(2)}% · ${amt[1]}–${amt[2]}` : k === "ore" ? `${+(amt * 100).toFixed(2)}%` : `${amt}`;
+        return `<div><span>${esc(fmtItem(item))}</span><b>${esc(a)}</b></div>`;
+      }).join("");
+      rows.push(`<div class="tip-sec">${label}</div><div class="tip-grid">${items}</div>`);
+    }
+    const extra = [];
+    if (r.attacker_time_multiplier && r.attacker_time_multiplier !== 1) extra.push(`<div><span>Capture time</span><b>×${r.attacker_time_multiplier}</b></div>`);
+    if (r.defender_time_multiplier && r.defender_time_multiplier !== 1) extra.push(`<div><span>Retake time</span><b>×${r.defender_time_multiplier}</b></div>`);
+    if (r.cost && (r.cost.constant || (r.cost.scale && r.cost.scale !== 1))) extra.push(`<div><span>Claim cost</span><b>${r.cost.constant ? "+" + r.cost.constant : ""}${r.cost.scale && r.cost.scale !== 1 ? " ×" + r.cost.scale : ""}</b></div>`);
+    if (extra.length) rows.push(`<div class="tip-sec">Territory</div><div class="tip-grid">${extra.join("")}</div>`);
+    const known = new Set(["icon", "cost", "priority", "income", "ore", "crops", "animals", "attacker_time_multiplier", "defender_time_multiplier"]);
+    const rest = Object.fromEntries(Object.entries(r).filter(([k, v]) => !known.has(k) && !(v && typeof v === "object" && !Object.keys(v).length)));
+    if (Object.keys(rest).length) rows.push(`<div class="tip-sec">Other</div><pre>${esc(JSON.stringify(rest, null, 1))}</pre>`);
+    return `<div class="tip-h">${u ? `<img src="${esc(u)}" alt="">` : ""}<b>${esc(prettyName(n))}</b><span>${count} ${count === 1 ? "territory" : "territories"}</span></div>${rows.join("") || `<div class="tip-none">No extra details</div>`}`;
+  }
+  function setupResTips() {
+    const tip = document.createElement("div");
+    tip.id = "res-tip";
+    tip.hidden = true;
+    document.body.appendChild(tip);
+    let cur = null;
+    const place = (e) => {
+      const pad = 14, w = tip.offsetWidth, h = tip.offsetHeight;
+      let x = e.clientX + pad, y = e.clientY + pad;
+      if (x + w > innerWidth - 8) x = Math.max(8, e.clientX - w - pad);
+      if (y + h > innerHeight - 8) y = Math.max(8, innerHeight - h - 8);
+      tip.style.left = x + "px"; tip.style.top = y + "px";
+    };
+    document.addEventListener("mouseover", (e) => {
+      const el = e.target.closest ? e.target.closest("[data-tipres]") : null;
+      if (el === cur) return;
+      cur = el;
+      if (!el) { tip.hidden = true; return; }
+      tip.innerHTML = resTipHtml(el.dataset.tipres);
+      tip.hidden = false;
+      place(e);
+    });
+    document.addEventListener("mousemove", (e) => { if (cur) place(e); });
+    document.addEventListener("mousedown", () => { tip.hidden = true; cur = null; }, true);
+    map.on("zoomstart movestart", () => { tip.hidden = true; cur = null; });
+  }
 
   // ---------------------------------------------------------------- layers + modes
   function syncLayerVisibility() {
@@ -1192,6 +1255,7 @@
   }
 
   function buildUi() {
+    setupResTips();
     setSidebar(prefs.sidebar);
     $("#menu-btn").onclick = () => setSidebar(!prefs.sidebar);
     $$("#tabs button").forEach((b) => (b.onclick = () => openTab(b.dataset.tab)));

@@ -46,6 +46,8 @@ mapExport:
   livePeriodTicks: 40
   # include supply-line connectivity (computed one town per tick)
   supplyLines: true
+  # show each resource's settings (income, mining drops, capture multipliers) when hovering it on the map
+  resourceDetails: true
 
 # ===================================
 # nametag configs

@@ -62,6 +62,7 @@ public object Config {
     public var mapExportStatePeriodTicks: Long = 100L
     public var mapExportLivePeriodTicks: Long = 40L
     public var mapExportSupplyLines: Boolean = true
+    public var mapExportResourceDetails: Boolean = true // resource income/ore/etc. on the public map
 
     // ===================================
     // nametag configs
@@ -499,6 +500,7 @@ public object Config {
             Config.mapExportStatePeriodTicks = mapExportSec.getLong("statePeriodTicks", Config.mapExportStatePeriodTicks).coerceIn(20L, 12000L)
             Config.mapExportLivePeriodTicks = mapExportSec.getLong("livePeriodTicks", Config.mapExportLivePeriodTicks).coerceIn(10L, 1200L)
             Config.mapExportSupplyLines = mapExportSec.getBoolean("supplyLines", Config.mapExportSupplyLines)
+            Config.mapExportResourceDetails = mapExportSec.getBoolean("resourceDetails", Config.mapExportResourceDetails)
         }
 
         Config.useNametags = config.getBoolean("useNametags", Config.useNametags)
