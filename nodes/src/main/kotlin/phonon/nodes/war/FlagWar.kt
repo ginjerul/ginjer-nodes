@@ -495,7 +495,9 @@ public object FlagWar {
             } else {
                 attackTime *= territory.attackerTimeMultiplier
                 if (!SupplyLines.isFriendly(terrTown, attackingTown)) {
-                    if (SupplyLines.isCutOff(terrTown, territory.id)) {
+                    // supply-cut speedup only for land the owner still holds: an occupied
+                    // territory counts as cut off, but taking it shouldn't get faster for that
+                    if (territory.occupier == null && SupplyLines.isCutOff(terrTown, territory.id)) {
                         attackTime *= SupplyLines.captureTimeMultiplier()
                     }
                     attackTime *= Fortifications.captureMultiplier(territory)

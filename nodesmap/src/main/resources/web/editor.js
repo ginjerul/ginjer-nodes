@@ -1807,6 +1807,24 @@
     $("#player-names").innerHTML = d.players.map((p) => `<option value="${esc(p)}">`).join("");
   }
 
+  // ---------------------------------------------------------------- follow live changes (war captures, town edits in game)
+  let stateVer = null;
+  async function pollState() {
+    let v;
+    try { v = await (await fetch("data/nodes/version.json", { cache: "no-cache" })).json(); } catch { return; }
+    if (!v || !v.state || v.state === stateVer) return;
+    if (stateVer === null) { stateVer = v.state; return; }
+    // don't redraw panels under the user's fingers; try again next poll
+    if (T.busy || isTyping() || !$("#modal-wrap").hidden) return;
+    stateVer = v.state;
+    const before = JSON.stringify([...E.claimed]);
+    await loadClaims();
+    if (JSON.stringify([...E.claimed]) === before) return;
+    restyle();
+    drawOverlays();
+    refreshUi();
+  }
+
   // ---------------------------------------------------------------- resource hover (like the old Dynmap editor)
   function resTipHtml(n) {
     const r = E.resources[n];
@@ -2028,5 +2046,6 @@
   // handy from the browser console, e.g. NodesEditor.serialize()
   window.NodesEditor = { state: E, map, serialize, select, undo, redo };
 
+  setInterval(pollState, 5000);
   init().catch((e) => { console.error(e); toast("Editor failed to load: " + e.message, true); });
 })();
