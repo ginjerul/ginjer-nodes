@@ -230,7 +230,13 @@ public class NodesPlugin : JavaPlugin() {
         phonon.nodes.map.MapExporter.start(this)
 
         // a timed war keeps counting down across restarts (boss bar + auto end)
-        server.scheduler.runTask(this, Runnable { phonon.nodes.war.WarTimer.restore() })
+        server.scheduler.runTask(
+            this,
+            Runnable {
+                phonon.nodes.stats.WarStats.load()
+                phonon.nodes.war.WarTimer.restore()
+            },
+        )
 
         val timeEnd = System.currentTimeMillis()
         val timeLoad = timeEnd - timeStart
@@ -247,6 +253,7 @@ public class NodesPlugin : JavaPlugin() {
         MiningBoost.shutdown()
         MiningTowers.shutdown()
         PlayerStats.shutdown()
+        phonon.nodes.stats.WarStats.shutdown()
         Refineries.shutdown()
         Plots.shutdown()
         RallyCap.save()

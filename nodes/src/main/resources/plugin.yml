@@ -98,7 +98,7 @@ commands:
   leaderboard:
     description: KDR leaderboards
     aliases: [lb]
-    usage: /leaderboard <kills|deaths|kdr|towns|nations>
+    usage: /leaderboard <kills|deaths|kdr|towns|nations|war>
   plot:
     description: Town plots
     aliases: [p]
