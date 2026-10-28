@@ -92,6 +92,11 @@ public object MapExporter {
         lastWorldRefs = emptyList()
     }
 
+    /** Re-export towns/nations now (after a web editor change) instead of waiting for the timer. */
+    public fun stateChanged() {
+        if (plugin != null) safe { exportState() }
+    }
+
     // ------------------------------------------------------------------
     // world
 

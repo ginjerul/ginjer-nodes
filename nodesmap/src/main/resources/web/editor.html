@@ -67,6 +67,7 @@
 <aside id="sidebar">
   <nav id="tabs">
     <button data-tab="terr" class="active">Territories</button>
+    <button data-tab="towns">Towns</button>
     <button data-tab="res">Resources</button>
     <button data-tab="opts">Options</button>
   </nav>
@@ -82,6 +83,23 @@
     </div>
     <div id="terr-summary" class="hint"></div>
     <div class="list" id="terr-list"></div>
+  </section>
+  <section id="tab-towns" class="tab">
+    <div class="list-tools">
+      <input id="town-filter" class="filter" placeholder="Search towns, nations, players">
+      <select id="town-sort">
+        <option value="name">Name</option>
+        <option value="nation">Nation</option>
+        <option value="land">Most land</option>
+        <option value="players">Most players</option>
+      </select>
+      <button id="town-new" class="btn small" title="Make a town from the territories selected on the map">New</button>
+    </div>
+    <div id="town-summary" class="hint"></div>
+    <div class="list" id="town-list"></div>
+    <div id="town-editor"></div>
+    <datalist id="nation-names"></datalist>
+    <datalist id="player-names"></datalist>
   </section>
   <section id="tab-res" class="tab">
     <div class="list-tools">

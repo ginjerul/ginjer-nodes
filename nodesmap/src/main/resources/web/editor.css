@@ -119,3 +119,30 @@ kbd { font: 600 11px var(--mono); border: 1px solid var(--line-strong); border-r
 #mode-hint { color: #f3d38d; font-family: var(--font); }
 #mode-hint:empty { display: none; }
 .keys kbd { justify-self: start; align-self: start; white-space: nowrap; margin-top: 1px; }
+
+/* towns tab */
+#town-list { max-height: 34vh; overflow: auto; flex: none; }
+#town-editor { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 10px; }
+#town-editor:empty { display: none; }
+#town-editor .grid2 { display: grid; grid-template-columns: 1fr 88px; gap: 0 8px; }
+#town-editor .field { margin-bottom: 6px; }
+#town-editor input[type=color] { padding: 2px 4px; cursor: pointer; }
+#town-editor input[type=color]:disabled { opacity: 0.3; cursor: default; }
+.te-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; font-size: 15px; }
+.te-head .sw { width: 14px; height: 14px; border-radius: 4px; flex: none; }
+.te-head b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.te-nation, .te-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 4px; align-items: center; }
+.hint.tight { margin: 0 0 6px; }
+.section-h .faint { text-transform: none; letter-spacing: 0; color: var(--faint); margin-left: 4px; font-size: 11.5px; }
+.kvline { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); margin-bottom: 4px; flex-wrap: wrap; }
+.kvline .btn { margin-left: auto; }
+.res-list { display: flex; flex-direction: column; gap: 2px; max-height: 220px; overflow: auto; }
+.rrow { display: grid; grid-template-columns: 1fr auto auto; gap: 6px; align-items: center; padding: 3px 4px 3px 8px; border-radius: 6px; }
+.rrow:hover { background: rgba(255,255,255,0.04); }
+.rrow .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.rrow select { height: 26px; border-radius: 6px; border: 1px solid var(--line); background: rgba(0,0,0,0.25); font-size: 12px; padding: 0 4px; }
+.rrow select option { background: var(--panel-solid); }
+.icon-x { width: 24px; height: 24px; border: 0; border-radius: 6px; background: transparent; color: var(--faint); cursor: pointer; font-size: 16px; line-height: 1; }
+.icon-x:hover { color: #ffb3b5; background: var(--war-soft); }
+.inline-add { display: flex; gap: 6px; margin: 6px 0; }
+.inline-add input { flex: 1; min-width: 0; height: 28px; border-radius: 7px; border: 1px solid var(--line); background: rgba(0,0,0,0.25); padding: 0 8px; outline: none; }

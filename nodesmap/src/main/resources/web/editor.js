@@ -36,7 +36,7 @@
 
   // ---------------------------------------------------------------- state
   const E = {
-    token: null, user: null, nodesOnline: false,
+    token: null, user: null, nodesOnline: false, townsOnline: false,
     info: null,
     top: {},                 // other top-level keys of world.json, kept as-is
     resources: {},           // resource node name -> definition object
@@ -114,12 +114,14 @@
       const s = await api("api/editor/session");
       E.user = s.user;
       E.nodesOnline = !!s.nodes;
+      E.townsOnline = !!s.towns;
     } catch (e) {
       modal(`<h2>Session expired</h2><p>${esc(e.message)}</p><div class="foot"><button class="btn" data-close>Edit a file offline</button></div>`);
       E.token = null;
       setSaveState();
       return;
     }
+    if (E.townsOnline) await loadClaims();
     if (E.nodesOnline) await loadFromServer(true);
     else toast("Nodes isn't running on the server, so you can only edit and download files.", true);
     setSaveState();
@@ -133,6 +135,16 @@
   }
 
   async function loadClaims() {
+    if (E.townsOnline) {
+      try {
+        const d = await api("api/editor/towns");
+        T.data = d;
+        setClaimsFromTowns(d);
+        renderDatalists();
+        renderTowns();
+        return;
+      } catch { /* fall back to the public map data */ }
+    }
     E.claimed.clear();
     try {
       const st = await (await fetch("data/nodes/state.json", { cache: "no-cache" })).json();
@@ -555,6 +567,15 @@
           : { renderer: R.claim, fill: true, fillColor: g.color, fillOpacity: 0.18, color: g.color, weight: 3, dashArray: "8 5", interactive: false }));
       }
     }
+    const hl = T.sel && $("#tab-towns").classList.contains("active") ? townByName(T.sel) : null;
+    if (hl) {
+      for (const [list, dash] of [[hl.territories, null], [hl.captured, "4 6"]]) {
+        const cells = [];
+        for (const id of list) { const t = E.terr.get(id); if (t) for (const k of t.chunks) cells.push(KX(k), KZ(k)); }
+        const rings = NodesGeom.outline(cells, 16).map((r) => r.map(([x, zz]) => ll(x, zz)));
+        if (rings.length) G.sel.addLayer(L.polygon(rings, { renderer: R.sel, fill: false, color: "#ffffff", weight: 3, opacity: 0.95, dashArray: dash || "10 6", interactive: false }));
+      }
+    }
     for (const t of E.terr.values()) {
       if (!t.core) continue;
       const p = ll(t.core[0] * 16 + 8, t.core[1] * 16 + 8);
@@ -908,6 +929,7 @@
     restyle();
     drawOverlays();
     refreshUi();
+    if (T.sel && $("#tab-towns").classList.contains("active")) renderTownEditor();
   }
   function toggleSel(id) {
     if (E.sel.has(id)) E.sel.delete(id); else E.sel.add(id);
@@ -1353,7 +1375,7 @@
       el.innerHTML = `
         <div class="info-kicker">Territory #${t.id}</div>
         <div class="field"><span>Name</span><input id="in-name" value="${esc(t.name)}" placeholder="Unnamed"></div>
-        ${c ? `<div class="note">${c.kind === "occupied" ? "Occupied" : "Claimed"} by <b>${esc(prettyName(c.town))}</b>${c.nation ? ` (${esc(prettyName(c.nation))})` : ""}.${locked ? " Its land is locked (Options → Lock claimed land); name and resources can still be edited." : ""} Changes need confirming on apply.</div>` : ""}
+        ${c ? `<div class="note">${c.kind === "occupied" ? "Occupied" : "Claimed"} by <b>${E.townsOnline ? `<a href="#" id="in-town">${esc(prettyName(c.town))}</a>` : esc(prettyName(c.town))}</b>${c.nation ? ` (${esc(prettyName(c.nation))})` : ""}.${locked ? " Its land is locked (Options → Lock claimed land); name and resources can still be edited." : ""} Changes need confirming on apply.</div>` : ""}
         ${pieces > 1 ? `<div class="note warn">This territory is in ${pieces} separate pieces. <a href="#" id="in-split">Split them up</a></div>` : ""}
         <dl class="kv">
           <dt>Chunks</dt><dd>${t.chunks.size}</dd>
@@ -1370,6 +1392,7 @@
       name.onchange = () => { begin("Rename"); touch(t.id); t.name = name.value.trim(); end(); };
       $("#in-core").onclick = (e) => { e.preventDefault(); setTool("core"); toast("Click a chunk inside the territory to make it the core"); };
       $("#in-zoom").onclick = () => zoomTo([t.id]);
+      if ($("#in-town")) $("#in-town").onclick = (e) => { e.preventDefault(); pickTown(c.town, false); };
       if ($("#in-split")) $("#in-split").onclick = (e) => { e.preventDefault(); splitDisconnected(); };
       if (!locked) $("#in-del").onclick = deleteSelected;
       $("#in-add").onchange = (e) => {
@@ -1520,6 +1543,240 @@
   function closeModal() { $("#modal-wrap").hidden = true; }
   function busy(on) { document.body.style.cursor = on ? "progress" : ""; $("#btn-apply").disabled = on || !E.nodesOnline; $("#btn-check").disabled = on || !E.nodesOnline; }
 
+  // ---------------------------------------------------------------- towns + nations (live, like the old Dynmap editor's Towns tab)
+  const T = { data: null, sel: null, busy: false };
+
+  function setClaimsFromTowns(d) {
+    E.claimed.clear();
+    const ncol = new Map((d.nations || []).map((n) => [n.name, n.color]));
+    for (const t of d.towns || []) {
+      const nation = t.nation || null;
+      const ncolor = (nation && ncol.get(nation)) || t.color;
+      for (const id of t.territories || []) E.claimed.set(id, { town: t.name, color: t.color, nation, ncolor, kind: "owned" });
+      for (const id of t.captured || []) if (!E.claimed.has(id)) E.claimed.set(id, { town: t.name, color: t.color, nation, ncolor, kind: "occupied" });
+    }
+  }
+
+  function setTowns(d) {
+    T.data = d;
+    if (T.sel && !d.towns.some((t) => t.name === T.sel)) T.sel = null;
+    setClaimsFromTowns(d);
+    renderDatalists();
+    restyle();
+    drawOverlays();
+    refreshUi();
+    renderTowns();
+  }
+
+  async function loadTowns() {
+    if (!E.townsOnline) { renderTowns(); return; }
+    try { setTowns(await api("api/editor/towns")); } catch (e) { toast("Couldn't load towns: " + e.message, true); }
+  }
+
+  async function townAct(body, okToast = true) {
+    if (T.busy) return null;
+    T.busy = true;
+    document.body.style.cursor = "progress";
+    try {
+      const r = await api("api/editor/town", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      if (r.data) setTowns(r.data);
+      if (!r.ok) { toast(r.message, true); return null; }
+      if (okToast) toast(r.message.charAt(0).toUpperCase() + r.message.slice(1));
+      return r;
+    } catch (e) {
+      toast(e.message, true);
+      return null;
+    } finally {
+      T.busy = false;
+      document.body.style.cursor = "";
+    }
+  }
+
+  const townByName = (n) => T.data?.towns.find((t) => t.name === n) || null;
+  const nationByName = (n) => T.data?.nations.find((x) => x.name === n) || null;
+  const selIds = () => [...E.sel].filter((id) => E.terr.has(id));
+  function needSel(what) {
+    const ids = selIds();
+    if (!ids.length) { toast(`Select territories on the map first, then ${what}`, true); return null; }
+    return ids;
+  }
+
+  function pickTown(name, fly) {
+    T.sel = name;
+    openTab("towns");
+    renderTowns();
+    drawOverlays();
+    const t = townByName(name);
+    if (fly && t) zoomTo([...t.territories, ...t.captured]);
+  }
+
+  function openTab(name) {
+    $$("#tabs button").forEach((x) => x.classList.toggle("active", x.dataset.tab === name));
+    $$(".tab").forEach((t) => t.classList.toggle("active", t.id === "tab-" + name));
+    drawOverlays();
+  }
+
+  function renderTowns() {
+    const list = $("#town-list");
+    if (!list) return;
+    const ed = $("#town-editor");
+    if (!E.token || !E.townsOnline) {
+      list.innerHTML = `<div class="note">${!E.token ? "Sign in with <kbd>/nodesmap editor</kbd> to edit towns and nations. Changes apply live on the server." : "This Nodes version can't edit towns from the map. Update <b>nodes.jar</b>."}</div>`;
+      ed.innerHTML = "";
+      $("#town-new").disabled = true;
+      return;
+    }
+    $("#town-new").disabled = false;
+    const d = T.data || { towns: [], nations: [], players: [] };
+    const q = $("#town-filter").value.trim().toLowerCase();
+    const sort = $("#town-sort").value;
+    let towns = d.towns.filter((t) => !q || t.name.toLowerCase().includes(q) || (t.nation || "").toLowerCase().includes(q) || t.residents.some((r) => r.toLowerCase().includes(q)));
+    const sorters = {
+      name: (a, b) => a.name.localeCompare(b.name),
+      nation: (a, b) => (a.nation || "~").localeCompare(b.nation || "~") || (b.capital - a.capital) || a.name.localeCompare(b.name),
+      land: (a, b) => b.territories.length - a.territories.length,
+      players: (a, b) => b.residents.length - a.residents.length,
+    };
+    towns.sort(sorters[sort] || sorters.name);
+    $("#town-summary").textContent = `${d.towns.length} towns · ${d.nations.length} nations` + (q ? ` · ${towns.length} shown` : "");
+    list.innerHTML = towns.map((t) => {
+      const n = t.nation ? nationByName(t.nation) : null;
+      return `<div class="trow ${t.name === T.sel ? "sel" : ""}" data-town="${esc(t.name)}">
+        <span class="sw" style="background:${esc(n ? n.color : t.color)}"></span>
+        <div><div class="nm">${t.capital ? `<span class="lock" title="Nation capital">★</span> ` : ""}${esc(prettyName(t.name))}</div><div class="sub">${n ? esc(prettyName(n.name)) : "No nation"}${t.leader ? " · " + esc(t.leader) : ""}</div></div>
+        <span class="stat">${t.territories.length}t · ${t.residents.length}p</span></div>`;
+    }).join("") || `<div class="empty">${d.towns.length ? "Nothing matches" : "No towns yet. Select territories on the map and press New."}</div>`;
+    renderTownEditor();
+  }
+
+  function renderTownEditor() {
+    const ed = $("#town-editor");
+    const t = townByName(T.sel);
+    if (!t) { ed.innerHTML = `<p class="hint">Pick a town to edit it. To make one, select territories on the map and press <b>New</b>.</p>`; return; }
+    const d = T.data;
+    const n = t.nation ? nationByName(t.nation) : null;
+    const home = E.terr.get(t.home);
+    const rankOf = (r) => (r === t.leader ? "leader" : t.officers.includes(r) ? "officer" : "member");
+    const order = { leader: 0, officer: 1, member: 2 };
+    const res = [...t.residents].sort((a, b) => order[rankOf(a)] - order[rankOf(b)] || a.localeCompare(b));
+    const sel = selIds();
+    ed.innerHTML = `
+      <div class="te-head"><span class="sw" style="background:${esc(t.color)}"></span><b>${esc(prettyName(t.name))}</b><button class="btn small" id="te-show" title="Select this town's land on the map">Show on map</button></div>
+      <div class="grid2">
+        <label class="field"><span>Town name</span><input id="te-name" value="${esc(t.name)}" spellcheck="false"></label>
+        <label class="field"><span>Color</span><input id="te-color" type="color" value="${esc(t.color)}"></label>
+      </div>
+      <div class="grid2">
+        <label class="field"><span>Nation</span><input id="te-nation" list="nation-names" value="${esc(t.nation || "")}" placeholder="None" spellcheck="false"></label>
+        <label class="field"><span>Color</span><input id="te-ncolor" type="color" value="${esc(n ? n.color : "#888888")}" ${n ? "" : "disabled"}></label>
+      </div>
+      <p class="hint tight">Type a nation to join it, a new name to create one, or clear it to leave.</p>
+      ${n ? `<div class="te-nation">${t.capital ? `<span class="badge gold">★ Capital of ${esc(prettyName(n.name))}</span>` : `<button class="btn small" id="te-capital">Make capital</button>`}<button class="btn small" id="te-nrename">Rename nation</button><button class="btn small danger" id="te-ndel">Delete nation</button></div>` : ""}
+
+      <div class="section-h">Land <span class="faint">${t.territories.length} territories${t.captured.length ? ` · ${t.captured.length} occupied` : ""} · claims ${t.claimsUsed}/${t.claimsMax}</span></div>
+      <div class="kvline">Home: <b>#${t.home}</b> ${home && home.name ? esc(home.name) : ""} <button class="btn small" id="te-home" ${sel.length === 1 ? "" : "disabled"} title="Select one of the town's territories on the map">Set to selected</button></div>
+      <div class="te-actions">
+        <button class="btn small" id="te-add" title="Give the selected unclaimed territories to this town">Add selected${sel.length ? ` (${sel.length})` : ""}</button>
+        <button class="btn small" id="te-cap" title="This town occupies the selected territories, like after a war">Capture selected</button>
+        <button class="btn small" id="te-rem" title="Make the selected territories unclaimed again">Remove selected</button>
+        <button class="btn small" id="te-free" title="End occupation of the selected territories">Free captured</button>
+      </div>
+      ${d.warBusy ? `<div class="note warn">A flag attack or raid is running, so land can't change until it ends.</div>` : ""}
+
+      <div class="section-h">Players <span class="faint">${t.residents.length}</span></div>
+      <div class="res-list">${res.map((r) => `<div class="rrow" data-player="${esc(r)}"><span class="nm">${rankOf(r) === "leader" ? "👑 " : rankOf(r) === "officer" ? "★ " : ""}${esc(r)}</span>
+        <select data-rank title="Rank"><option value="leader" ${rankOf(r) === "leader" ? "selected" : ""}>Leader</option><option value="officer" ${rankOf(r) === "officer" ? "selected" : ""}>Officer</option><option value="member" ${rankOf(r) === "member" ? "selected" : ""}>Member</option></select>
+        <button class="icon-x" data-kick title="Remove from town">×</button></div>`).join("") || `<div class="hint tight">No players</div>`}</div>
+      <div class="inline-add"><input id="te-player" list="player-names" placeholder="Add a player" spellcheck="false"><button class="btn small" id="te-padd">Add</button></div>
+      <label class="tgl"><input type="checkbox" id="te-open" ${t.open ? "checked" : ""}>Open to join</label>
+
+      <div class="actions"><button class="btn small danger" id="te-del">Delete town</button></div>`;
+
+    $("#te-show").onclick = () => { select([...t.territories]); zoomTo([...t.territories, ...t.captured]); };
+    $("#te-name").onchange = (e) => townAct({ op: "town.rename", town: t.name, name: e.target.value }).then((r) => { if (r) { T.sel = e.target.value.trim(); renderTowns(); } else e.target.value = t.name; });
+    $("#te-color").onchange = (e) => townAct({ op: "town.color", town: t.name, color: e.target.value });
+    $("#te-nation").onchange = (e) => {
+      const v = e.target.value.trim();
+      if (v === (t.nation || "")) return;
+      if (!v && !confirm(`Take ${prettyName(t.name)} out of ${prettyName(t.nation)}?${n && n.towns.length === 1 ? " It's the only town, so the nation will be deleted." : ""}`)) { e.target.value = t.nation || ""; return; }
+      if (v && !nationByName(v) && !confirm(`Create a new nation "${v}" with ${prettyName(t.name)} as its capital?`)) { e.target.value = t.nation || ""; return; }
+      townAct({ op: "town.setNation", town: t.name, nation: v });
+    };
+    if (n) {
+      $("#te-ncolor").onchange = (e) => townAct({ op: "nation.color", nation: n.name, color: e.target.value });
+      if ($("#te-capital")) $("#te-capital").onclick = () => townAct({ op: "nation.capital", nation: n.name, town: t.name });
+      $("#te-nrename").onclick = () => {
+        const v = prompt(`New name for ${n.name}`, n.name);
+        if (v && v.trim() !== n.name) townAct({ op: "nation.rename", nation: n.name, name: v.trim() });
+      };
+      $("#te-ndel").onclick = () => {
+        if (confirm(`Delete the nation ${prettyName(n.name)}? Its ${n.towns.length} town${n.towns.length === 1 ? "" : "s"} stay, without a nation.`)) townAct({ op: "nation.delete", nation: n.name });
+      };
+    }
+    $("#te-home").onclick = () => { const ids = needSel("set the home"); if (ids) townAct({ op: "town.home", town: t.name, territories: [ids[0]] }); };
+    $("#te-add").onclick = () => { const ids = needSel("add them"); if (ids) townAct({ op: "town.addTerritories", town: t.name, territories: ids }); };
+    $("#te-cap").onclick = () => { const ids = needSel("capture them"); if (ids) townAct({ op: "town.capture", town: t.name, territories: ids }); };
+    $("#te-rem").onclick = () => { const ids = needSel("remove them"); if (ids) townAct({ op: "town.removeTerritories", territories: ids }); };
+    $("#te-free").onclick = () => { const ids = needSel("free them"); if (ids) townAct({ op: "town.release", territories: ids }); };
+    const addPlayer = () => {
+      const v = $("#te-player").value.trim();
+      if (!v) return;
+      const other = d.towns.find((x) => x.name !== t.name && x.residents.some((r) => r.toLowerCase() === v.toLowerCase()));
+      if (other && !confirm(`${v} is in ${prettyName(other.name)}. Move them to ${prettyName(t.name)}?`)) return;
+      townAct({ op: "town.addPlayer", town: t.name, player: v });
+    };
+    $("#te-padd").onclick = addPlayer;
+    $("#te-player").onkeydown = (e) => { if (e.key === "Enter") addPlayer(); };
+    $$("#town-editor .rrow").forEach((row) => {
+      const p = row.dataset.player;
+      $("[data-rank]", row).onchange = (e) => townAct({ op: "town.rank", town: t.name, player: p, rank: e.target.value });
+      $("[data-kick]", row).onclick = () => { if (confirm(`Remove ${p} from ${prettyName(t.name)}?`)) townAct({ op: "town.removePlayer", town: t.name, player: p }); };
+    });
+    $("#te-open").onchange = (e) => townAct({ op: "town.open", town: t.name, open: e.target.checked });
+    $("#te-del").onclick = () => {
+      if (confirm(`Delete the town ${prettyName(t.name)}? Its land becomes unclaimed and its ${t.residents.length} player${t.residents.length === 1 ? "" : "s"} become townless. This can't be undone.`)) townAct({ op: "town.delete", town: t.name });
+    };
+  }
+
+  function newTownDialog() {
+    const ids = selIds();
+    const free = ids.filter((id) => !E.claimed.has(id) || E.claimed.get(id).kind !== "owned");
+    if (!free.length) {
+      toast(ids.length ? "Those territories already belong to towns. Select unclaimed land for the new town." : "Select the territories for the new town on the map first (its first one becomes the home)", true);
+      return;
+    }
+    const home = E.terr.get(free[0]);
+    modal(`<h2>New town</h2>
+      <p>The town gets the ${free.length} unclaimed selected ${free.length === 1 ? "territory" : "territories"}. Its home is <b>#${home.id}${home.name ? " " + esc(home.name) : ""}</b>.${ids.length > free.length ? ` ${ids.length - free.length} already-claimed ones are skipped.` : ""}</p>
+      <label class="field"><span>Name (no spaces)</span><input id="nt-name" spellcheck="false" autocomplete="off"></label>
+      <label class="field"><span>Leader (optional)</span><input id="nt-leader" list="player-names" placeholder="Player name" spellcheck="false"></label>
+      <label class="field"><span>Nation (optional)</span><input id="nt-nation" list="nation-names" placeholder="Existing or new nation" spellcheck="false"></label>
+      <div class="foot"><button class="btn" data-close>Cancel</button><button class="btn primary" id="nt-go">Create town</button></div>`);
+    const nm = $("#nt-name");
+    nm.focus();
+    const go = async () => {
+      const name = nm.value.trim().replace(/\s+/g, "_");
+      if (!name) { nm.focus(); return; }
+      const leader = $("#nt-leader").value.trim();
+      const nation = $("#nt-nation").value.trim();
+      const r = await townAct({ op: "town.create", name, territories: free, player: leader || undefined });
+      if (!r) return;
+      closeModal();
+      T.sel = name;
+      if (nation) await townAct({ op: "town.setNation", town: name, nation });
+      pickTown(name, false);
+    };
+    $("#nt-go").onclick = go;
+    nm.onkeydown = (e) => { if (e.key === "Enter") go(); };
+  }
+
+  function renderDatalists() {
+    const d = T.data;
+    if (!d) return;
+    $("#nation-names").innerHTML = d.nations.map((n) => `<option value="${esc(n.name)}">`).join("");
+    $("#player-names").innerHTML = d.players.map((p) => `<option value="${esc(p)}">`).join("");
+  }
+
   // ---------------------------------------------------------------- wiring
   function buildUi() {
     $$("#tools [data-tool]").forEach((b) => (b.onclick = () => setTool(b.dataset.tool)));
@@ -1558,10 +1815,14 @@
         toast(`Imported ${E.terr.size} territories. Apply to send them to the server.`);
       } catch (err) { toast("Couldn't import: " + err.message, true); }
     };
-    $$("#tabs button").forEach((b) => (b.onclick = () => {
-      $$("#tabs button").forEach((x) => x.classList.toggle("active", x === b));
-      $$(".tab").forEach((t) => t.classList.toggle("active", t.id === "tab-" + b.dataset.tab));
-    }));
+    $$("#tabs button").forEach((b) => (b.onclick = () => openTab(b.dataset.tab)));
+    $("#town-filter").oninput = renderTowns;
+    $("#town-sort").onchange = renderTowns;
+    $("#town-new").onclick = newTownDialog;
+    $("#town-list").onclick = (e) => {
+      const row = e.target.closest("[data-town]");
+      if (row) pickTown(row.dataset.town, true);
+    };
     $("#terr-filter").oninput = renderTerrList;
     $("#terr-sort").onchange = renderTerrList;
     $("#res-filter").oninput = renderResList;

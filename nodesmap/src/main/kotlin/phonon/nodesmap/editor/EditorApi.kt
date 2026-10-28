@@ -70,7 +70,7 @@ class EditorApi(
     // ------------------------------------------------------------------
     // bridge to Nodes
 
-    private class Bridge(val worldJson: Method, val apply: Method)
+    private class Bridge(val worldJson: Method, val apply: Method, val townsJson: Method?, val townAct: Method?)
 
     @Volatile private var bridge: Bridge? = null
 
@@ -80,9 +80,17 @@ class EditorApi(
         if (!nodes.isEnabled) return null
         return try {
             val cls = Class.forName("phonon.nodes.map.MapEditApi", true, nodes.javaClass.classLoader)
+            // town editing arrived later: older Nodes jars just don't have it
+            val towns = try {
+                Class.forName("phonon.nodes.map.MapTownApi", true, nodes.javaClass.classLoader)
+            } catch (e: ClassNotFoundException) {
+                null
+            }
             val b = Bridge(
                 cls.getMethod("worldJson"),
                 cls.getMethod("apply", String::class.java, Boolean::class.javaPrimitiveType, Boolean::class.javaPrimitiveType, String::class.java),
+                towns?.getMethod("townsJson"),
+                towns?.getMethod("act", String::class.java, String::class.java),
             )
             bridge = b
             b
@@ -105,7 +113,7 @@ class EditorApi(
         return when (req.path) {
             "/api/editor/session" -> ApiResponse(
                 200,
-                "{\"user\":${q(s.user)},\"expiresAt\":${s.expiresAt},\"nodes\":${bridge() != null}}",
+                "{\"user\":${q(s.user)},\"expiresAt\":${s.expiresAt},\"nodes\":${bridge() != null},\"towns\":${bridge()?.townsJson != null}}",
             )
 
             "/api/editor/world" -> {
@@ -126,11 +134,24 @@ class EditorApi(
                 ApiResponse(200, out)
             }
 
+            "/api/editor/towns" -> {
+                val m = bridge()?.townsJson ?: return noTowns()
+                ApiResponse(200, m.invoke(null) as String)
+            }
+
+            "/api/editor/town" -> {
+                if (req.method != "POST") return err(405, "use POST")
+                val m = bridge()?.townAct ?: return noTowns()
+                ApiResponse(200, m.invoke(null, String(req.body, StandardCharsets.UTF_8), s.user) as String)
+            }
+
             else -> err(404, "unknown editor route")
         }
     }
 
     private fun noNodes() = err(503, "Nodes isn't running, or this Nodes version doesn't support the editor. You can still edit and download world.json.")
+
+    private fun noTowns() = err(503, "This Nodes version can't edit towns from the map. Update nodes.jar.")
 
     private fun err(status: Int, msg: String) = ApiResponse(status, "{\"error\":${q(msg)}}")
 
