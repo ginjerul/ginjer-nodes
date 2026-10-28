@@ -44,7 +44,8 @@
     owner: new Map(),        // chunk key -> territory id
     nextId: 0,
     sel: new Set(),
-    claimed: new Map(),      // territory id -> {town, color, kind}
+    claimed: new Map(),      // territory id -> {town, color, nation, ncolor, kind, occ?}
+    occChunks: new Map(),    // chunk key -> town occupying it (war flags)
     cost: { constant: 10, scale: 0.25 },
     icons: {},
     undo: [], redo: [],
@@ -102,6 +103,7 @@
       if (w.costConfig) E.cost = w.costConfig;
     } catch { /* optional */ }
     await loadClaims();
+    await loadOccupiedChunks();
 
     if (!E.token) {
       modal(`<h2>Sign in to edit</h2><p>Run <kbd>/nodesmap editor</kbd> in game (or in the console) and open the link it gives you. Links expire after a while for safety.</p>
@@ -134,6 +136,23 @@
     toast(`Loaded ${E.terr.size} territories from the server`);
   }
 
+  /** a town occupying a territory (captured in war); the owner, if any, stays the owner */
+  function addOccupier(id, o) {
+    const c = E.claimed.get(id);
+    if (c) c.occ = o;
+    else E.claimed.set(id, { ...o, kind: "occupied", occ: o });
+  }
+
+  /** occupied chunks from flags (live layer): chunk key -> occupying town */
+  async function loadOccupiedChunks() {
+    const m = new Map();
+    try {
+      const live = await (await fetch("data/nodes/live.json", { cache: "no-cache" })).json();
+      for (const [x, z, town] of live.occupied || []) m.set(K(x, z), town);
+    } catch { /* no live data */ }
+    E.occChunks = m;
+  }
+
   async function loadClaims() {
     if (E.townsOnline) {
       try {
@@ -152,8 +171,8 @@
       for (const t of st.towns || []) {
         const nation = t.nation || null;
         const ncolor = (nation && nationColor.get(nation)) || t.color;
-        for (const id of t.territories || []) E.claimed.set(id, { town: t.name, color: t.color, nation, ncolor, kind: "owned" });
-        for (const id of t.captured || []) if (!E.claimed.has(id)) E.claimed.set(id, { town: t.name, color: t.color, nation, ncolor, kind: "occupied" });
+        for (const id of t.territories || []) E.claimed.set(id, { town: t.name, color: t.color, nation, ncolor, kind: "owned", occ: E.claimed.get(id)?.occ });
+        for (const id of t.captured || []) addOccupier(id, { town: t.name, color: t.color, nation, ncolor });
       }
     } catch { /* no live data */ }
   }
@@ -499,6 +518,29 @@
   const prettyName = (s) => String(s ?? "").replace(/_/g, " ");
   const NO_OWNER = "#9aa0a8";
 
+  /** diagonal stripes pattern (occupied land), defined once in the claim svg */
+  const stripeIds = new Set();
+  function stripe(color) {
+    const id = "occ" + color.replace(/[^a-z0-9]/gi, "");
+    if (stripeIds.has(id)) return `url(#${id})`;
+    const root = R.claim._container;
+    if (!root) return color;
+    let defs = root.querySelector("defs");
+    if (!defs) { defs = document.createElementNS("http://www.w3.org/2000/svg", "defs"); root.prepend(defs); }
+    const p = document.createElementNS("http://www.w3.org/2000/svg", "pattern");
+    p.setAttribute("id", id);
+    p.setAttribute("patternUnits", "userSpaceOnUse");
+    p.setAttribute("width", "10"); p.setAttribute("height", "10");
+    p.setAttribute("patternTransform", "rotate(45)");
+    const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    rect.setAttribute("width", "4"); rect.setAttribute("height", "10");
+    rect.setAttribute("fill", color); rect.setAttribute("fill-opacity", "0.75"); rect.setAttribute("stroke", "none");
+    p.appendChild(rect);
+    defs.appendChild(p);
+    stripeIds.add(id);
+    return `url(#${id})`;
+  }
+
   /** fill color: the owning nation's color (like the public map), or the 6 territory colors */
   function terrColor(t) {
     if (E.opt.colorBy === "territory") return PALETTE[((t.color % 6) + 6) % 6];
@@ -573,6 +615,35 @@
         G.claim.addLayer(L.polygon(rings, byNation
           ? { renderer: R.claim, fill: false, color: g.color, weight: 2.5, opacity: 0.95, interactive: false }
           : { renderer: R.claim, fill: true, fillColor: g.color, fillOpacity: 0.18, color: g.color, weight: 3, dashArray: "8 5", interactive: false }));
+      }
+    }
+    // occupation (war): whole captured territories and single captured chunks, striped in the occupier's color
+    {
+      const byTown = new Map();
+      const add = (town, color, x, z) => {
+        if (!byTown.has(town)) byTown.set(town, { color, cells: [] });
+        byTown.get(town).cells.push(x, z);
+      };
+      const whole = new Set();
+      for (const [id, c] of E.claimed) {
+        if (!c.occ) continue;
+        const t = E.terr.get(id);
+        if (!t) continue;
+        whole.add(id);
+        for (const k of t.chunks) add(c.occ.town, c.occ.color, KX(k), KZ(k));
+      }
+      const tcol = new Map((T.data?.towns || []).map((t) => [t.name, t.color]));
+      for (const [k, town] of E.occChunks) {
+        if (whole.has(E.owner.get(k))) continue;
+        add(town, tcol.get(town) || "#e5484d", KX(k), KZ(k));
+      }
+      for (const [town, g] of byTown) {
+        const rings = NodesGeom.outline(g.cells, 16).map((r) => r.map(([x, zz]) => ll(x, zz)));
+        if (!rings.length) continue;
+        const poly = L.polygon(rings, { renderer: R.claim, fillColor: g.color, fillOpacity: 1, color: g.color, weight: 2, opacity: 0.95, interactive: false });
+        G.claim.addLayer(poly);
+        // the svg exists once something is drawn in it: then swap the fill for stripes
+        poly.getElement()?.setAttribute("fill", stripe(g.color));
       }
     }
     const hl = T.sel && $("#tab-towns").classList.contains("active") ? townByName(T.sel) : null;
@@ -1277,7 +1348,7 @@
       const c = E.claimed.get(t.id);
       const icons = t.nodes.slice(0, 5).map((n) => { const u = iconUrl(n); return u ? `<img src="${esc(u)}" alt="" data-tipres="${esc(n)}">` : `<span data-tipres="${esc(n)}">${esc(n)}</span>`; }).join("");
       const split = pieces.get(t.id) > 1 ? `<span class="warn" title="split into separate pieces">⚠</span>` : "";
-      return `<div class="trow ${E.sel.has(t.id) ? "sel" : ""}" data-id="${t.id}"><span class="sw" style="background:${terrColor(t)}"></span><div><div class="nm">${c ? `<span class="lock" title="claimed by ${esc(prettyName(c.town))}">🔒</span> ` : ""}${t.name ? `${esc(t.name)} <span style="color:var(--faint);font-weight:400">#${t.id}</span>` : `Territory #${t.id}`} ${split}</div><div class="sub">${c ? esc(prettyName(c.nation || c.town)) + (icons ? " · " : "") : ""}${icons}</div></div><span class="stat">${t.chunks.size}</span></div>`;
+      return `<div class="trow ${E.sel.has(t.id) ? "sel" : ""}" data-id="${t.id}"><span class="sw" style="background:${terrColor(t)}"></span><div><div class="nm">${c ? `<span class="lock" title="claimed by ${esc(prettyName(c.town))}">🔒</span> ` : ""}${t.name ? `${esc(t.name)} <span style="color:var(--faint);font-weight:400">#${t.id}</span>` : `Territory #${t.id}`} ${split}</div><div class="sub">${c && c.kind === "owned" ? esc(prettyName(c.nation || c.town)) + (icons || c.occ ? " · " : "") : ""}${c && c.occ ? `<span class="occ">⚔ ${esc(prettyName(c.occ.town))}</span>` + (icons ? " · " : "") : ""}${icons}</div></div><span class="stat">${t.chunks.size}</span></div>`;
     }).join("") + (list.length > shown.length ? `<div class="hint">…${list.length - shown.length} more, search to narrow down</div>` : "") + (!list.length ? `<div class="empty">${E.terr.size ? "Nothing matches" : "No territories yet. Use New (N) to paint one."}</div>` : "");
   }
 
@@ -1370,6 +1441,13 @@
     };
   }
 
+  function occCount(t) { let n = 0; for (const k of t.chunks) if (E.occChunks.has(k)) n++; return n; }
+  function occTowns(t) {
+    const m = new Map();
+    for (const k of t.chunks) { const o = E.occChunks.get(k); if (o) m.set(o, (m.get(o) || 0) + 1); }
+    return [...m].map(([n, c]) => `${prettyName(n)} (${c})`).join(", ");
+  }
+
   function renderInspector() {
     const el = $("#inspector");
     const ids = [...E.sel].filter((id) => E.terr.has(id));
@@ -1385,7 +1463,9 @@
       el.innerHTML = `
         <div class="info-kicker">Territory #${t.id}</div>
         <div class="field"><span>Name</span><input id="in-name" value="${esc(t.name)}" placeholder="No name (optional)"></div>
-        ${c ? `<div class="note">${c.kind === "occupied" ? "Occupied" : "Claimed"} by <b>${E.townsOnline ? `<a href="#" id="in-town">${esc(prettyName(c.town))}</a>` : esc(prettyName(c.town))}</b>${c.nation ? ` (${esc(prettyName(c.nation))})` : ""}.${locked ? " Its land is locked (Options → Lock claimed land); name and resources can still be edited." : ""} Changes need confirming on apply.</div>` : ""}
+        ${c && c.occ ? `<div class="note err">⚔ Occupied by <b>${esc(prettyName(c.occ.town))}</b>${c.occ.nation ? ` (${esc(prettyName(c.occ.nation))})` : ""}${c.kind === "owned" ? `, taken from ${esc(prettyName(c.town))}` : ""}.</div>` : ""}
+        ${occCount(t) && !(c && c.occ) ? `<div class="note warn">⚔ ${occCount(t)} of its ${t.chunks.size} chunks are occupied by flags: ${esc(occTowns(t))}</div>` : ""}
+        ${c && c.kind === "owned" ? `<div class="note">Claimed by <b>${E.townsOnline ? `<a href="#" id="in-town">${esc(prettyName(c.town))}</a>` : esc(prettyName(c.town))}</b>${c.nation ? ` (${esc(prettyName(c.nation))})` : ""}.${locked ? " Its land is locked (Options → Lock claimed land); name and resources can still be edited." : ""} Changes need confirming on apply.</div>` : ""}
         ${pieces > 1 ? `<div class="note warn">This territory is in ${pieces} separate pieces. <a href="#" id="in-split">Split them up</a></div>` : ""}
         <dl class="kv">
           <dt>Chunks</dt><dd>${t.chunks.size}</dd>
@@ -1582,8 +1662,8 @@
     for (const t of d.towns || []) {
       const nation = t.nation || null;
       const ncolor = (nation && ncol.get(nation)) || t.color;
-      for (const id of t.territories || []) E.claimed.set(id, { town: t.name, color: t.color, nation, ncolor, kind: "owned" });
-      for (const id of t.captured || []) if (!E.claimed.has(id)) E.claimed.set(id, { town: t.name, color: t.color, nation, ncolor, kind: "occupied" });
+      for (const id of t.territories || []) E.claimed.set(id, { town: t.name, color: t.color, nation, ncolor, kind: "owned", occ: E.claimed.get(id)?.occ });
+      for (const id of t.captured || []) addOccupier(id, { town: t.name, color: t.color, nation, ncolor });
     }
   }
 
@@ -1808,10 +1888,19 @@
   }
 
   // ---------------------------------------------------------------- follow live changes (war captures, town edits in game)
-  let stateVer = null;
+  let stateVer = null, liveVer = null;
   async function pollState() {
     let v;
     try { v = await (await fetch("data/nodes/version.json", { cache: "no-cache" })).json(); } catch { return; }
+    if (v && v.live && v.live !== liveVer) {
+      const first = liveVer === null;
+      liveVer = v.live;
+      if (!first) {
+        const before = JSON.stringify([...E.occChunks]);
+        await loadOccupiedChunks();
+        if (JSON.stringify([...E.occChunks]) !== before) { drawOverlays(); if (!isTyping()) renderInspector(); }
+      }
+    }
     if (!v || !v.state || v.state === stateVer) return;
     if (stateVer === null) { stateVer = v.state; return; }
     // don't redraw panels under the user's fingers; try again next poll
