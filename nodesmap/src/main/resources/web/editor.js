@@ -1786,6 +1786,9 @@
       if (inc.length) bits.push(inc.length > 2 ? `income: ${inc.length} items` : "income: " + inc.map(([k, v]) => `${v} ${k.replace(/_/g, " ")}`).join(", "));
       const ore = Object.entries(n.ore || {});
       if (ore.length) bits.push(ore.length > 2 ? `mining: ${ore.length} ores` : "mining: " + ore.map(([k, v]) => `${Math.round((Array.isArray(v) ? v[0] : v) * 1000) / 10}% ${k.replace(/_/g, " ")}`).join(", "));
+      const rates = (o) => Object.entries(o || {}).map(([k, v]) => `${k.replace(/_/g, " ")} ${Math.round(v * 100)}%`).join(", ");
+      if (Object.keys(n.crops || {}).length) bits.push("crops: " + rates(n.crops));
+      if (Object.keys(n.animals || {}).length) bits.push("breeding: " + rates(n.animals));
       if (n.attacker_time_multiplier) bits.push(`capture ×${n.attacker_time_multiplier}`);
       if (n.cost?.constant) bits.push(`+${n.cost.constant} claims`);
       const exists = E.resources[name] ? ` <span class="badge gold" style="padding:1px 6px;font-size:11px">exists</span>` : "";

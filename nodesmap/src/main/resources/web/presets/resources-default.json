@@ -374,6 +374,351 @@
      "defender_time_multiplier": 2.0
     }
    }
+  },
+  {
+   "id": "crops",
+   "title": "Crops",
+   "about": "Lets crops grow in the territory. The rate is the chance each growth tick goes through: 1.0 is normal speed, 0.5 is half speed. Farm gives the four basic crops at half speed; the rest are one crop at full speed. Crops don't grow in territories without a matching node.",
+   "nodes": {
+    "farm": {
+     "icon": "wheat",
+     "cost": {
+      "constant": 0,
+      "scale": 1.0
+     },
+     "priority": 0,
+     "income": {},
+     "ore": {},
+     "crops": {
+      "wheat": 0.5,
+      "carrots": 0.5,
+      "potatoes": 0.5,
+      "beetroots": 0.5
+     },
+     "animals": {}
+    },
+    "wheat": {
+     "icon": "wheat",
+     "cost": {
+      "constant": 0,
+      "scale": 1.0
+     },
+     "priority": 0,
+     "income": {},
+     "ore": {},
+     "crops": {
+      "wheat": 1.0
+     },
+     "animals": {}
+    },
+    "carrot": {
+     "icon": "carrot",
+     "cost": {
+      "constant": 0,
+      "scale": 1.0
+     },
+     "priority": 0,
+     "income": {},
+     "ore": {},
+     "crops": {
+      "carrots": 1.0
+     },
+     "animals": {}
+    },
+    "potato": {
+     "icon": "potato",
+     "cost": {
+      "constant": 0,
+      "scale": 1.0
+     },
+     "priority": 0,
+     "income": {},
+     "ore": {},
+     "crops": {
+      "potatoes": 1.0
+     },
+     "animals": {}
+    },
+    "beetroot": {
+     "icon": "beetroot",
+     "cost": {
+      "constant": 0,
+      "scale": 1.0
+     },
+     "priority": 0,
+     "income": {},
+     "ore": {},
+     "crops": {
+      "beetroots": 1.0
+     },
+     "animals": {}
+    },
+    "melon": {
+     "icon": "melon_slice",
+     "cost": {
+      "constant": 0,
+      "scale": 1.0
+     },
+     "priority": 0,
+     "income": {},
+     "ore": {},
+     "crops": {
+      "melon": 1.0
+     },
+     "animals": {}
+    },
+    "pumpkin": {
+     "icon": "pumpkin_seeds",
+     "cost": {
+      "constant": 0,
+      "scale": 1.0
+     },
+     "priority": 0,
+     "income": {},
+     "ore": {},
+     "crops": {
+      "pumpkin": 1.0
+     },
+     "animals": {}
+    },
+    "sugar_cane": {
+     "icon": "sugar_cane",
+     "cost": {
+      "constant": 0,
+      "scale": 1.0
+     },
+     "priority": 0,
+     "income": {},
+     "ore": {},
+     "crops": {
+      "sugar_cane": 1.0
+     },
+     "animals": {}
+    },
+    "berries": {
+     "icon": "sweet_berries",
+     "cost": {
+      "constant": 0,
+      "scale": 1.0
+     },
+     "priority": 0,
+     "income": {},
+     "ore": {},
+     "crops": {
+      "sweet_berries": 1.0
+     },
+     "animals": {}
+    },
+    "cocoa": {
+     "icon": "cocoa_beans",
+     "cost": {
+      "constant": 0,
+      "scale": 1.0
+     },
+     "priority": 0,
+     "income": {},
+     "ore": {},
+     "crops": {
+      "cocoa": 1.0
+     },
+     "animals": {}
+    },
+    "cactus": {
+     "icon": "green_dye",
+     "cost": {
+      "constant": 0,
+      "scale": 1.0
+     },
+     "priority": 0,
+     "income": {},
+     "ore": {},
+     "crops": {
+      "cactus": 1.0
+     },
+     "animals": {}
+    },
+    "kelp": {
+     "icon": "kelp",
+     "cost": {
+      "constant": 0,
+      "scale": 1.0
+     },
+     "priority": 0,
+     "income": {},
+     "ore": {},
+     "crops": {
+      "kelp": 1.0
+     },
+     "animals": {}
+    },
+    "nether_wart": {
+     "icon": "nether_wart",
+     "cost": {
+      "constant": 0,
+      "scale": 1.0
+     },
+     "priority": 0,
+     "income": {},
+     "ore": {},
+     "crops": {
+      "nether_wart": 1.0
+     },
+     "animals": {}
+    }
+   }
+  },
+  {
+   "id": "animals",
+   "title": "Animals",
+   "about": "Lets animals breed in the territory. The rate is the chance a breeding attempt succeeds: 1.0 always, 0.5 half the time. Ranch gives cows, sheep, pigs and chickens at half rate; the rest are one kind at full rate. Sheep can only be sheared where sheep can breed.",
+   "nodes": {
+    "ranch": {
+     "icon": "mob_cow",
+     "cost": {
+      "constant": 0,
+      "scale": 1.0
+     },
+     "priority": 0,
+     "income": {},
+     "ore": {},
+     "crops": {},
+     "animals": {
+      "cow": 0.5,
+      "sheep": 0.5,
+      "pig": 0.5,
+      "chicken": 0.5
+     }
+    },
+    "cattle": {
+     "icon": "mob_cow",
+     "cost": {
+      "constant": 0,
+      "scale": 1.0
+     },
+     "priority": 0,
+     "income": {},
+     "ore": {},
+     "crops": {},
+     "animals": {
+      "cow": 1.0,
+      "mooshroom": 1.0
+     }
+    },
+    "sheep": {
+     "icon": "mob_sheep",
+     "cost": {
+      "constant": 0,
+      "scale": 1.0
+     },
+     "priority": 0,
+     "income": {},
+     "ore": {},
+     "crops": {},
+     "animals": {
+      "sheep": 1.0
+     }
+    },
+    "pigs": {
+     "icon": "mob_pig",
+     "cost": {
+      "constant": 0,
+      "scale": 1.0
+     },
+     "priority": 0,
+     "income": {},
+     "ore": {},
+     "crops": {},
+     "animals": {
+      "pig": 1.0
+     }
+    },
+    "chickens": {
+     "icon": "mob_chicken",
+     "cost": {
+      "constant": 0,
+      "scale": 1.0
+     },
+     "priority": 0,
+     "income": {},
+     "ore": {},
+     "crops": {},
+     "animals": {
+      "chicken": 1.0
+     }
+    },
+    "rabbits": {
+     "icon": "mob_rabbit",
+     "cost": {
+      "constant": 0,
+      "scale": 1.0
+     },
+     "priority": 0,
+     "income": {},
+     "ore": {},
+     "crops": {},
+     "animals": {
+      "rabbit": 1.0
+     }
+    },
+    "horses": {
+     "icon": "mob_horse",
+     "cost": {
+      "constant": 0,
+      "scale": 1.0
+     },
+     "priority": 0,
+     "income": {},
+     "ore": {},
+     "crops": {},
+     "animals": {
+      "horse": 1.0,
+      "donkey": 1.0,
+      "mule": 1.0
+     }
+    },
+    "llamas": {
+     "icon": "mob_llama",
+     "cost": {
+      "constant": 0,
+      "scale": 1.0
+     },
+     "priority": 0,
+     "income": {},
+     "ore": {},
+     "crops": {},
+     "animals": {
+      "llama": 1.0
+     }
+    },
+    "bees": {
+     "icon": "mob_bee",
+     "cost": {
+      "constant": 0,
+      "scale": 1.0
+     },
+     "priority": 0,
+     "income": {},
+     "ore": {},
+     "crops": {},
+     "animals": {
+      "bee": 1.0
+     }
+    },
+    "turtles": {
+     "icon": "mob_turtle",
+     "cost": {
+      "constant": 0,
+      "scale": 1.0
+     },
+     "priority": 0,
+     "income": {},
+     "ore": {},
+     "crops": {},
+     "animals": {
+      "turtle": 1.0
+     }
+    }
+   }
   }
  ]
 }
