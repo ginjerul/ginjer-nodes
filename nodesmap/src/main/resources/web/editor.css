@@ -3,7 +3,7 @@
 
 body.editor #map { cursor: default; }
 body.editor.tool-paint #map, body.editor.tool-new #map, body.editor.tool-erase #map,
-body.editor.tool-rect #map, body.editor.tool-fill #map, body.editor.tool-core #map { cursor: crosshair; }
+body.editor.tool-rect #map, body.editor.tool-auto #map, body.editor.tool-fill #map, body.editor.tool-core #map { cursor: crosshair; }
 body.editor.panning #map { cursor: grab; }
 body.editor .leaflet-interactive { cursor: inherit; }
 
@@ -155,3 +155,7 @@ kbd { font: 600 11px var(--mono); border: 1px solid var(--line-strong); border-r
 #res-tip pre { margin: 0; font: 11.5px/1.4 var(--mono); color: var(--muted); white-space: pre-wrap; word-break: break-word; }
 #res-tip .tip-warn { color: #fcd38d; margin-top: 4px; }
 .trow .sub .occ { color: #ff9a9d; }
+
+#modal .drow { display: grid; grid-template-columns: 1fr 74px 1.2fr 28px; gap: 6px; margin-bottom: 6px; }
+#modal .drow select, #modal .drow input { height: 32px; border-radius: 7px; border: 1px solid var(--line); background: rgba(0,0,0,0.25); color: var(--text); padding: 0 8px; min-width: 0; }
+#modal .drow select option { background: var(--panel-solid); }

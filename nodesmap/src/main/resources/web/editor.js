@@ -758,7 +758,7 @@
   }
   function syncDragging() {
     const brushPaints = PAINT_TOOLS.has(E.tool) && !E.classic;
-    const paintMode = brushPaints || E.tool === "rect" || stroke || rectStart || (E.tool === "select" && shiftDown);
+    const paintMode = brushPaints || E.tool === "rect" || E.tool === "auto" || stroke || rectStart || (E.tool === "select" && shiftDown);
     if (paintMode && !spaceDown) map.dragging.disable(); else map.dragging.enable();
     document.body.classList.toggle("panning", spaceDown);
   }
@@ -824,8 +824,8 @@
       G.ui.addLayer(boxRect);
       return;
     }
-    if (E.tool === "rect") {
-      rectStart = [cx, cz]; rectMode = "fill";
+    if (E.tool === "rect" || E.tool === "auto") {
+      rectStart = [cx, cz]; rectMode = E.tool === "auto" ? "auto" : "fill";
       boxRect.setBounds([ll(cx * 16, cz * 16), ll(cx * 16 + 16, cz * 16 + 16)]);
       G.ui.addLayer(boxRect);
       return;
@@ -961,6 +961,7 @@
     const x0 = Math.min(a[0], b[0]), x1 = Math.max(a[0], b[0]);
     const z0 = Math.min(a[1], b[1]), z1 = Math.max(a[1], b[1]);
     const area = (x1 - x0 + 1) * (z1 - z0 + 1);
+    if (mode === "auto") return autoDialog(x0, z0, x1, z1);
     if (mode === "select") {
       const ids = new Set();
       if (area <= 400000) {
@@ -1093,13 +1094,9 @@
    * chunks: k-means (Lloyd) on chunk centers, then every territory is made
    * one connected piece and tiny leftovers are merged into a neighbor.
    */
-  function generate({ avg, seed, iterations, mergeBelow }) {
-    const ids = [...E.sel];
-    if (!ids.length) return;
-    if (lockedInSelection().length) return toast("Claimed territories are locked and can't be regenerated", true);
-    const cells = [];
-    for (const id of ids) for (const k of E.terr.get(id).chunks) cells.push(k);
-    if (cells.length < 2) return;
+  /** Splits a set of chunk keys into compact pieces of about `avg` chunks (k-means style). Returns an array of Sets. */
+  function partition(cells, { avg, seed, iterations, mergeBelow }) {
+    if (cells.length < 2) return [new Set(cells)];
     const n = Math.max(1, Math.round(cells.length / avg));
     const rnd = mulberry32(seed);
     const xs = new Float64Array(cells.length), zs = new Float64Array(cells.length);
@@ -1197,6 +1194,17 @@
         groups.delete(g);
       }
     }
+    return [...groups.values()].filter((g) => g.size);
+  }
+
+  function generate({ avg, seed, iterations, mergeBelow }) {
+    const ids = [...E.sel];
+    if (!ids.length) return;
+    if (lockedInSelection().length) return toast("Claimed territories are locked and can't be regenerated", true);
+    const cells = [];
+    for (const id of ids) for (const k of E.terr.get(id).chunks) cells.push(k);
+    if (cells.length < 2) return;
+    const groups = partition(cells, { avg, seed, iterations, mergeBelow });
     begin("Generate territories");
     for (const id of ids) {
       const t = E.terr.get(id);
@@ -1205,7 +1213,7 @@
       t.chunks.clear();
     }
     const created = [];
-    for (const set of groups.values()) {
+    for (const set of groups) {
       if (!set.size) continue;
       const t = newTerritory();
       for (const k of set) assign(k, t.id);
@@ -1216,16 +1224,131 @@
     toast(`Made ${created.length} territories (about ${Math.round(cells.length / Math.max(1, created.length))} chunks each)`);
   }
 
-  function distribute(resource, count) {
-    const ids = [...E.sel].filter((id) => !E.terr.get(id).nodes.includes(resource));
-    if (!ids.length) return toast("Every selected territory already has it", true);
-    const rnd = mulberry32((Date.now() & 0xffff) + ids.length);
-    for (let i = ids.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [ids[i], ids[j]] = [ids[j], ids[i]]; }
-    const pick = ids.slice(0, Math.min(count, ids.length));
-    begin(`Add ${resource}`);
-    for (const id of pick) { touch(id); E.terr.get(id).nodes.push(resource); }
+  /** Picks `count` items spread out (best-candidate sampling); `taken` are positions that already count as occupied. */
+  function spreadPick(cands, count, rnd, taken) {
+    const pos = (t) => t.core || [KX([...t.chunks][0]), KZ([...t.chunks][0])];
+    const pts = taken.slice();
+    const left = cands.slice();
+    const out = [];
+    while (out.length < count && left.length) {
+      let best = -1, bd = -1;
+      const tries = Math.min(left.length, 12);
+      for (let n = 0; n < tries; n++) {
+        const i = Math.floor(rnd() * left.length);
+        const p = pos(left[i]);
+        let d = Infinity;
+        for (const q of pts) { const dd = (p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2; if (dd < d) d = dd; }
+        if (d > bd) { bd = d; best = i; }
+      }
+      const t = left.splice(best, 1)[0];
+      out.push(t);
+      pts.push(pos(t));
+    }
+    return out;
+  }
+
+  /** rows: [{ resource, amount, percent }]; options: { spread, maxPer, clear, seed } */
+  function distributeResources(rows, { spread, maxPer, clear, seed }) {
+    const scope = (E.sel.size ? [...E.sel] : [...E.terr.keys()]).map((id) => E.terr.get(id)).filter((t) => t && !isLocked(t.id));
+    if (!scope.length) return toast("No territories to put resources on (claimed ones are locked, see Options)", true);
+    const rnd = mulberry32(seed);
+    begin("Distribute resources");
+    if (clear) for (const t of scope) { touch(t.id); t.nodes = []; }
+    const summary = [];
+    for (const row of rows) {
+      const want = row.percent ? Math.round(scope.length * row.amount / 100) : Math.round(row.amount);
+      const cands = scope.filter((t) => !t.nodes.includes(row.resource) && t.nodes.length < maxPer);
+      // territories anywhere that already have it count as occupied spots, so new ones keep their distance
+      const taken = [];
+      for (const t of E.terr.values()) if (t.nodes.includes(row.resource) && t.core) taken.push(t.core);
+      let picked;
+      if (spread) {
+        picked = spreadPick(cands, want, rnd, taken);
+      } else {
+        const a = cands.slice();
+        for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+        picked = a.slice(0, want);
+      }
+      for (const t of picked) { touch(t.id); t.nodes.push(row.resource); }
+      summary.push(`${row.resource} ×${picked.length}`);
+    }
     end();
-    toast(`Added ${resource} to ${pick.length} territories`);
+    toast(`Distributed: ${summary.join(", ")}${summary.length ? "" : "nothing"}`);
+  }
+
+  function distribute(resource, count) {
+    distributeResources([{ resource, amount: count, percent: false }], { spread: false, maxPer: 99, clear: false, seed: (Date.now() & 0xffff) + E.sel.size });
+  }
+
+  async function waitForLand(x0, z0, x1, z1) {
+    const [rx0, rz0] = regionOf(x0, z0), [rx1, rz1] = regionOf(x1, z1);
+    const regs = [];
+    for (let z = rz0; z <= rz1; z++) for (let x = rx0; x <= rx1; x++) regs.push(loadRegion(x, z));
+    const t0 = Date.now();
+    while (regs.some((r) => r.state === "loading") && Date.now() - t0 < 30000) await new Promise((r) => setTimeout(r, 100));
+  }
+
+  function autoDialog(x0, z0, x1, z1) {
+    const area = (x1 - x0 + 1) * (z1 - z0 + 1);
+    if (area > 250000) return toast("That box is too big (max 250,000 chunks). Do it in a few boxes.", true);
+    const p = store.get("auto", { avg: 120, seed: 1, iterations: 4, mergeBelow: 30, minIsland: 12, land: true });
+    modal(`<h2>Auto-generate territories</h2>
+      <p>Fills the unclaimed land inside this box (${(x1 - x0 + 1)}×${(z1 - z0 + 1)} chunks) with new territories. Existing territories are left alone. You can undo this.</p>
+      <div class="grid2">
+        <label class="field"><span>Chunks per territory</span><input id="a-avg" type="number" min="4" value="${p.avg}"></label>
+        <label class="field"><span>Random seed</span><input id="a-seed" type="number" value="${p.seed}"></label>
+        <label class="field"><span>Smoothing passes</span><input id="a-it" type="number" min="0" max="20" value="${p.iterations}"></label>
+        <label class="field"><span>Merge pieces smaller than</span><input id="a-merge" type="number" min="0" value="${p.mergeBelow}"></label>
+        <label class="field"><span>Skip islands smaller than</span><input id="a-isle" type="number" min="0" value="${p.minIsland}"></label>
+        <label class="field"><span>Land only</span><select id="a-land"><option value="1"${p.land ? " selected" : ""}>Yes, skip water</option><option value="0"${p.land ? "" : " selected"}>No, include water</option></select></label>
+      </div>
+      <p class="hint" id="a-est"></p>
+      <div class="foot"><button class="btn" data-close>Cancel</button><button class="btn primary" id="a-go">Generate</button></div>`);
+    const upd = () => { $("#a-est").textContent = `Up to about ${Math.max(1, Math.round(area / Math.max(4, +$("#a-avg").value || 120)))} territories if the whole box is land`; };
+    $("#a-avg").oninput = upd;
+    upd();
+    $("#a-go").onclick = async () => {
+      const params = {
+        avg: Math.max(4, +$("#a-avg").value || 120), seed: +$("#a-seed").value || 1,
+        iterations: Math.max(0, Math.min(20, +$("#a-it").value || 0)), mergeBelow: Math.max(0, +$("#a-merge").value || 0),
+        minIsland: Math.max(0, +$("#a-isle").value || 0), land: $("#a-land").value === "1",
+      };
+      store.set("auto", params);
+      closeModal();
+      toast("Reading terrain…");
+      if (params.land) await waitForLand(x0, z0, x1, z1);
+      autoGenerate(x0, z0, x1, z1, params);
+    };
+  }
+
+  function autoGenerate(x0, z0, x1, z1, { avg, seed, iterations, mergeBelow, minIsland, land }) {
+    const cells = [];
+    for (let z = z0; z <= z1; z++) {
+      for (let x = x0; x <= x1; x++) {
+        const k = K(x, z);
+        if (E.owner.has(k)) continue;
+        if (land && isLand(k) !== true) continue;
+        cells.push(k);
+      }
+    }
+    if (!cells.length) return toast("No free land in that box (water, or already in territories)", true);
+    const comps = components(new Set(cells));
+    begin("Auto-generate territories");
+    const created = [];
+    let skipped = 0;
+    comps.forEach((comp, i) => {
+      if (comp.length < Math.max(1, minIsland)) { skipped += comp.length; return; }
+      const parts = comp.length < avg * 1.5 ? [new Set(comp)] : partition(comp, { avg, seed: seed + i, iterations, mergeBelow });
+      for (const set of parts) {
+        if (!set.size) continue;
+        const t = newTerritory();
+        for (const k of set) assign(k, t.id);
+        created.push(t.id);
+      }
+    });
+    end();
+    select(created);
+    toast(`Made ${created.length} territories (about ${Math.round((cells.length - skipped) / Math.max(1, created.length))} chunks each)${skipped ? `, skipped ${skipped} chunks of tiny islands` : ""}`);
   }
 
   // ---------------------------------------------------------------- serialize
@@ -1629,13 +1752,35 @@
   function distributeDialog() {
     const names = Object.keys(E.resources).sort();
     if (!names.length) return toast("Create a resource first (Resources tab)", true);
-    modal(`<h2>Add a resource</h2><p>Adds it to randomly chosen territories in the selection.</p>
-      <div class="grid2">
-        <label class="field"><span>Resource</span><select id="d-res">${names.map((n) => `<option>${esc(n)}</option>`).join("")}</select></label>
-        <label class="field"><span>How many territories</span><input id="d-n" type="number" min="1" value="${Math.max(1, Math.round(E.sel.size / 5))}"></label>
+    const scopeN = E.sel.size || E.terr.size;
+    const p = store.get("dist", { spread: true, maxPer: 3, clear: false, seed: 1 });
+    const rowHtml = (r) => `<div class="drow">
+      <select class="d-res">${names.map((n) => `<option${n === r.resource ? " selected" : ""}>${esc(n)}</option>`).join("")}</select>
+      <input class="d-amt" type="number" min="0" step="any" value="${r.amount}">
+      <select class="d-unit"><option value="n"${r.percent ? "" : " selected"}>territories</option><option value="p"${r.percent ? " selected" : ""}>% of territories</option></select>
+      <button class="icon-btn d-del" title="Remove row" aria-label="Remove row">×</button></div>`;
+    modal(`<h2>Distribute resources</h2>
+      <p>Places resources on ${E.sel.size ? `the ${E.sel.size} selected territories` : `all ${E.terr.size} territories (claimed ones are skipped)`}. Add one row per resource. You can undo this.</p>
+      <div id="d-rows">${(p.rows && p.rows.length ? p.rows : [{ resource: names[0], amount: 10, percent: true }]).filter((r) => names.includes(r.resource)).map(rowHtml).join("")}</div>
+      <button class="btn small" id="d-add">+ Add resource</button>
+      <div class="grid2" style="margin-top:10px">
+        <label class="field"><span>Max resources per territory</span><input id="d-max" type="number" min="1" value="${p.maxPer}"></label>
+        <label class="field"><span>Random seed</span><input id="d-seed" type="number" value="${p.seed}"></label>
+        <label class="field"><span>Placement</span><select id="d-spread"><option value="1"${p.spread ? " selected" : ""}>Spread evenly</option><option value="0"${p.spread ? "" : " selected"}>Fully random</option></select></label>
+        <label class="field"><span>Existing resources</span><select id="d-clear"><option value="0"${p.clear ? "" : " selected"}>Keep them</option><option value="1"${p.clear ? " selected" : ""}>Clear first</option></select></label>
       </div>
-      <div class="foot"><button class="btn" data-close>Cancel</button><button class="btn primary" id="d-go">Add</button></div>`);
-    $("#d-go").onclick = () => { const r = $("#d-res").value; const n = +$("#d-n").value || 1; closeModal(); distribute(r, n); };
+      <p class="hint">${scopeN.toLocaleString()} territories in scope</p>
+      <div class="foot"><button class="btn" data-close>Cancel</button><button class="btn primary" id="d-go">Distribute</button></div>`);
+    const wire = () => $$("#d-rows .d-del").forEach((b) => (b.onclick = () => { if ($$("#d-rows .drow").length > 1) b.parentElement.remove(); }));
+    wire();
+    $("#d-add").onclick = () => { $("#d-rows").insertAdjacentHTML("beforeend", rowHtml({ resource: names[0], amount: 10, percent: true })); wire(); };
+    $("#d-go").onclick = () => {
+      const rows = $$("#d-rows .drow").map((r) => ({ resource: $(".d-res", r).value, amount: Math.max(0, +$(".d-amt", r).value || 0), percent: $(".d-unit", r).value === "p" }));
+      const opts = { spread: $("#d-spread").value === "1", maxPer: Math.max(1, +$("#d-max").value || 1), clear: $("#d-clear").value === "1", seed: +$("#d-seed").value || 1 };
+      store.set("dist", { ...opts, rows });
+      closeModal();
+      distributeResources(rows, opts);
+    };
   }
 
   // ---------------------------------------------------------------- toast / modal / busy
@@ -2013,6 +2158,7 @@
       renderResList();
     };
     $("#res-pack").onclick = packDialog;
+    $("#terr-dist").onclick = distributeDialog;
     $("#res-new").onclick = () => {
       let n = "new_resource", i = 1;
       while (E.resources[n]) n = `new_resource_${i++}`;
@@ -2072,7 +2218,7 @@
         if (pendingNew) toast("Next stroke starts a new territory");
         return;
       }
-      const tools = { v: "select", b: "paint", n: "new", e: "erase", r: "rect", f: "fill", c: "core" };
+      const tools = { v: "select", b: "paint", n: "new", e: "erase", r: "rect", f: "fill", c: "core", g: "auto" };
       if (tools[e.key.toLowerCase()]) return setTool(tools[e.key.toLowerCase()]);
       if (e.key === "[") return setBrush(E.brush - 1);
       if (e.key === "]") return setBrush(E.brush + 1);
