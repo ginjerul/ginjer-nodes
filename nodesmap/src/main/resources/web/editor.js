@@ -722,7 +722,7 @@
     E.classic = PAINT_TOOLS.has(t) && classic;
     E.tool = t;
     if (!PAINT_TOOLS.has(t)) setPendingNew(false);
-    if (t !== "auto") polyReset();
+    if (t !== "auto") penReset();
     if (t === "auto") map.doubleClickZoom.disable(); else map.doubleClickZoom.enable();
     document.body.className = "editor tool-" + t;
     $$("#tools [data-tool]").forEach((b) => b.classList.toggle("active", b.dataset.tool === t));
@@ -753,8 +753,9 @@
     const brush = PAINT_TOOLS.has(E.tool);
     const btn = E.classic ? "right-drag" : "drag";
     if (E.tool === "auto") {
-      el.textContent = poly.length >= 3 ? "Enter or click the first point to finish · Backspace: undo point · Esc: cancel" :
-        "Click points around the area, or drag to draw freehand";
+      el.textContent = penStrokes.length ?
+        "Click inside a closed area to fill it · drag to draw more border · Backspace: undo line · Esc: clear" :
+        "Drag to draw a border line · click inside a closed area to fill it (water and territories close areas too)";
       return;
     }
     el.textContent = !brush ? "" :
@@ -797,11 +798,7 @@
     }
     if (PAINT_TOOLS.has(E.tool)) cursor.setLatLng(ll(cx * 16 + 8, cz * 16 + 8));
     if (stroke) strokeTo(cx, cz);
-    if (E.tool === "auto") {
-      if (polyDown && !polyFree && Math.hypot(oe.clientX - polyDown.sx, oe.clientY - polyDown.sy) > 8) polyFree = true;
-      if (polyFree) polyAdd(Math.floor(e.latlng.lng), Math.floor(e.latlng.lat), 24);
-      else { polyHover = e.latlng; polyDraw(); }
-    }
+    if (E.tool === "auto") penMove(e);
     if (rectStart) {
       boxRect.setBounds([ll(Math.min(rectStart[0], cx) * 16, Math.min(rectStart[1], cz) * 16), ll((Math.max(rectStart[0], cx) + 1) * 16, (Math.max(rectStart[1], cz) + 1) * 16)]);
     }
@@ -813,69 +810,99 @@
   map.getContainer().addEventListener("contextmenu", (e) => e.preventDefault());
   map.on("dragstart", () => { if (spaceDown) spacePanned = true; });
 
-  // ---- Auto tool: draw the outline of the area (click points, or drag freehand)
-  const polyShape = L.polygon([], { renderer: R.ui, color: "#f3d38d", weight: 2, fillOpacity: 0.14, dashArray: "6 4", interactive: false });
-  let poly = [];          // [x, z] block coordinates
-  let polyHover = null;   // current mouse position while placing points
-  let polyDown = null;    // { sx, sy } screen position of the mouse press
-  let polyFree = false;
+  // ---- Auto tool (pen): draw border lines, then click inside a closed area to fill it
+  const penWalls = new Set();   // chunk keys of drawn border lines
+  let penStrokes = [];          // [{ keys: [], line: L.Polyline }] for undo
+  let penDown = null;           // { sx, sy, moved, last: [cx, cz], stroke }
+  const penStyle = { renderer: R.ui, color: "#f3d38d", weight: 3, opacity: 0.95, interactive: false };
 
-  function polyDraw() {
-    const pts = poly.map((p) => ll(p[0], p[1]));
-    if (polyHover && !polyFree) pts.push(polyHover);
-    polyShape.setLatLngs(pts);
-    if (pts.length) G.ui.addLayer(polyShape); else G.ui.removeLayer(polyShape);
-  }
-  function polyReset() {
-    poly = []; polyHover = null; polyDown = null; polyFree = false;
-    polyDraw();
+  function penReset() {
+    for (const st of penStrokes) G.ui.removeLayer(st.line);
+    penStrokes = [];
+    penWalls.clear();
+    penDown = null;
     updateModeHint();
   }
-  function polyAdd(x, z, minDist = 8) {
-    const last = poly[poly.length - 1];
-    if (last && Math.hypot(last[0] - x, last[1] - z) < minDist) return;
-    poly.push([x, z]);
-    polyDraw();
+  function penUndo() {
+    const st = penStrokes.pop();
+    if (!st) return;
+    G.ui.removeLayer(st.line);
+    penWalls.clear();
+    for (const o of penStrokes) for (const k of o.keys) penWalls.add(k);
     updateModeHint();
-  }
-  function polyFinish() {
-    if (poly.length < 3) return toast("Click at least 3 points around the area first", true);
-    const pts = poly.slice();
-    polyReset();
-    const xs = pts.map((p) => p[0]), zs = pts.map((p) => p[1]);
-    const x0 = Math.floor(Math.min(...xs) / 16), x1 = Math.floor(Math.max(...xs) / 16);
-    const z0 = Math.floor(Math.min(...zs) / 16), z1 = Math.floor(Math.max(...zs) / 16);
-    const inside = (cx, cz) => {
-      const px = cx * 16 + 8, pz = cz * 16 + 8;
-      let in_ = false;
-      for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
-        const [xi, zi] = pts[i], [xj, zj] = pts[j];
-        if ((zi > pz) !== (zj > pz) && px < ((xj - xi) * (pz - zi)) / (zj - zi) + xi) in_ = !in_;
-      }
-      return in_;
-    };
-    autoDialog(x0, z0, x1, z1, inside);
   }
   map.on("mousedown", (e) => {
     if (E.tool !== "auto" || spaceDown || e.originalEvent.button !== 0) return;
-    polyDown = { sx: e.originalEvent.clientX, sy: e.originalEvent.clientY };
-    polyFree = false;
+    const [cx, cz] = chunkAt(e.latlng);
+    penDown = { sx: e.originalEvent.clientX, sy: e.originalEvent.clientY, moved: false, last: [cx, cz], start: [cx, cz], stroke: null };
   });
-  map.on("dblclick", () => { if (E.tool === "auto" && poly.length >= 3) polyFinish(); });
-  document.addEventListener("mouseup", (e) => {
-    if (E.tool !== "auto" || !polyDown) return;
-    const wasFree = polyFree;
-    polyDown = null; polyFree = false;
-    if (e.target.closest && e.target.closest("#sidebar,#modal-wrap,#topbar")) return;
-    if (wasFree) return polyFinish();
-    const p = map.mouseEventToLatLng(e);
-    if (poly.length >= 3) {
-      const f = map.latLngToContainerPoint(ll(poly[0][0], poly[0][1]));
-      const c = map.latLngToContainerPoint(p);
-      if (Math.hypot(f.x - c.x, f.y - c.y) < 12) return polyFinish();
+  function penMove(e) {
+    if (!penDown) return;
+    const oe = e.originalEvent || e;
+    if (!penDown.moved) {
+      if (Math.hypot(oe.clientX - penDown.sx, oe.clientY - penDown.sy) < 6) return;
+      penDown.moved = true;
+      penDown.stroke = { keys: [K(penDown.start[0], penDown.start[1])], pts: [ll(penDown.start[0] * 16 + 8, penDown.start[1] * 16 + 8)], line: L.polyline([], penStyle) };
+      G.ui.addLayer(penDown.stroke.line);
+      penWalls.add(penDown.stroke.keys[0]);
     }
-    polyAdd(Math.floor(p.lng), Math.floor(p.lat));
+    const [cx, cz] = chunkAt(e.latlng || map.mouseEventToLatLng(e));
+    if (cx === penDown.last[0] && cz === penDown.last[1]) return;
+    for (const [x, z] of line(penDown.last[0], penDown.last[1], cx, cz).slice(1)) {
+      const k = K(x, z);
+      penDown.stroke.keys.push(k);
+      penWalls.add(k);
+    }
+    penDown.stroke.pts.push(ll(cx * 16 + 8, cz * 16 + 8));
+    penDown.stroke.line.setLatLngs(penDown.stroke.pts);
+    penDown.last = [cx, cz];
+  }
+  document.addEventListener("mouseup", (e) => {
+    if (E.tool !== "auto" || !penDown) return;
+    const d = penDown;
+    penDown = null;
+    if (e.target.closest && e.target.closest("#sidebar,#modal-wrap")) return;
+    if (d.moved) {
+      penDown = d;
+      penMove(e); // include the point where the button was released
+      penDown = null;
+      penStrokes.push(d.stroke);
+      updateModeHint();
+      return;
+    }
+    penFill(d.start[0], d.start[1]);
   });
+
+  /** flood fill of free land around (cx, cz), stopped by drawn borders, territories and (with Land only) water */
+  async function penFill(cx, cz) {
+    const start = K(cx, cz);
+    if (E.owner.has(start)) return toast("That chunk is already in a territory. Click on free land inside your border.", true);
+    if (penWalls.has(start)) return toast("That's on a border line. Click inside the area instead.", true);
+    const LIMIT = 250000;
+    if (E.opt.land) {
+      await waitForLand(cx, cz, cx, cz);
+      if (isLand(start) !== true) return toast("That's water. Click on land, or turn off Land only in Options.", true);
+    }
+    toast("Filling…");
+    const seen = new Set([start]);
+    const queue = [start];
+    for (let qi = 0; qi < queue.length; qi++) {
+      const k = queue[qi];
+      const x = KX(k), z = KZ(k);
+      for (const nk of [K(x + 1, z), K(x - 1, z), K(x, z + 1), K(x, z - 1)]) {
+        if (seen.has(nk) || E.owner.has(nk) || penWalls.has(nk)) continue;
+        if (E.opt.land) {
+          let v = isLand(nk);
+          if (v === null) { await waitForLand(KX(nk), KZ(nk), KX(nk), KZ(nk)); v = isLand(nk); }
+          if (v !== true) continue;
+        }
+        seen.add(nk);
+        queue.push(nk);
+      }
+      if (queue.length > LIMIT) return toast("That area isn't closed: it keeps going. Draw the missing part of the border" + (E.opt.land ? "." : ", or turn on Land only in Options so water closes it."), true);
+    }
+    autoDialog(queue);
+  }
 
   /** stroke mode for a mouse press while the brush is on */
   function brushMode(oe) {
@@ -1363,68 +1390,48 @@
     while (regs.some((r) => r.state === "loading") && Date.now() - t0 < 30000) await new Promise((r) => setTimeout(r, 100));
   }
 
-  function autoDialog(x0, z0, x1, z1, inside) {
-    const area = (x1 - x0 + 1) * (z1 - z0 + 1);
-    if (area > 250000) return toast("That outline is too big (max 250,000 chunks across). Do it in a few parts.", true);
-    const p = store.get("auto", { avg: 120, seed: 1, iterations: 4, mergeBelow: 30, minIsland: 12, land: true });
+  function autoDialog(cells) {
+    const p = store.get("auto", { avg: 120, seed: 1, iterations: 4, mergeBelow: 30 });
     modal(`<h2>Auto-generate territories</h2>
-      <p>Fills the unclaimed land inside your outline with new territories. Existing territories are left alone. You can undo this.</p>
+      <p>Fills this area (${cells.length.toLocaleString()} chunks of free land) with new territories. Nothing else is touched. You can undo this.</p>
       <div class="grid2">
         <label class="field"><span>Chunks per territory</span><input id="a-avg" type="number" min="4" value="${p.avg}"></label>
         <label class="field"><span>Random seed</span><input id="a-seed" type="number" value="${p.seed}"></label>
         <label class="field"><span>Smoothing passes</span><input id="a-it" type="number" min="0" max="20" value="${p.iterations}"></label>
         <label class="field"><span>Merge pieces smaller than</span><input id="a-merge" type="number" min="0" value="${p.mergeBelow}"></label>
-        <label class="field"><span>Skip islands smaller than</span><input id="a-isle" type="number" min="0" value="${p.minIsland}"></label>
-        <label class="field"><span>Land only</span><select id="a-land"><option value="1"${p.land ? " selected" : ""}>Yes, skip water</option><option value="0"${p.land ? "" : " selected"}>No, include water</option></select></label>
       </div>
       <p class="hint" id="a-est"></p>
       <div class="foot"><button class="btn" data-close>Cancel</button><button class="btn primary" id="a-go">Generate</button></div>`);
-    const upd = () => { $("#a-est").textContent = `Up to about ${Math.max(1, Math.round(area / Math.max(4, +$("#a-avg").value || 120)))} territories if the whole outline is land`; };
+    const upd = () => { $("#a-est").textContent = `About ${Math.max(1, Math.round(cells.length / Math.max(4, +$("#a-avg").value || 120)))} territories`; };
     $("#a-avg").oninput = upd;
     upd();
-    $("#a-go").onclick = async () => {
+    $("#a-go").onclick = () => {
       const params = {
         avg: Math.max(4, +$("#a-avg").value || 120), seed: +$("#a-seed").value || 1,
         iterations: Math.max(0, Math.min(20, +$("#a-it").value || 0)), mergeBelow: Math.max(0, +$("#a-merge").value || 0),
-        minIsland: Math.max(0, +$("#a-isle").value || 0), land: $("#a-land").value === "1",
       };
       store.set("auto", params);
       closeModal();
-      toast("Reading terrain…");
-      if (params.land) await waitForLand(x0, z0, x1, z1);
-      autoGenerate(x0, z0, x1, z1, inside, params);
+      autoGenerate(cells, params);
     };
   }
 
-  function autoGenerate(x0, z0, x1, z1, inside, { avg, seed, iterations, mergeBelow, minIsland, land }) {
-    const cells = [];
-    for (let z = z0; z <= z1; z++) {
-      for (let x = x0; x <= x1; x++) {
-        const k = K(x, z);
-        if (E.owner.has(k)) continue;
-        if (inside && !inside(x, z)) continue;
-        if (land && isLand(k) !== true) continue;
-        cells.push(k);
-      }
-    }
-    if (!cells.length) return toast("No free land inside that outline (water, or already in territories)", true);
-    const comps = components(new Set(cells));
+  function autoGenerate(cells, { avg, seed, iterations, mergeBelow }) {
+    cells = cells.filter((k) => !E.owner.has(k));
+    if (!cells.length) return toast("No free land left in that area", true);
     begin("Auto-generate territories");
     const created = [];
-    let skipped = 0;
-    comps.forEach((comp, i) => {
-      if (comp.length < Math.max(1, minIsland)) { skipped += comp.length; return; }
-      const parts = comp.length < avg * 1.5 ? [new Set(comp)] : partition(comp, { avg, seed: seed + i, iterations, mergeBelow });
-      for (const set of parts) {
-        if (!set.size) continue;
-        const t = newTerritory();
-        for (const k of set) assign(k, t.id);
-        created.push(t.id);
-      }
-    });
+    const parts = cells.length < avg * 1.5 ? [new Set(cells)] : partition(cells, { avg, seed, iterations, mergeBelow });
+    for (const set of parts) {
+      if (!set.size) continue;
+      const t = newTerritory();
+      for (const k of set) assign(k, t.id);
+      created.push(t.id);
+    }
     end();
+    penReset();
     select(created);
-    toast(`Made ${created.length} territories (about ${Math.round((cells.length - skipped) / Math.max(1, created.length))} chunks each)${skipped ? `, skipped ${skipped} chunks of tiny islands` : ""}`);
+    toast(`Made ${created.length} territories (about ${Math.round(cells.length / Math.max(1, created.length))} chunks each)`);
   }
 
   // ---------------------------------------------------------------- serialize
@@ -2277,14 +2284,11 @@
       const typing = isTyping();
       if (e.key === "Escape") {
         closeModal();
-        if (!typing) { if (E.tool === "auto" && poly.length) polyReset(); else select([]); }
+        if (!typing) { if (E.tool === "auto" && penStrokes.length) penReset(); else select([]); }
         return;
       }
       if (typing) return;
-      if (E.tool === "auto" && poly.length) {
-        if (e.key === "Enter") { e.preventDefault(); return polyFinish(); }
-        if (e.key === "Backspace") { e.preventDefault(); poly.pop(); polyDraw(); updateModeHint(); return; }
-      }
+      if (E.tool === "auto" && penStrokes.length && e.key === "Backspace") { e.preventDefault(); penUndo(); return; }
       const mod = e.ctrlKey || e.metaKey;
       if (mod && e.key.toLowerCase() === "z") { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
       if (mod && e.key.toLowerCase() === "y") { e.preventDefault(); redo(); return; }
