@@ -722,6 +722,8 @@
     E.classic = PAINT_TOOLS.has(t) && classic;
     E.tool = t;
     if (!PAINT_TOOLS.has(t)) setPendingNew(false);
+    if (t !== "auto") polyReset();
+    if (t === "auto") map.doubleClickZoom.disable(); else map.doubleClickZoom.enable();
     document.body.className = "editor tool-" + t;
     $$("#tools [data-tool]").forEach((b) => b.classList.toggle("active", b.dataset.tool === t));
     $("#brush").classList.toggle("off", !PAINT_TOOLS.has(t));
@@ -750,6 +752,11 @@
     if (!el) return;
     const brush = PAINT_TOOLS.has(E.tool);
     const btn = E.classic ? "right-drag" : "drag";
+    if (E.tool === "auto") {
+      el.textContent = poly.length >= 3 ? "Enter or click the first point to finish · Backspace: undo point · Esc: cancel" :
+        "Click points around the area, or drag to draw freehand";
+      return;
+    }
     el.textContent = !brush ? "" :
       pendingNew ? `Next stroke starts a new territory · ${btn} to paint` :
       E.tool === "erase" ? `Erasing · ${btn} · Space: brush off` :
@@ -790,6 +797,11 @@
     }
     if (PAINT_TOOLS.has(E.tool)) cursor.setLatLng(ll(cx * 16 + 8, cz * 16 + 8));
     if (stroke) strokeTo(cx, cz);
+    if (E.tool === "auto") {
+      if (polyDown && !polyFree && Math.hypot(oe.clientX - polyDown.sx, oe.clientY - polyDown.sy) > 8) polyFree = true;
+      if (polyFree) polyAdd(Math.floor(e.latlng.lng), Math.floor(e.latlng.lat), 24);
+      else { polyHover = e.latlng; polyDraw(); }
+    }
     if (rectStart) {
       boxRect.setBounds([ll(Math.min(rectStart[0], cx) * 16, Math.min(rectStart[1], cz) * 16), ll((Math.max(rectStart[0], cx) + 1) * 16, (Math.max(rectStart[1], cz) + 1) * 16)]);
     }
@@ -800,6 +812,70 @@
 
   map.getContainer().addEventListener("contextmenu", (e) => e.preventDefault());
   map.on("dragstart", () => { if (spaceDown) spacePanned = true; });
+
+  // ---- Auto tool: draw the outline of the area (click points, or drag freehand)
+  const polyShape = L.polygon([], { renderer: R.ui, color: "#f3d38d", weight: 2, fillOpacity: 0.14, dashArray: "6 4", interactive: false });
+  let poly = [];          // [x, z] block coordinates
+  let polyHover = null;   // current mouse position while placing points
+  let polyDown = null;    // { sx, sy } screen position of the mouse press
+  let polyFree = false;
+
+  function polyDraw() {
+    const pts = poly.map((p) => ll(p[0], p[1]));
+    if (polyHover && !polyFree) pts.push(polyHover);
+    polyShape.setLatLngs(pts);
+    if (pts.length) G.ui.addLayer(polyShape); else G.ui.removeLayer(polyShape);
+  }
+  function polyReset() {
+    poly = []; polyHover = null; polyDown = null; polyFree = false;
+    polyDraw();
+    updateModeHint();
+  }
+  function polyAdd(x, z, minDist = 8) {
+    const last = poly[poly.length - 1];
+    if (last && Math.hypot(last[0] - x, last[1] - z) < minDist) return;
+    poly.push([x, z]);
+    polyDraw();
+    updateModeHint();
+  }
+  function polyFinish() {
+    if (poly.length < 3) return toast("Click at least 3 points around the area first", true);
+    const pts = poly.slice();
+    polyReset();
+    const xs = pts.map((p) => p[0]), zs = pts.map((p) => p[1]);
+    const x0 = Math.floor(Math.min(...xs) / 16), x1 = Math.floor(Math.max(...xs) / 16);
+    const z0 = Math.floor(Math.min(...zs) / 16), z1 = Math.floor(Math.max(...zs) / 16);
+    const inside = (cx, cz) => {
+      const px = cx * 16 + 8, pz = cz * 16 + 8;
+      let in_ = false;
+      for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+        const [xi, zi] = pts[i], [xj, zj] = pts[j];
+        if ((zi > pz) !== (zj > pz) && px < ((xj - xi) * (pz - zi)) / (zj - zi) + xi) in_ = !in_;
+      }
+      return in_;
+    };
+    autoDialog(x0, z0, x1, z1, inside);
+  }
+  map.on("mousedown", (e) => {
+    if (E.tool !== "auto" || spaceDown || e.originalEvent.button !== 0) return;
+    polyDown = { sx: e.originalEvent.clientX, sy: e.originalEvent.clientY };
+    polyFree = false;
+  });
+  map.on("dblclick", () => { if (E.tool === "auto" && poly.length >= 3) polyFinish(); });
+  document.addEventListener("mouseup", (e) => {
+    if (E.tool !== "auto" || !polyDown) return;
+    const wasFree = polyFree;
+    polyDown = null; polyFree = false;
+    if (e.target.closest && e.target.closest("#sidebar,#modal-wrap,#topbar")) return;
+    if (wasFree) return polyFinish();
+    const p = map.mouseEventToLatLng(e);
+    if (poly.length >= 3) {
+      const f = map.latLngToContainerPoint(ll(poly[0][0], poly[0][1]));
+      const c = map.latLngToContainerPoint(p);
+      if (Math.hypot(f.x - c.x, f.y - c.y) < 12) return polyFinish();
+    }
+    polyAdd(Math.floor(p.lng), Math.floor(p.lat));
+  });
 
   /** stroke mode for a mouse press while the brush is on */
   function brushMode(oe) {
@@ -824,8 +900,8 @@
       G.ui.addLayer(boxRect);
       return;
     }
-    if (E.tool === "rect" || E.tool === "auto") {
-      rectStart = [cx, cz]; rectMode = E.tool === "auto" ? "auto" : "fill";
+    if (E.tool === "rect") {
+      rectStart = [cx, cz]; rectMode = "fill";
       boxRect.setBounds([ll(cx * 16, cz * 16), ll(cx * 16 + 16, cz * 16 + 16)]);
       G.ui.addLayer(boxRect);
       return;
@@ -961,7 +1037,6 @@
     const x0 = Math.min(a[0], b[0]), x1 = Math.max(a[0], b[0]);
     const z0 = Math.min(a[1], b[1]), z1 = Math.max(a[1], b[1]);
     const area = (x1 - x0 + 1) * (z1 - z0 + 1);
-    if (mode === "auto") return autoDialog(x0, z0, x1, z1);
     if (mode === "select") {
       const ids = new Set();
       if (area <= 400000) {
@@ -1288,12 +1363,12 @@
     while (regs.some((r) => r.state === "loading") && Date.now() - t0 < 30000) await new Promise((r) => setTimeout(r, 100));
   }
 
-  function autoDialog(x0, z0, x1, z1) {
+  function autoDialog(x0, z0, x1, z1, inside) {
     const area = (x1 - x0 + 1) * (z1 - z0 + 1);
-    if (area > 250000) return toast("That box is too big (max 250,000 chunks). Do it in a few boxes.", true);
+    if (area > 250000) return toast("That outline is too big (max 250,000 chunks across). Do it in a few parts.", true);
     const p = store.get("auto", { avg: 120, seed: 1, iterations: 4, mergeBelow: 30, minIsland: 12, land: true });
     modal(`<h2>Auto-generate territories</h2>
-      <p>Fills the unclaimed land inside this box (${(x1 - x0 + 1)}×${(z1 - z0 + 1)} chunks) with new territories. Existing territories are left alone. You can undo this.</p>
+      <p>Fills the unclaimed land inside your outline with new territories. Existing territories are left alone. You can undo this.</p>
       <div class="grid2">
         <label class="field"><span>Chunks per territory</span><input id="a-avg" type="number" min="4" value="${p.avg}"></label>
         <label class="field"><span>Random seed</span><input id="a-seed" type="number" value="${p.seed}"></label>
@@ -1304,7 +1379,7 @@
       </div>
       <p class="hint" id="a-est"></p>
       <div class="foot"><button class="btn" data-close>Cancel</button><button class="btn primary" id="a-go">Generate</button></div>`);
-    const upd = () => { $("#a-est").textContent = `Up to about ${Math.max(1, Math.round(area / Math.max(4, +$("#a-avg").value || 120)))} territories if the whole box is land`; };
+    const upd = () => { $("#a-est").textContent = `Up to about ${Math.max(1, Math.round(area / Math.max(4, +$("#a-avg").value || 120)))} territories if the whole outline is land`; };
     $("#a-avg").oninput = upd;
     upd();
     $("#a-go").onclick = async () => {
@@ -1317,21 +1392,22 @@
       closeModal();
       toast("Reading terrain…");
       if (params.land) await waitForLand(x0, z0, x1, z1);
-      autoGenerate(x0, z0, x1, z1, params);
+      autoGenerate(x0, z0, x1, z1, inside, params);
     };
   }
 
-  function autoGenerate(x0, z0, x1, z1, { avg, seed, iterations, mergeBelow, minIsland, land }) {
+  function autoGenerate(x0, z0, x1, z1, inside, { avg, seed, iterations, mergeBelow, minIsland, land }) {
     const cells = [];
     for (let z = z0; z <= z1; z++) {
       for (let x = x0; x <= x1; x++) {
         const k = K(x, z);
         if (E.owner.has(k)) continue;
+        if (inside && !inside(x, z)) continue;
         if (land && isLand(k) !== true) continue;
         cells.push(k);
       }
     }
-    if (!cells.length) return toast("No free land in that box (water, or already in territories)", true);
+    if (!cells.length) return toast("No free land inside that outline (water, or already in territories)", true);
     const comps = components(new Set(cells));
     begin("Auto-generate territories");
     const created = [];
@@ -2199,8 +2275,16 @@
 
     document.addEventListener("keydown", (e) => {
       const typing = isTyping();
-      if (e.key === "Escape") { closeModal(); if (!typing) select([]); return; }
+      if (e.key === "Escape") {
+        closeModal();
+        if (!typing) { if (E.tool === "auto" && poly.length) polyReset(); else select([]); }
+        return;
+      }
       if (typing) return;
+      if (E.tool === "auto" && poly.length) {
+        if (e.key === "Enter") { e.preventDefault(); return polyFinish(); }
+        if (e.key === "Backspace") { e.preventDefault(); poly.pop(); polyDraw(); updateModeHint(); return; }
+      }
       const mod = e.ctrlKey || e.metaKey;
       if (mod && e.key.toLowerCase() === "z") { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
       if (mod && e.key.toLowerCase() === "y") { e.preventDefault(); redo(); return; }
