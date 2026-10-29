@@ -33,7 +33,7 @@ class EditorApi(
     @Volatile var sessionMinutes: Int,
     private val sessionFile: File? = null,
 ) {
-    class Session(val user: String, val uuid: UUID?, val expiresAt: Long)
+    class Session(val user: String, val uuid: UUID?, val expiresAt: Long, val persist: Boolean = false)
 
     // keyed by SHA-256 of the token, so the saved file can't be used to log in
     private val sessions = ConcurrentHashMap<String, Session>()
@@ -58,7 +58,7 @@ class EditorApi(
                     val exp = o.get("expiresAt").asLong
                     if (exp < now) continue
                     val uuid = o.get("uuid")?.takeIf { !it.isJsonNull }?.asString?.let { UUID.fromString(it) }
-                    sessions[o.get("hash").asString] = Session(o.get("user").asString, uuid, exp)
+                    sessions[o.get("hash").asString] = Session(o.get("user").asString, uuid, exp, true)
                 }
             }
         } catch (e: Exception) {
@@ -71,6 +71,7 @@ class EditorApi(
         try {
             val arr = JsonArray()
             for ((h, s) in sessions) {
+                if (!s.persist) continue
                 val o = JsonObject()
                 o.addProperty("hash", h)
                 o.addProperty("user", s.user)
@@ -87,12 +88,13 @@ class EditorApi(
         }
     }
 
-    fun createSession(user: String, uuid: UUID?): String {
+    /** [minutes] null = the configured default; [persist] keeps the login across server restarts. */
+    fun createSession(user: String, uuid: UUID?, minutes: Int? = null, persist: Boolean = false): String {
         purge()
         val bytes = ByteArray(32)
         random.nextBytes(bytes)
         val token = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
-        sessions[hash(token)] = Session(user, uuid, System.currentTimeMillis() + sessionMinutes * 60_000L)
+        sessions[hash(token)] = Session(user, uuid, System.currentTimeMillis() + (minutes ?: sessionMinutes) * 60_000L, persist)
         save()
         return token
     }

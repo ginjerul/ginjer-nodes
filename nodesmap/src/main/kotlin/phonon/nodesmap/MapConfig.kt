@@ -40,7 +40,7 @@ data class MapConfig(
             title = c.getString("web.title", "Nodes Map") ?: "Nodes Map",
             publicUrl = (c.getString("web.public-url", "") ?: "").trim().trimEnd('/'),
             editorEnabled = c.getBoolean("editor.enabled", true),
-            editorSessionMinutes = c.getInt("editor.session-minutes", 1440).coerceIn(5, 7 * 24 * 60),
+            editorSessionMinutes = c.getInt("editor.session-minutes", 120).coerceIn(5, 7 * 24 * 60),
             liveUpdates = c.getBoolean("render.live-updates", true),
             batchSeconds = c.getInt("render.batch-seconds", 15).coerceIn(1, 3600),
             snapshotBudgetNanos = (c.getDouble("render.snapshot-budget-ms", 2.0).coerceIn(0.1, 40.0) * 1_000_000).toLong(),

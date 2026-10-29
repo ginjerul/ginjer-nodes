@@ -218,7 +218,7 @@ class NodesMapPlugin : JavaPlugin() {
     private fun printHelp(sender: CommandSender) {
         msg(sender, "${ChatColor.BOLD}[Nodes] Map commands:")
         if (sender.hasPermission("nodesmap.link")) line(sender, "/nodesmap link", "Get a link to the web map")
-        if (sender.hasPermission("nodesmap.editor")) line(sender, "/nodesmap editor", "Open the map editor (\"/nodesmap editor revoke\" to log out)")
+        if (sender.hasPermission("nodesmap.editor")) line(sender, "/nodesmap editor", "Open the map editor: /nodesmap editor [time like 2h] [true|false = survive restarts] (\"revoke\" to log out)")
         if (sender.hasPermission("nodesmap.admin")) {
             line(sender, "/nodesmap status", "Render queue, progress and web address")
             line(sender, "/nodesmap fullrender [radius]", "Draw every generated chunk (or within radius chunks of you)")
@@ -410,6 +410,28 @@ class NodesMapPlugin : JavaPlugin() {
         return "%d%% (%,d / %,d chunks, %,d/s%s)".format(pct, p.done, p.total, rate, eta)
     }
 
+    /** "2h", "90m", "1h30m", "2d" -> minutes (1 minute to 7 days); null if invalid. A unit is required. */
+    private fun parseEditorDuration(text: String): Int? {
+        val m = Regex("^(?:(\\d+)d)?(?:(\\d+)h)?(?:(\\d+)m)?$", RegexOption.IGNORE_CASE).matchEntire(text) ?: return null
+        if (m.groupValues.drop(1).all { it.isEmpty() }) return null
+        val d = m.groupValues[1].toLongOrNull() ?: 0L
+        val h = m.groupValues[2].toLongOrNull() ?: 0L
+        val min = m.groupValues[3].toLongOrNull() ?: 0L
+        val total = d * 1440 + h * 60 + min
+        return if (total in 1..7 * 24 * 60) total.toInt() else null
+    }
+
+    private fun formatMinutes(total: Int): String {
+        val d = total / 1440
+        val h = total % 1440 / 60
+        val m = total % 60
+        return listOfNotNull(
+            if (d > 0) "${d}d" else null,
+            if (h > 0) "${h}h" else null,
+            if (m > 0) "${m}m" else null,
+        ).joinToString(" ")
+    }
+
     private fun editorCommand(sender: CommandSender, args: Array<out String>) {
         if (!sender.hasPermission("nodesmap.editor")) {
             err(sender, "You don't have permission to use \"/nodesmap editor\"")
@@ -426,9 +448,27 @@ class NodesMapPlugin : JavaPlugin() {
             msg(sender, "[Nodes] Ended ${ChatColor.WHITE}$n${ChatColor.AQUA} map editor session(s)")
             return
         }
-        val token = ed.createSession(sender.name, (sender as? Player)?.uniqueId)
+        var minutes = cfg.editorSessionMinutes
+        var persist = false
+        for (a in args.drop(1)) {
+            val flag = when (a.lowercase()) {
+                "true", "yes", "persist" -> true
+                "false", "no" -> false
+                else -> null
+            }
+            if (flag != null) {
+                persist = flag
+                continue
+            }
+            minutes = parseEditorDuration(a) ?: run {
+                err(sender, "Invalid time \"$a\". Use a time with a unit like 2h, 90m, 1h30m or 2d (max 7d), and true/false to keep the login across restarts")
+                return
+            }
+        }
+        val token = ed.createSession(sender.name, (sender as? Player)?.uniqueId, minutes, persist)
         val url = "${mapUrl()}/editor.html#token=$token"
-        msg(sender, "[Nodes] Map editor link (valid ${cfg.editorSessionMinutes} minutes, don't share it):")
+        val restartNote = if (persist) "survives restarts" else "ends on restart"
+        msg(sender, "[Nodes] Map editor link (valid ${formatMinutes(minutes)}, $restartNote, don't share it):")
         if (sender is Player) {
             sender.sendMessage(
                 Component.text("[Open map editor]", NamedTextColor.GREEN)
@@ -450,7 +490,10 @@ class NodesMapPlugin : JavaPlugin() {
             if (sender.hasPermission("nodesmap.admin")) opts += listOf("status", "fullrender", "render", "cancel", "players", "reload")
             return opts.filter { it.startsWith(args[0].lowercase()) }
         }
-        if (args.size == 2 && args[0].equals("editor", true)) return listOf("revoke").filter { it.startsWith(args[1].lowercase()) }
+        if (args.size >= 2 && args[0].equals("editor", true)) {
+            val opts = if (args.size == 2) listOf("revoke", "30m", "2h", "6h", "12h", "1d", "true", "false") else listOf("true", "false")
+            return opts.filter { it.startsWith(args.last().lowercase()) }
+        }
         if (args.size == 2 && args[0].equals("players", true)) return listOf("on", "off").filter { it.startsWith(args[1].lowercase()) }
         return emptyList()
     }
