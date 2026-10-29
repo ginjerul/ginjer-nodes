@@ -1350,8 +1350,8 @@
   }
 
   /** rows: [{ resource, amount, percent }]; options: { spread, maxPer, clear, seed } */
-  function distributeResources(rows, { spread, maxPer, clear, seed }) {
-    const scope = (E.sel.size ? [...E.sel] : [...E.terr.keys()]).map((id) => E.terr.get(id)).filter((t) => t && !isLocked(t.id));
+  function distributeResources(rows, { spread, maxPer, clear, seed, scopeAll }) {
+    const scope = (!scopeAll && E.sel.size ? [...E.sel] : [...E.terr.keys()]).map((id) => E.terr.get(id)).filter((t) => t && !isLocked(t.id));
     if (!scope.length) return toast("No territories to put resources on (claimed ones are locked, see Options)", true);
     const rnd = mulberry32(seed);
     begin("Distribute resources");
@@ -1379,7 +1379,7 @@
   }
 
   function distribute(resource, count) {
-    distributeResources([{ resource, amount: count, percent: false }], { spread: false, maxPer: 99, clear: false, seed: (Date.now() & 0xffff) + E.sel.size });
+    distributeResources([{ resource, amount: count, percent: false }], { spread: false, maxPer: 99, clear: false, seed: (Date.now() & 0xffff) + E.sel.size, scopeAll: false });
   }
 
   async function waitForLand(x0, z0, x1, z1) {
@@ -1835,15 +1835,15 @@
   function distributeDialog() {
     const names = Object.keys(E.resources).sort();
     if (!names.length) return toast("Create a resource first (Resources tab)", true);
-    const scopeN = E.sel.size || E.terr.size;
-    const p = store.get("dist", { spread: true, maxPer: 3, clear: false, seed: 1 });
+    const p = store.get("dist", { spread: true, maxPer: 3, clear: false, seed: 1, scopeAll: false });
     const rowHtml = (r) => `<div class="drow">
       <select class="d-res">${names.map((n) => `<option${n === r.resource ? " selected" : ""}>${esc(n)}</option>`).join("")}</select>
       <input class="d-amt" type="number" min="0" step="any" value="${r.amount}">
       <select class="d-unit"><option value="n"${r.percent ? "" : " selected"}>territories</option><option value="p"${r.percent ? " selected" : ""}>% of territories</option></select>
       <button class="icon-btn d-del" title="Remove row" aria-label="Remove row">×</button></div>`;
     modal(`<h2>Distribute resources</h2>
-      <p>Places resources on ${E.sel.size ? `the ${E.sel.size} selected territories` : `all ${E.terr.size} territories (claimed ones are skipped)`}. Add one row per resource. You can undo this.</p>
+      <p>Add a box for each resource you want to place. Claimed territories are skipped. You can undo this.</p>
+      <label class="field"><span>Where</span><select id="d-scope"><option value="sel"${E.sel.size && !p.scopeAll ? " selected" : ""}${E.sel.size ? "" : " disabled"}>Selected territories (${E.sel.size})</option><option value="all"${E.sel.size && !p.scopeAll ? "" : " selected"}>All territories (${E.terr.size})</option></select></label>
       <div id="d-rows">${(p.rows && p.rows.length ? p.rows : [{ resource: names[0], amount: 10, percent: true }]).filter((r) => names.includes(r.resource)).map(rowHtml).join("")}</div>
       <button class="btn small" id="d-add">+ Add resource</button>
       <div class="grid2" style="margin-top:10px">
@@ -1852,14 +1852,17 @@
         <label class="field"><span>Placement</span><select id="d-spread"><option value="1"${p.spread ? " selected" : ""}>Spread evenly</option><option value="0"${p.spread ? "" : " selected"}>Fully random</option></select></label>
         <label class="field"><span>Existing resources</span><select id="d-clear"><option value="0"${p.clear ? "" : " selected"}>Keep them</option><option value="1"${p.clear ? " selected" : ""}>Clear first</option></select></label>
       </div>
-      <p class="hint">${scopeN.toLocaleString()} territories in scope</p>
       <div class="foot"><button class="btn" data-close>Cancel</button><button class="btn primary" id="d-go">Distribute</button></div>`);
     const wire = () => $$("#d-rows .d-del").forEach((b) => (b.onclick = () => { if ($$("#d-rows .drow").length > 1) b.parentElement.remove(); }));
     wire();
-    $("#d-add").onclick = () => { $("#d-rows").insertAdjacentHTML("beforeend", rowHtml({ resource: names[0], amount: 10, percent: true })); wire(); };
+    $("#d-add").onclick = () => {
+      const used = $$("#d-rows .d-res").map((x) => x.value);
+      $("#d-rows").insertAdjacentHTML("beforeend", rowHtml({ resource: names.find((n) => !used.includes(n)) || names[0], amount: 10, percent: true }));
+      wire();
+    };
     $("#d-go").onclick = () => {
       const rows = $$("#d-rows .drow").map((r) => ({ resource: $(".d-res", r).value, amount: Math.max(0, +$(".d-amt", r).value || 0), percent: $(".d-unit", r).value === "p" }));
-      const opts = { spread: $("#d-spread").value === "1", maxPer: Math.max(1, +$("#d-max").value || 1), clear: $("#d-clear").value === "1", seed: +$("#d-seed").value || 1 };
+      const opts = { spread: $("#d-spread").value === "1", maxPer: Math.max(1, +$("#d-max").value || 1), clear: $("#d-clear").value === "1", seed: +$("#d-seed").value || 1, scopeAll: $("#d-scope").value === "all" };
       store.set("dist", { ...opts, rows });
       closeModal();
       distributeResources(rows, opts);
