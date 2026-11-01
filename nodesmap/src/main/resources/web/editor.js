@@ -842,6 +842,35 @@
     }
     return best || [cx, cz, false];
   }
+  /** chunks from a to b: follows the border staircase when both ends are on a border, otherwise a straight line */
+  function penPath(a, b) {
+    const straight = line(a[0], a[1], b[0], b[1]).slice(1);
+    const dist = Math.max(Math.abs(a[0] - b[0]), Math.abs(a[1] - b[1]));
+    if (dist < 2 || !penEdge(K(a[0], a[1])) || !penEdge(K(b[0], b[1]))) return straight;
+    const R = dist + 6;
+    const goal = K(b[0], b[1]);
+    const prev = new Map([[K(a[0], a[1]), null]]);
+    const q = [K(a[0], a[1])];
+    for (let i = 0; i < q.length && i < 6000; i++) {
+      const k = q[i];
+      if (k === goal) break;
+      const x = KX(k), z = KZ(k);
+      for (let dz = -1; dz <= 1; dz++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          if (!dx && !dz) continue;
+          const nx = x + dx, nz = z + dz, nk = K(nx, nz);
+          if (prev.has(nk) || Math.abs(nx - a[0]) > R || Math.abs(nz - a[1]) > R || !penEdge(nk)) continue;
+          prev.set(nk, k);
+          q.push(nk);
+        }
+      }
+    }
+    if (!prev.has(goal)) return straight;
+    const out = [];
+    for (let k = goal; k !== null && k !== K(a[0], a[1]); k = prev.get(k)) out.push([KX(k), KZ(k)]);
+    out.reverse();
+    return out.length <= dist * 3 + 8 ? out : straight;
+  }
   function penShowMarker(cx, cz, snapped) {
     penMarker.setLatLng(ll(cx * 16 + 8, cz * 16 + 8));
     penMarker.setStyle({ fillColor: snapped ? "#7ee08a" : "#f3d38d" });
@@ -885,13 +914,14 @@
     }
     const cx = sx, cz = sz;
     if (cx === penDown.last[0] && cz === penDown.last[1]) return;
-    for (const [x, z] of line(penDown.last[0], penDown.last[1], cx, cz).slice(1)) {
+    if (penDown.stroke.keySet.has(K(cx, cz))) return; // don't double back over the line just drawn
+    for (const [x, z] of penPath(penDown.last, [cx, cz])) {
       const k = K(x, z);
       penDown.stroke.keys.push(k);
       penDown.stroke.keySet.add(k);
       penWalls.add(k);
+      penDown.stroke.pts.push(ll(x * 16 + 8, z * 16 + 8));
     }
-    penDown.stroke.pts.push(ll(cx * 16 + 8, cz * 16 + 8));
     penDown.stroke.line.setLatLngs(penDown.stroke.pts);
     penDown.last = [cx, cz];
   }
