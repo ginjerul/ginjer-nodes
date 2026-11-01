@@ -70,7 +70,7 @@ object Surrender {
         Message.print(
             player,
             "${town.name} will join ${target.name}. Territories, income and claims stay. " +
-                "Wars with ${target.name} end. Cooldown: 1 day.",
+                "You inherit ${target.name}'s wars and alliances, as if invited. Cooldown: 1 day.",
         )
         player.sendMessage(
             Component.text("[Confirm]", NamedTextColor.GREEN)
@@ -107,10 +107,6 @@ object Surrender {
 
         val oldNation = town.nation
 
-        // wars and alliances with towns outside both nations are kept
-        val keepEnemies = town.enemies.filter { it.nation !== target && it.nation !== oldNation }
-        val keepAllies = town.allies.filter { it.nation !== target && it.nation !== oldNation }
-
         if (oldNation != null) {
             if (oldNation.capital === town) {
                 val newCapital = oldNation.towns.filter { it !== town }.maxByOrNull { it.territories.size }
@@ -124,17 +120,6 @@ object Surrender {
         val joined = Nodes.addTownToNation(target, town)
         if (joined.isFailure) {
             return "Could not join ${target.name}: ${joined.exceptionOrNull()?.message}"
-        }
-
-        for (enemy in keepEnemies) {
-            town.enemies.add(enemy)
-            enemy.enemies.add(town)
-            enemy.needsUpdate()
-        }
-        for (ally in keepAllies) {
-            town.allies.add(ally)
-            ally.allies.add(town)
-            ally.needsUpdate()
         }
 
         town.needsUpdate()
