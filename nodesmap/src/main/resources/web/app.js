@@ -531,17 +531,17 @@
     for (const t of S.terr.values()) {
       if (!t.name) continue;
       labelDefs.push({
-        kind: "terr", latlng: ll(t.core[0] * 16 + 8, t.core[1] * 16 + 20), priority: (t.chunks.length >> 1),
+        kind: "terr", latlng: ll(t.core[0] * 16 + 8, t.core[1] * 16 + 8), dy: -15, priority: (t.chunks.length >> 1),
         w: textWidth(t.name, 10.5, 600, 0), h: 13,
-        html: `<div class="lbl terr">${esc(t.name)}</div>`,
+        html: `<div class="lbl terr" style="margin-top:-15px">${esc(t.name)}</div>`,
       });
     }
     for (const t of S.terr.values()) {
       const txt = "#" + t.id;
       labelDefs.push({
-        kind: "terrid", latlng: ll(t.core[0] * 16 + 8, t.core[1] * 16 + 8), priority: (t.chunks.length >> 1) - 1000,
+        kind: "terrid", latlng: ll(t.core[0] * 16 + 8, t.core[1] * 16 + 8), dy: 15, priority: (t.chunks.length >> 1) - 1000,
         w: textWidth(txt, 10.5, 600, 0), h: 13,
-        html: `<div class="lbl terr id">${txt}</div>`,
+        html: `<div class="lbl terr id" style="margin-top:15px">${txt}</div>`,
       });
     }
     labelDefs.sort((a, b) => b.priority - a.priority);
@@ -606,6 +606,7 @@
       if (!show[d.kind]) continue;
       if (d.kind === "nation") Object.assign(d, fitNation(d, scale));
       const p = map.latLngToContainerPoint(d.latlng);
+      if (d.dy) p.y += d.dy;
       const x0 = p.x - d.w / 2 - pad, x1 = p.x + d.w / 2 + pad;
       const y0 = p.y - d.h / 2 - pad / 2, y1 = p.y + d.h / 2 + pad / 2;
       if (x1 < -50 || y1 < -50 || x0 > size.x + 50 || y0 > size.y + 50) continue;
@@ -636,7 +637,7 @@
       if (!icons.length) continue;
       G.resources.addLayer(L.marker(ll(t.core[0] * 16 + 8, t.core[1] * 16 + 8), {
         pane: "labels", interactive: false, keyboard: false,
-        icon: L.divIcon({ className: "", iconSize: null, html: `<div class="res-stack" style="margin-top:18px">${icons.map(([r, u]) => `<img src="${esc(u)}" alt="" data-tipres="${esc(r)}">`).join("")}</div>` }),
+        icon: L.divIcon({ className: "", iconSize: null, html: `<div class="res-stack"${icons.length > 1 ? ` data-more="${icons.length - 1}"` : ""}>${icons.map(([r, u]) => `<img src="${esc(u)}" alt="" data-tipres="${esc(r)}">`).join("")}</div>` }),
       }));
     }
   }

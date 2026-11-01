@@ -676,7 +676,7 @@
       }
       if (E.opt.icons && z >= -1 && t.nodes.length) {
         const imgs = t.nodes.slice(0, 4).map((n) => iconUrl(n)).filter(Boolean).map((u) => `<img src="${esc(u)}" alt="">`).join("");
-        if (imgs) G.icons.addLayer(L.marker(p, { pane: "over", interactive: false, keyboard: false, icon: L.divIcon({ className: "", iconSize: null, html: `<div class="ed-icons" style="margin-top:12px">${imgs}</div>` }) }));
+        if (imgs) G.icons.addLayer(L.marker(p, { pane: "over", interactive: false, keyboard: false, icon: L.divIcon({ className: "", iconSize: null, html: `<div class="ed-icons">${imgs}</div>` }) }));
       }
       if (E.sel.has(t.id) && z >= -2) {
         G.sel.addLayer(L.marker(p, { pane: "ui", interactive: false, keyboard: false, icon: L.divIcon({ className: "", iconSize: null, html: `<div class="ed-core" title="core"></div>` }) }));

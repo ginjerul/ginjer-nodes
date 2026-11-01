@@ -251,7 +251,10 @@ body.sidebar-closed #sidebar { transform: translateX(calc(-100% - 20px)); opacit
 @media (hover: none) { .mouse-hint { display: none; } }
 
 /* calmer map when zoomed out: smaller, softer resource icons */
-body.zlow .res-stack { transform: scale(0.72); opacity: 0.7; }
+body.zlow .res-stack { transform: translate(-50%, -50%) scale(0.78); opacity: 0.85; }
+/* zoomed out: one icon on the core chunk plus a +N badge instead of a wide row */
+body.zlow .res-stack[data-more] img:nth-child(n+2) { display: none; }
+body.zlow .res-stack[data-more]::after { content: "+" attr(data-more); align-self: center; margin-left: 2px; font: 700 10px var(--font); color: #fff; text-shadow: 0 0 3px #000, 0 0 6px #000; }
 .lbl.terr.id { opacity: 0.6; font-weight: 500; }
 
 /* info card sections */
