@@ -758,6 +758,13 @@
         "Right-drag to draw a border line (it clips onto borders, Alt turns that off) · left-drag pans · click inside a closed area to fill it";
       return;
     }
+    const tips = {
+      select: "Select: click or right-click a territory · Shift+drag to box-select · Shift+click adds",
+      core: "Core: click a chunk to make it the territory's core",
+      fill: "Fill: click empty land to fill the connected area (needs Land only in settings)",
+      rect: "Box: drag a rectangle to fill it",
+    };
+    if (tips[E.tool]) { el.textContent = tips[E.tool]; return; }
     el.textContent = !brush ? "" :
       pendingNew ? `Next stroke starts a new territory · ${btn} to paint` :
       E.tool === "erase" ? `Erasing · ${btn} · Space: brush off` :
@@ -2270,6 +2277,11 @@
     $("#redo").onclick = redo;
     $("#btn-check").onclick = () => check(false);
     $("#btn-apply").onclick = () => check(true);
+    const setOpts = (open) => { $("#opts-pop").hidden = !open; $("#opts-btn").setAttribute("aria-expanded", String(open)); };
+    $("#opts-btn").onclick = (e) => { e.stopPropagation(); setOpts($("#opts-pop").hidden); };
+    $("#opts-close").onclick = () => setOpts(false);
+    document.addEventListener("mousedown", (e) => { if (!$("#opts-pop").hidden && !e.target.closest("#opts-pop, #opts-btn")) setOpts(false); });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#opts-pop").hidden) setOpts(false); });
     $("#btn-menu").onclick = (e) => { e.stopPropagation(); $("#menu").hidden = !$("#menu").hidden; };
     document.addEventListener("click", () => ($("#menu").hidden = true));
     $$("#menu [data-act]").forEach((b) => (b.onclick = async () => {

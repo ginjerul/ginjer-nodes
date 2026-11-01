@@ -21,12 +21,15 @@
     <input id="search" type="search" placeholder="Search towns, nations, players, territories" autocomplete="off" spellcheck="false">
     <div id="search-results" hidden></div>
   </div>
+  <button id="layers-btn" class="pill-btn" aria-expanded="false" aria-controls="view" title="Map layers and view options">
+    <svg viewBox="0 0 24 24"><path d="M12 3l9 5-9 5-9-5zM3 13l9 5 9-5"/></svg><span>Layers</span>
+  </button>
   <div id="war-pill" hidden></div>
 </header>
 
 <aside id="sidebar">
   <div class="list-tools side-tools">
-    <input class="filter" data-list="all" placeholder="Filter nations and towns">
+    <input class="filter" data-list="all" placeholder="Filter…">
     <select class="sort" data-list="all" aria-label="Sort">
       <option value="territories">Most land</option>
       <option value="towns">Most towns</option>
@@ -48,15 +51,20 @@
 </aside>
 
 <div id="view" class="view">
-  <button id="view-head" aria-expanded="true" title="Map view settings">
-    <svg viewBox="0 0 24 24"><path d="M12 3l9 5-9 5-9-5zM3 13l9 5 9-5"/></svg>
-    <span>View</span>
-    <svg class="chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
-  </button>
+  <div id="view-head">
+    <span>Map layers</span>
+    <button id="view-close" class="icon-btn" aria-label="Close">
+      <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </button>
+  </div>
   <div id="view-body">
+    <div class="fh">Look</div>
+    <div id="presets" class="seg seg4"></div>
+    <div class="fh">Colour by</div>
     <div id="modes" class="seg"></div>
     <div id="mode-extra"></div>
-    <div id="layer-toggles"></div>
+    <button id="custom-toggle" class="link-btn" aria-expanded="false"><span>Customize layers</span><svg class="chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>
+    <div id="layer-toggles" hidden></div>
   </div>
 </div>
 

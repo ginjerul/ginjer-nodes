@@ -116,7 +116,7 @@
     layers: Object.assign(Object.fromEntries(LAYERS.map(([k, , d]) => [k, d])), store.get("layers", {})),
     sidebar: store.get("sidebar", window.innerWidth > 760),
     warOpen: store.get("warOpen", true),
-    view: store.get("view", window.innerWidth > 760),
+    view: false,
   };
 
   // ---------------------------------------------------------------- map
@@ -595,8 +595,8 @@
     const show = {
       nation: prefs.layers.nationLabels && z <= -3,
       town: prefs.layers.townLabels && z >= -3,
-      terr: prefs.layers.terrLabels && z >= -1,
-      terrid: prefs.layers.terrIds && z >= -2,
+      terr: prefs.layers.terrLabels && z >= 0,
+      terrid: prefs.layers.terrIds && z >= -1,
     };
     const size = map.getSize();
     const pad = 3;
@@ -941,9 +941,35 @@
 
   // ---------------------------------------------------------------- info panels
   let infoTarget = null;
+  // sections remember whether you folded them; long lists start folded
+  const infoFolded = new Set(store.get("infoFolded", ["Residents", "Towns"]));
+  function sectionize(root) {
+    for (const h of [...root.querySelectorAll(".section-h")]) {
+      const title = h.textContent.trim();
+      const det = document.createElement("details");
+      det.className = "sec-d";
+      det.open = !infoFolded.has(title);
+      const sum = document.createElement("summary");
+      sum.textContent = title;
+      det.appendChild(sum);
+      let n = h.nextSibling;
+      h.parentNode.insertBefore(det, h);
+      while (n && !(n.nodeType === 1 && n.classList.contains("section-h"))) {
+        const next = n.nextSibling;
+        det.appendChild(n);
+        n = next;
+      }
+      h.remove();
+      det.addEventListener("toggle", () => {
+        if (det.open) infoFolded.delete(title); else infoFolded.add(title);
+        store.set("infoFolded", [...infoFolded]);
+      });
+    }
+  }
   function openInfo(html, target) {
     infoTarget = target;
     $("#info-body").innerHTML = html;
+    sectionize($("#info-body"));
     $("#info").hidden = false;
   }
   function refreshInfo() {
@@ -1237,6 +1263,7 @@
       grid: prefs.layers.chunks,
     };
     map.getContainer().classList.toggle("far", z < -1);
+    document.body.classList.toggle("zlow", z <= -1);
     for (const [k, on] of Object.entries(want)) {
       const has = map.hasLayer(G[k]);
       if (on && !has) G[k].addTo(map);
@@ -1249,6 +1276,7 @@
     $$("#modes button").forEach((b) => b.classList.toggle("active", b.dataset.mode === m));
     refreshModeExtra();
     styleTerritories(); drawBorders(); syncLayerVisibility();
+    syncPanel();
   }
 
   function refreshModeExtra() {
@@ -1292,9 +1320,48 @@
   }
 
   function setView(open) {
-    prefs.view = open; store.set("view", open);
-    $("#view").classList.toggle("closed", !open);
-    $("#view-head").setAttribute("aria-expanded", open);
+    prefs.view = open;
+    $("#view").classList.toggle("open", open);
+    $("#layers-btn").setAttribute("aria-expanded", String(open));
+  }
+
+  // looks: one click sets mode + layers. Anything not listed is switched off.
+  const PRESETS = [
+    ["clean", "Clean", "towns", ["territories", "borders", "townLabels", "nationLabels", "war"]],
+    ["political", "Political", "nations", ["territories", "borders", "townLabels", "nationLabels"]],
+    ["war", "War", "towns", ["territories", "borders", "townLabels", "players", "war", "warzones", "raids", "forts", "outposts"]],
+    ["economy", "Economy", "towns", ["territories", "borders", "townLabels", "resources", "ports", "towers", "refineries", "drops"]],
+  ];
+  function activePreset() {
+    for (const [id, , mode, on] of PRESETS) {
+      if (prefs.mode !== mode) continue;
+      if (LAYERS.every(([k]) => !!prefs.layers[k] === on.includes(k))) return id;
+    }
+    return null;
+  }
+  function refreshLayers() {
+    styleTerritories(); drawWar(); drawZones(); drawPlayers(); drawChunkGrid();
+    syncLayerVisibility();
+    scheduleLayout();
+  }
+  function applyPreset(id) {
+    const p = PRESETS.find(([k]) => k === id);
+    if (!p) return;
+    for (const [k] of LAYERS) prefs.layers[k] = p[3].includes(k);
+    store.set("layers", prefs.layers);
+    if (prefs.mode !== p[2]) setMode(p[2]);
+    refreshLayers();
+    syncPanel();
+  }
+  function syncPanel() {
+    const cur = activePreset();
+    $$("#presets button").forEach((b) => b.classList.toggle("active", b.dataset.preset === cur));
+    $$("#layer-toggles input").forEach((i) => {
+      const keys = GROUPS.find(([l]) => l === i.dataset.group)[1];
+      const on = keys.filter((k) => prefs.layers[k]).length;
+      i.checked = on > 0;
+      i.indeterminate = on > 0 && on < keys.length;
+    });
   }
 
   function buildUi() {
@@ -1304,12 +1371,13 @@
     $("#war-head").onclick = () => setWarOpen(!prefs.warOpen);
     setWarOpen(prefs.warOpen);
     $("#war-pill").onclick = () => openTab("war");
-    setView(prefs.view);
-    $("#view-head").onclick = () => setView(!prefs.view);
-    // keep the info panel just below the View box
-    const placeInfo = () => document.body.style.setProperty("--view-h", $("#view").offsetHeight + "px");
-    if (window.ResizeObserver) new ResizeObserver(placeInfo).observe($("#view"));
-    placeInfo();
+    setView(false);
+    $("#layers-btn").onclick = () => setView(!prefs.view);
+    $("#view-close").onclick = () => setView(false);
+    document.addEventListener("mousedown", (e) => {
+      if (prefs.view && !e.target.closest("#view, #layers-btn")) setView(false);
+    });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape" && prefs.view) setView(false); });
     for (const el of [$("#view"), $("#sidebar"), $("#info")]) {
       L.DomEvent.disableClickPropagation(el);
       L.DomEvent.disableScrollPropagation(el);
@@ -1319,29 +1387,29 @@
     $("#modes").innerHTML = MODES.map(([k, l]) => `<button data-mode="${k}" class="${k === prefs.mode ? "active" : ""}">${l}</button>`).join("");
     $$("#modes button").forEach((b) => (b.onclick = () => setMode(b.dataset.mode)));
 
+    if (store.get("layers", null) === null && store.get("mode", null) === null) {
+      for (const [k] of LAYERS) prefs.layers[k] = PRESETS[0][3].includes(k);
+    }
+    $("#presets").innerHTML = PRESETS.map(([k, l]) => `<button data-preset="${k}">${l}</button>`).join("");
+    $$("#presets button").forEach((b) => (b.onclick = () => applyPreset(b.dataset.preset)));
+
     $("#layer-toggles").innerHTML = GROUPS.map(([l]) => `<label class="tgl"><input type="checkbox" data-group="${l}">${l}</label>`).join("");
-    const syncChecks = () => $$("#layer-toggles input").forEach((i) => {
-      const keys = GROUPS.find(([l]) => l === i.dataset.group)[1];
-      const on = keys.filter((k) => prefs.layers[k]).length;
-      i.checked = on > 0;
-      i.indeterminate = on > 0 && on < keys.length;
-    });
-    syncChecks();
     $$("#layer-toggles input").forEach((i) => (i.onchange = () => {
       const keys = GROUPS.find(([l]) => l === i.dataset.group)[1];
       for (const k of keys) prefs.layers[k] = i.checked;
       store.set("layers", prefs.layers);
-      syncChecks();
-      const has = (...ks) => ks.some((k) => keys.includes(k));
-      if (has("territories", "war")) styleTerritories();
-      if (has("war")) drawWar();
-      if (has("warzones", "raids")) drawZones();
-      if (has("players")) drawPlayers();
-      if (has("chunks")) drawChunkGrid();
-      syncLayerVisibility();
-      scheduleLayout();
+      refreshLayers();
+      syncPanel();
       i.blur();
     }));
+    const customOpen = (open) => {
+      $("#layer-toggles").hidden = !open;
+      $("#custom-toggle").setAttribute("aria-expanded", String(open));
+      store.set("customOpen", open);
+    };
+    $("#custom-toggle").onclick = () => customOpen($("#layer-toggles").hidden);
+    customOpen(!!store.get("customOpen", false));
+    syncPanel();
 
     $$(".filter, .sort").forEach((el) => (el.oninput = renderLists));
 
