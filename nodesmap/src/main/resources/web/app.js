@@ -521,11 +521,14 @@
       const home = S.terr.get(t.home);
       if (!home) continue;
       const isCap = capitals.has(t.name);
-      const text = (isCap ? "★ " : "") + prettyName(t.name);
+      const text = prettyName(t.name);
+      // capital: the star sits exactly on the home core chunk, the name hangs below it
       labelDefs.push({
         kind: "town", latlng: chunkCenter(home.core[0], home.core[1]), priority: 1e5 + t.territories.length * 10 + (isCap ? 5 : 0),
-        w: textWidth(text, 12.5, 700, 0), h: 15,
-        html: `<div class="lbl town">${isCap ? `<span class="cap">★</span>` : ""}${esc(prettyName(t.name))}</div>`,
+        w: textWidth(text, 12.5, 700, 0), h: isCap ? 28 : 15, dy: isCap ? 7 : 0,
+        html: isCap
+          ? `<div class="lbl town capital"><span class="cap">★</span><span class="nm">${esc(text)}</span></div>`
+          : `<div class="lbl town">${esc(text)}</div>`,
       });
     }
     for (const t of S.terr.values()) {
