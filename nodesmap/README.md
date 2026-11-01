@@ -26,6 +26,7 @@ A full editor for `world.json` (territories and resource nodes), drawn on top of
    - **Fill (F):** fills a whole island or valley in one click.
    - **Core (C):** sets a territory's core chunk.
    - **Selection actions:** merge, delete, split disconnected pieces, regenerate into random territories of a chosen size, and add a resource to random territories.
+   - **Shards (Reef sharding):** draw the area each server owns as a polygon, curved shape, box or circle, name the server, drag points to reshape, then **Save to NodesMap** (updates the web map) or **Copy for reef.yml**.
    - **Resources tab:** create, rename and delete resource nodes, pick icons, and set cost, priority and the full JSON (income, ore, crops, animals, neighbor modifiers).
    - **Undo/redo** for everything (Ctrl+Z / Ctrl+Shift+Z).
 3. **Check** shows what would change. **Apply to server** writes it live: Nodes backs up the old `world.json` to `plugins/nodes/backup/`, reloads territories, keeps occupation state, and recalculates town claims.

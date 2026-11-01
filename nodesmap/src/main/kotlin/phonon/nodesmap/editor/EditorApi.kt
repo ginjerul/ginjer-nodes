@@ -33,6 +33,10 @@ class EditorApi(
     @Volatile var sessionMinutes: Int,
     private val sessionFile: File? = null,
 ) {
+    /** Server regions (Reef sharding): read as {"regions":[..]}, write from the same JSON. Set by the plugin. */
+    @Volatile var shardsGet: (() -> String)? = null
+    @Volatile var shardsSet: ((String) -> String)? = null
+
     class Session(val user: String, val uuid: UUID?, val expiresAt: Long, val persist: Boolean = false)
 
     // keyed by SHA-256 of the token, so the saved file can't be used to log in
@@ -203,6 +207,22 @@ class EditorApi(
                 if (req.method != "POST") return err(405, "use POST")
                 val m = bridge()?.townAct ?: return noTowns()
                 ApiResponse(200, m.invoke(null, String(req.body, StandardCharsets.UTF_8), s.user) as String)
+            }
+
+            "/api/editor/shards" -> {
+                if (req.method == "POST") {
+                    val set = shardsSet ?: return err(404, "server regions aren't available")
+                    val out = set(String(req.body, StandardCharsets.UTF_8))
+                    if (out.startsWith("{\"error\"")) {
+                        ApiResponse(400, out)
+                    } else {
+                        logger.info("${s.user} saved the server regions from the web editor")
+                        ApiResponse(200, out)
+                    }
+                } else {
+                    val get = shardsGet ?: return err(404, "server regions aren't available")
+                    ApiResponse(200, get())
+                }
             }
 
             else -> err(404, "unknown editor route")

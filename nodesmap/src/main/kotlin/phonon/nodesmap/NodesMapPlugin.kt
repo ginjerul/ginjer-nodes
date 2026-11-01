@@ -76,6 +76,8 @@ class NodesMapPlugin : JavaPlugin() {
             try {
                 val ed = EditorApi(server, logger, cfg.editorSessionMinutes, java.io.File(dataFolder, "editor-sessions.json"))
                 editor = ed
+                ed.shardsGet = { onMainThread { shardsGetJson() } }
+                ed.shardsSet = { body -> onMainThread { shardsSetJson(body) } }
                 web = WebServer(webRoot, cfg.webBind, cfg.webPort, cfg.webThreads, logger).also {
                     it.api = { req ->
                         if (req.path.startsWith("/api/editor/") && cfg.editorEnabled) {
@@ -113,6 +115,48 @@ class NodesMapPlugin : JavaPlugin() {
     }
 
     private fun settingsOf(c: MapConfig) = RenderSettings(c.shading, c.waterDepth, c.chunkGrid, c.zoomOutLevels)
+
+    /** Runs on the server thread (config and map info live there) and waits for the result. */
+    private fun <T> onMainThread(block: () -> T): T =
+        server.scheduler.callSyncMethod(this, java.util.concurrent.Callable { block() }).get(10, java.util.concurrent.TimeUnit.SECONDS)
+
+    private fun shardsGetJson(): String =
+        com.google.gson.Gson().toJson(mapOf("regions" to config.getMapList("shards.regions")))
+
+    /** JSON from the editor -> plain maps/lists for config.yml (whole numbers stay whole) */
+    private fun jsonToConfigValue(el: com.google.gson.JsonElement): Any? = when {
+        el.isJsonNull -> null
+        el.isJsonArray -> el.asJsonArray.map { jsonToConfigValue(it) }
+        el.isJsonObject -> el.asJsonObject.entrySet().associate { it.key to jsonToConfigValue(it.value) }
+        el.asJsonPrimitive.isBoolean -> el.asBoolean
+        el.asJsonPrimitive.isNumber -> el.asDouble.let { d -> if (d == Math.rint(d) && Math.abs(d) < 1e12) d.toLong() else d }
+        else -> el.asString
+    }
+
+    private fun shardsSetJson(body: String): String {
+        return try {
+            val regions = com.google.gson.JsonParser.parseString(body).asJsonObject.getAsJsonArray("regions")
+            val out = ArrayList<Any?>()
+            for ((i, el) in regions.withIndex()) {
+                val m = jsonToConfigValue(el) as? Map<*, *> ?: return shardError("Region ${i + 1} isn't valid")
+                try {
+                    MapConfig.parseShard(m)
+                } catch (e: Exception) {
+                    return shardError("Region ${i + 1} (${m["server"]}) isn't valid: ${e.message ?: "bad shape"}")
+                }
+                out.add(m)
+            }
+            config.set("shards.regions", out)
+            saveConfig()
+            cfg = MapConfig.load(config)
+            publishMapInfo()
+            "{\"ok\":true,\"count\":${out.size}}"
+        } catch (e: Exception) {
+            shardError("Couldn't read the regions: ${e.message}")
+        }
+    }
+
+    private fun shardError(msg: String) = "{\"error\":${jsonStr(msg)}}"
 
     /** Region outlines for the "Server borders" layer, as [{"server":..,"points":[[x,z],..]},..] */
     private fun shardsJson(): String {

@@ -36,6 +36,8 @@
     <button data-tool="rect" title="Drag a rectangle to fill (R)">
       <svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="1"/></svg><span>Box</span></button>
     <i class="tsep"></i>
+    <button data-tool="shards" title="Server regions: draw the area each shard server owns (Reef sharding)">
+      <svg viewBox="0 0 24 24"><path d="M4 6c4-3 6 3 10 0s5-1 6 1v10c-1-2-2-4-6-1s-6-3-10 0z"/></svg><span>Shards</span></button>
     <button data-tool="auto" title="Pen: right-drag to draw border lines (left-drag pans), click inside the closed area to auto-generate territories there (G)">
       <svg viewBox="0 0 24 24"><path d="M4 4h7v7H4zM13 4h7v4h-7zM13 10h7v10h-7zM4 13h7v7H4z"/></svg><span>Pen</span></button>
   </div>
@@ -75,6 +77,7 @@
     <button data-tab="terr" class="active">Territories</button>
     <button data-tab="towns">Towns</button>
     <button data-tab="res">Resources</button>
+    <button data-tab="shards">Shards</button>
   </nav>
   <section id="tab-terr" class="tab active">
     <div class="list-tools">
@@ -115,6 +118,27 @@
     </div>
     <div class="list" id="res-list"></div>
     <div id="res-editor"></div>
+  </section>
+  <section id="tab-shards" class="tab">
+    <div class="seg" id="shard-kind">
+      <button data-v="poly">Polygon</button>
+      <button data-v="rect">Box</button>
+      <button data-v="circle">Circle</button>
+    </div>
+    <div class="shard-form">
+      <input id="shard-server" class="filter" placeholder="Server name, e.g. s1" list="shard-server-names" autocomplete="off">
+      <datalist id="shard-server-names"></datalist>
+      <label class="tgl" id="shard-curve-row"><input type="checkbox" id="shard-smooth">Curved edges (round the corners)</label>
+      <label class="tgl"><input type="checkbox" id="shard-snap" checked>Snap to chunks (16 blocks)</label>
+    </div>
+    <div id="shard-summary" class="hint"></div>
+    <div class="list" id="shard-list"></div>
+    <div class="shard-actions">
+      <button id="shard-save" class="btn primary small">Save to NodesMap</button>
+      <button id="shard-yaml" class="btn small">Copy for reef.yml</button>
+      <button id="shard-reload" class="btn small">Reload</button>
+    </div>
+    <p class="hint">The server name is the one in velocity.toml. Regions higher in the list win where they overlap. Saving updates the web map; copy the list into reef.yml on every server.</p>
   </section>
 </aside>
 

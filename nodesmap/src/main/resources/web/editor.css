@@ -180,3 +180,21 @@ kbd { font: 600 11px var(--mono); border: 1px solid var(--line-strong); border-r
 #sidebar .list-tools { flex-wrap: wrap; }
 #sidebar .list-tools input.filter { flex: 1 1 100%; }
 #sidebar .list-tools select { flex: 1; }
+
+/* server shards tab */
+body.editor.tool-shards #map { cursor: crosshair; }
+.shard-form { display: grid; gap: 8px; margin: 10px 0 6px; }
+.shard-row { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 8px; border: 1px solid transparent; cursor: pointer; flex-wrap: wrap; }
+.shard-row:hover { background: rgba(255,255,255,0.04); }
+.shard-row.sel { border-color: var(--accent); background: var(--accent-soft); }
+.shard-row .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.shard-row .shard-name { width: 84px; height: 26px; padding: 0 6px; border-radius: 6px; border: 1px solid var(--line); background: rgba(0,0,0,0.2); color: var(--text); font: inherit; font-size: 12.5px; }
+.shard-row .shard-desc { flex: 1; min-width: 80px; font-size: 12px; color: var(--muted); }
+.shard-row .shard-curve { display: flex; align-items: center; gap: 3px; font-size: 12px; color: var(--muted); }
+.shard-row .icon-btn { width: 24px; height: 24px; font-size: 13px; }
+.shard-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 4px; }
+.shard-handle { width: 14px; height: 14px; border-radius: 50%; background: #fff; border: 2px solid #1a1406; box-shadow: 0 0 0 2px rgba(255,255,255,0.6); cursor: grab; }
+.shard-handle:active { cursor: grabbing; }
+#shard-curve-row[hidden] { display: none; }
+#shard-server { height: 32px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--line-strong); background: rgba(0,0,0,0.25); color: var(--text); font: inherit; }
+#shard-server::placeholder { color: var(--faint); }

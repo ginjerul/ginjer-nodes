@@ -136,6 +136,7 @@
     if (E.townsOnline) await loadClaims();
     if (E.nodesOnline) await loadFromServer(true);
     else toast("Nodes isn't running on the server, so you can only edit and download files.", true);
+    loadShards();
     setSaveState();
   }
 
@@ -731,6 +732,7 @@
     if (PAINT_TOOLS.has(t)) G.ui.addLayer(cursor); else G.ui.removeLayer(cursor);
     preloadLand();
     updateModeHint();
+    shardsToolChanged();
   }
   /** Space tap: brush on/off, like the old Dynmap editor's paint mode */
   function toggleBrush() {
@@ -750,6 +752,7 @@
   function updateModeHint() {
     const el = $("#mode-hint");
     if (!el) return;
+    if (E.tool === "shards") { el.textContent = shardHintText(); return; }
     const brush = PAINT_TOOLS.has(E.tool);
     const btn = E.classic ? "right-drag" : "drag";
     if (E.tool === "auto") {
@@ -2040,6 +2043,7 @@
   }
 
   function openTab(name) {
+    if (name === "shards" && E.tool !== "shards") { setTool("shards"); return; }
     $$("#tabs button").forEach((x) => x.classList.toggle("active", x.dataset.tab === name));
     $$(".tab").forEach((t) => t.classList.toggle("active", t.id === "tab-" + name));
     drawOverlays();
@@ -2266,9 +2270,408 @@
     document.addEventListener("mousedown", () => { tip.hidden = true; cur = null; }, true);
   }
 
+  // ---------------------------------------------------------------- server shards (Reef sharding regions)
+  // Regions are kept in exactly the config format Reef and NodesMap read, so what you draw is what they load:
+  //   rectangle {server, min-x, min-z, max-x, max-z}, polygon {server, points, smooth?}, circle {server, center-x, center-z, radius}
+  const SH = {
+    regions: [], sel: -1, draft: [], hover: null, dirty: false, loaded: false, layers: [],
+    kind: store.get("shKind", "poly"), smooth: !!store.get("shSmooth", false), snap: store.get("shSnap", true), server: store.get("shServer", ""),
+  };
+  const SHARD_COLORS = ["#ff7a45", "#36cfc9", "#b37feb", "#ffd666", "#73d13d", "#ff85c0", "#69b1ff", "#ffa940"];
+  map.createPane("shards").style.zIndex = 640;
+  R.shards = L.svg({ pane: "shards", padding: 0.3 });
+  G.shards = L.layerGroup().addTo(map);
+  G.shardsUi = L.layerGroup().addTo(map);
+  G.shardsDraft = L.layerGroup().addTo(map);
+
+  const shardKind = (r) => (Array.isArray(r.points) ? "poly" : r["center-x"] !== undefined ? "circle" : "rect");
+
+  /** closed Catmull-Rom spline through the points (same maths as Reef and NodesMap) */
+  function shardSmooth(p) {
+    const n = p.length, out = [];
+    for (let i = 0; i < n; i++) {
+      const p0 = p[(i + n - 1) % n], p1 = p[i], p2 = p[(i + 1) % n], p3 = p[(i + 2) % n];
+      const steps = Math.min(256, Math.max(4, Math.ceil(Math.hypot(p2[0] - p1[0], p2[1] - p1[1]) / 8)));
+      for (let s = 0; s < steps; s++) {
+        const t = s / steps, t2 = t * t, t3 = t2 * t;
+        const axis = (k) => 0.5 * (2 * p1[k] + (-p0[k] + p2[k]) * t + (2 * p0[k] - 5 * p1[k] + 4 * p2[k] - p3[k]) * t2 + (-p0[k] + 3 * p1[k] - 3 * p2[k] + p3[k]) * t3);
+        out.push([axis(0), axis(1)]);
+      }
+    }
+    return out;
+  }
+
+  /** the polygon a region really covers */
+  function shardOutline(r) {
+    const kind = shardKind(r);
+    if (kind === "poly") {
+      const pts = r.points.map((p) => [Number(p[0]), Number(p[1])]);
+      return r.smooth === true && pts.length >= 3 ? shardSmooth(pts) : pts;
+    }
+    if (kind === "circle") {
+      const cx = +r["center-x"], cz = +r["center-z"];
+      const rx = r["radius-x"] !== undefined ? +r["radius-x"] : +r.radius;
+      const rz = r["radius-z"] !== undefined ? +r["radius-z"] : +r.radius;
+      const n = Math.min(1024, Math.max(32, Math.ceil((2 * Math.PI * Math.max(rx, rz)) / 8)));
+      return Array.from({ length: n }, (_, i) => [cx + rx * Math.cos((2 * Math.PI * i) / n), cz + rz * Math.sin((2 * Math.PI * i) / n)]);
+    }
+    const a = +r["min-x"], b = +r["min-z"], c = +r["max-x"], d = +r["max-z"];
+    return [[a, b], [c, b], [c, d], [a, d]];
+  }
+
+  function shardColor(server) {
+    const names = [...new Set(SH.regions.map((r) => r.server))];
+    return SHARD_COLORS[Math.max(0, names.indexOf(server)) % SHARD_COLORS.length];
+  }
+
+  function shardPoint(latlng) {
+    const q = SH.snap ? 16 : 1;
+    return [Math.round(latlng.lng / q) * q, Math.round(latlng.lat / q) * q];
+  }
+
+  function shardDesc(r) {
+    const kind = shardKind(r);
+    if (kind === "poly") return `${r.points.length} points${r.smooth ? ", curved" : ""}`;
+    if (kind === "circle") return r["radius-x"] !== undefined ? `ellipse ${r["radius-x"]}×${r["radius-z"]}` : `circle, radius ${r.radius}`;
+    return `box ${Math.abs(r["max-x"] - r["min-x"])}×${Math.abs(r["max-z"] - r["min-z"])}`;
+  }
+
+  function shardsNormalize() {
+    for (const r of SH.regions) {
+      if (shardKind(r) !== "rect") continue;
+      const x0 = Math.min(r["min-x"], r["max-x"]), x1 = Math.max(r["min-x"], r["max-x"]);
+      const z0 = Math.min(r["min-z"], r["max-z"]), z1 = Math.max(r["min-z"], r["max-z"]);
+      r["min-x"] = x0; r["max-x"] = x1; r["min-z"] = z0; r["max-z"] = z1;
+    }
+  }
+
+  function shardChanged() {
+    SH.dirty = true;
+    renderShardList();
+    drawShards();
+    updateModeHint();
+  }
+
+  function drawShards() {
+    G.shards.clearLayers();
+    SH.layers = [];
+    SH.regions.forEach((r, i) => {
+      let pts;
+      try { pts = shardOutline(r); } catch { SH.layers.push(null); return; }
+      if (pts.length < 3 || pts.some(([x, z]) => !isFinite(x) || !isFinite(z))) { SH.layers.push(null); return; }
+      const color = shardColor(r.server), sel = i === SH.sel;
+      const poly = L.polygon(pts.map(([x, z]) => ll(x, z)), {
+        renderer: R.shards, color, weight: sel ? 4 : 2.5, opacity: 0.95, dashArray: sel ? null : "10 8",
+        fillColor: color, fillOpacity: sel ? 0.16 : 0.06, interactive: false,
+      });
+      poly.bindTooltip(`#${i + 1} ${r.server}`, { permanent: true, direction: "center", className: "shard-label", opacity: 0.9 });
+      G.shards.addLayer(poly);
+      SH.layers.push(poly);
+    });
+    drawShardUi();
+  }
+
+  /** handles for dragging the selected region's points */
+  function shardHandles(r) {
+    const kind = shardKind(r);
+    if (kind === "poly") {
+      return r.points.map((p, idx) => ({
+        x: p[0], z: p[1],
+        set: (x, z) => { r.points[idx] = [x, z]; },
+        remove: () => { if (r.points.length > 3) { r.points.splice(idx, 1); return true; } return false; },
+      }));
+    }
+    if (kind === "circle") {
+      const cx = +r["center-x"], cz = +r["center-z"];
+      const rx = r["radius-x"] !== undefined ? +r["radius-x"] : +r.radius;
+      const handles = [
+        { x: cx, z: cz, set: (x, z) => { r["center-x"] = x; r["center-z"] = z; } },
+        { x: cx + rx, z: cz, set: (x) => { const v = Math.max(1, Math.abs(x - +r["center-x"])); if (r["radius-x"] !== undefined) r["radius-x"] = v; else r.radius = v; } },
+      ];
+      if (r["radius-z"] !== undefined) handles.push({ x: cx, z: cz + +r["radius-z"], set: (x, z) => { r["radius-z"] = Math.max(1, Math.abs(z - +r["center-z"])); } });
+      return handles;
+    }
+    return [
+      { x: r["min-x"], z: r["min-z"], set: (x, z) => { r["min-x"] = x; r["min-z"] = z; } },
+      { x: r["max-x"], z: r["min-z"], set: (x, z) => { r["max-x"] = x; r["min-z"] = z; } },
+      { x: r["max-x"], z: r["max-z"], set: (x, z) => { r["max-x"] = x; r["max-z"] = z; } },
+      { x: r["min-x"], z: r["max-z"], set: (x, z) => { r["min-x"] = x; r["max-z"] = z; } },
+    ];
+  }
+
+  function drawShardUi() {
+    G.shardsUi.clearLayers();
+    G.shardsDraft.clearLayers();
+    if (E.tool !== "shards") return;
+    if (SH.draft.length) { drawShardDraft(); return; }
+    const r = SH.regions[SH.sel];
+    if (!r) return;
+    const icon = L.divIcon({ className: "shard-handle", iconSize: [14, 14] });
+    shardHandles(r).forEach((h) => {
+      const m = L.marker(ll(h.x, h.z), { icon, draggable: true, keyboard: false, zIndexOffset: 1000 });
+      m.on("drag", () => {
+        const [x, z] = shardPoint(m.getLatLng());
+        h.set(x, z);
+        const layer = SH.layers[SH.sel];
+        if (layer) layer.setLatLngs(shardOutline(r).map(([px, pz]) => ll(px, pz)));
+      });
+      m.on("dragend", () => { shardsNormalize(); shardChanged(); });
+      m.on("contextmenu", (e) => {
+        L.DomEvent.stop(e);
+        if (h.remove) {
+          if (h.remove()) shardChanged(); else toast("A polygon needs at least 3 points", true);
+        }
+      });
+      G.shardsUi.addLayer(m);
+    });
+  }
+
+  function drawShardDraft() {
+    G.shardsDraft.clearLayers();
+    const color = shardColor(shardServerName() || "?");
+    const style = { renderer: R.shards, color, weight: 2.5, dashArray: "4 6", interactive: false };
+    const pts = SH.draft.map(([x, z]) => ll(x, z));
+    const hov = SH.hover ? ll(SH.hover[0], SH.hover[1]) : null;
+    if (SH.kind === "poly") {
+      const all = hov ? [...pts, hov] : pts;
+      if (all.length > 1) G.shardsDraft.addLayer(L.polyline(all, style));
+      SH.draft.forEach(([x, z], i) => G.shardsDraft.addLayer(L.circleMarker(ll(x, z), { renderer: R.shards, radius: i === 0 ? 7 : 4, color, fillColor: "#fff", fillOpacity: 1, weight: 2, interactive: false })));
+    } else if (SH.kind === "rect" && hov) {
+      G.shardsDraft.addLayer(L.rectangle([pts[0], hov], { ...style, fill: true, fillColor: color, fillOpacity: 0.1 }));
+    } else if (SH.kind === "circle" && hov) {
+      const radius = Math.hypot(SH.hover[0] - SH.draft[0][0], SH.hover[1] - SH.draft[0][1]);
+      G.shardsDraft.addLayer(L.circle(pts[0], { ...style, radius, fill: true, fillColor: color, fillOpacity: 0.1 }));
+    }
+  }
+
+  function shardServerName() {
+    return ($("#shard-server")?.value || "").trim();
+  }
+
+  function shardAdd(region) {
+    SH.regions.push(region);
+    SH.sel = SH.regions.length - 1;
+    SH.draft = [];
+    SH.hover = null;
+    shardsNormalize();
+    shardChanged();
+    toast(`Added region #${SH.regions.length} for ${region.server}. Save to keep it.`);
+  }
+
+  function shardFinishPolygon() {
+    if (SH.draft.length < 3) return toast("A polygon needs at least 3 points", true);
+    const region = { server: shardServerName(), points: SH.draft.map(([x, z]) => [x, z]) };
+    if (SH.smooth) region.smooth = true;
+    shardAdd(region);
+  }
+
+  function shardCancelDraft() {
+    SH.draft = [];
+    SH.hover = null;
+    drawShardUi();
+    updateModeHint();
+  }
+
+  map.on("click", (e) => {
+    if (E.tool !== "shards") return;
+    if (!shardServerName()) { toast("Type the server name first (the one in velocity.toml)", true); $("#shard-server")?.focus(); return; }
+    const p = shardPoint(e.latlng);
+    if (SH.kind === "poly") {
+      if (SH.draft.length >= 3) {
+        const first = map.latLngToContainerPoint(ll(SH.draft[0][0], SH.draft[0][1]));
+        if (first.distanceTo(map.latLngToContainerPoint(e.latlng)) < 12) return shardFinishPolygon();
+      }
+      SH.draft.push(p);
+    } else if (SH.kind === "rect") {
+      if (!SH.draft.length) SH.draft.push(p);
+      else {
+        const a = SH.draft[0];
+        if (a[0] === p[0] || a[1] === p[1]) return toast("Click the opposite corner", true);
+        return shardAdd({ server: shardServerName(), "min-x": Math.min(a[0], p[0]), "min-z": Math.min(a[1], p[1]), "max-x": Math.max(a[0], p[0]), "max-z": Math.max(a[1], p[1]) });
+      }
+    } else if (!SH.draft.length) {
+      SH.draft.push(p);
+    } else {
+      const c = SH.draft[0];
+      const radius = Math.round(Math.hypot(p[0] - c[0], p[1] - c[1]));
+      if (radius < 1) return toast("Click further from the centre", true);
+      return shardAdd({ server: shardServerName(), "center-x": c[0], "center-z": c[1], radius });
+    }
+    drawShardUi();
+    updateModeHint();
+  });
+
+  map.on("mousemove", (e) => {
+    if (E.tool !== "shards" || !SH.draft.length) return;
+    SH.hover = shardPoint(e.latlng);
+    drawShardDraft();
+  });
+
+  map.on("contextmenu", () => {
+    if (E.tool !== "shards" || !SH.draft.length) return;
+    SH.draft.pop();
+    drawShardUi();
+    updateModeHint();
+  });
+
+  /** returns true if the key was used */
+  function shardKey(e) {
+    if (E.tool !== "shards" || !SH.draft.length) return false;
+    if (e.key === "Enter" && SH.kind === "poly") { shardFinishPolygon(); return true; }
+    if (e.key === "Backspace") { e.preventDefault(); SH.draft.pop(); drawShardUi(); updateModeHint(); return true; }
+    return false;
+  }
+
+  function shardHintText() {
+    if (!SH.regions.length && !SH.draft.length) return "Shards: pick a shape, type the server name, then click on the map";
+    if (SH.kind === "poly") return SH.draft.length ? `Polygon: ${SH.draft.length} point(s) · click the first point or press Enter to finish · Backspace/right-click: undo point · Esc: cancel` : "Polygon: click to place points · drag the dots of the selected region to reshape it · right-click a dot to remove it";
+    if (SH.kind === "rect") return SH.draft.length ? "Box: click the opposite corner · Esc: cancel" : "Box: click one corner, then the opposite corner";
+    return SH.draft.length ? "Circle: click to set the radius · Esc: cancel" : "Circle: click the centre, then a point on the edge";
+  }
+
+  function shardsToolChanged() {
+    if (E.tool !== "shards") SH.draft = [];
+    if (E.tool === "shards") { openTab("shards"); if (!SH.loaded) loadShards(); }
+    drawShards();
+    updateModeHint();
+  }
+
+  function renderShardList() {
+    const list = $("#shard-list");
+    if (!list) return;
+    const names = [...new Set(SH.regions.map((r) => r.server))];
+    $("#shard-server-names").innerHTML = names.map((n) => `<option value="${esc(n)}">`).join("");
+    $("#shard-summary").textContent = `${SH.regions.length} region${SH.regions.length === 1 ? "" : "s"}${SH.dirty ? " · unsaved changes" : ""}`;
+    list.innerHTML = SH.regions.map((r, i) => `
+      <div class="shard-row${i === SH.sel ? " sel" : ""}" data-i="${i}">
+        <i class="dot" style="background:${shardColor(r.server)}"></i>
+        <input class="shard-name" data-i="${i}" value="${esc(r.server)}" aria-label="Server name">
+        <span class="shard-desc">${esc(shardDesc(r))}</span>
+        ${shardKind(r) === "poly" ? `<label class="shard-curve" title="Round the corners into a curve through every point"><input type="checkbox" data-curve="${i}"${r.smooth ? " checked" : ""}>curve</label>` : ""}
+        <button class="icon-btn" data-up="${i}" title="Move up: regions higher in the list win where they overlap">↑</button>
+        <button class="icon-btn" data-down="${i}" title="Move down">↓</button>
+        <button class="icon-btn" data-del="${i}" title="Delete this region">✕</button>
+      </div>`).join("") || '<div class="hint">No regions yet.</div>';
+  }
+
+  function shardYaml() {
+    const q = (s) => (/^[A-Za-z0-9_.-]+$/.test(s) ? s : JSON.stringify(s));
+    const lines = SH.regions.map((r) => {
+      const kind = shardKind(r);
+      if (kind === "poly") return `  - {server: ${q(r.server)}, ${r.smooth ? "smooth: true, " : ""}points: [${r.points.map((p) => `[${p[0]}, ${p[1]}]`).join(", ")}]}`;
+      if (kind === "circle") {
+        const radii = r["radius-x"] !== undefined ? `radius-x: ${r["radius-x"]}, radius-z: ${r["radius-z"]}` : `radius: ${r.radius}`;
+        return `  - {server: ${q(r.server)}, center-x: ${r["center-x"]}, center-z: ${r["center-z"]}, ${radii}}`;
+      }
+      return `  - {server: ${q(r.server)}, min-x: ${r["min-x"]}, min-z: ${r["min-z"]}, max-x: ${r["max-x"]}, max-z: ${r["max-z"]}}`;
+    });
+    return "  regions:\n" + lines.join("\n");
+  }
+
+  function showShardYaml() {
+    if (!SH.regions.length) return toast("Draw a region first", true);
+    modal(`<h2>Regions for reef.yml</h2>
+      <p>Replace the <code>regions:</code> list under <code>sharding:</code> in <code>reef.yml</code> on every server with this. The list must be identical on all of them (only <code>this-server</code> differs), then run <code>/reef reload</code>. Regions higher up win where they overlap.</p>
+      <textarea id="shard-yaml-text" rows="12" readonly style="width:100%;font-family:ui-monospace,monospace;font-size:12px"></textarea>
+      <div class="foot"><button class="btn primary" id="shard-copy">Copy</button><button class="btn" data-close>Close</button></div>`);
+    const ta = $("#shard-yaml-text");
+    ta.value = shardYaml();
+    $("#shard-copy").onclick = async () => {
+      try { await navigator.clipboard.writeText(ta.value); toast("Copied"); } catch { ta.select(); document.execCommand("copy"); toast("Copied"); }
+    };
+  }
+
+  async function loadShards() {
+    if (!E.token) return;
+    try {
+      const d = await api("api/editor/shards");
+      SH.regions = (d.regions || []).filter((r) => r && typeof r.server === "string");
+      SH.sel = -1;
+      SH.dirty = false;
+      SH.loaded = true;
+      renderShardList();
+      drawShards();
+    } catch (e) {
+      if (e.status !== 404) toast("Couldn't load server regions: " + e.message, true);
+    }
+  }
+
+  async function saveShards() {
+    if (!E.token) return toast("Open the editor with /nodesmap editor in game to save", true);
+    shardsNormalize();
+    if (SH.regions.some((r) => !String(r.server || "").trim())) return toast("Every region needs a server name", true);
+    try {
+      await api("api/editor/shards", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ regions: SH.regions }) });
+      SH.dirty = false;
+      renderShardList();
+      toast("Saved to NodesMap. Use \"Copy for reef.yml\" to put the same regions on your servers.");
+    } catch (e) {
+      toast("Couldn't save: " + e.message, true);
+    }
+  }
+
+  function setupShards() {
+    $$("#shard-kind button").forEach((b) => {
+      b.classList.toggle("active", b.dataset.v === SH.kind);
+      b.onclick = () => {
+        SH.kind = b.dataset.v; store.set("shKind", SH.kind);
+        SH.draft = []; SH.hover = null;
+        $$("#shard-kind button").forEach((x) => x.classList.toggle("active", x === b));
+        $("#shard-curve-row").hidden = SH.kind !== "poly";
+        drawShardUi(); updateModeHint();
+      };
+    });
+    $("#shard-curve-row").hidden = SH.kind !== "poly";
+    const smooth = $("#shard-smooth");
+    smooth.checked = SH.smooth;
+    smooth.onchange = () => { SH.smooth = smooth.checked; store.set("shSmooth", SH.smooth); };
+    const snap = $("#shard-snap");
+    snap.checked = SH.snap;
+    snap.onchange = () => { SH.snap = snap.checked; store.set("shSnap", SH.snap); };
+    const name = $("#shard-server");
+    name.value = SH.server;
+    name.oninput = () => { SH.server = name.value; store.set("shServer", SH.server); };
+    $("#shard-save").onclick = saveShards;
+    $("#shard-yaml").onclick = showShardYaml;
+    $("#shard-reload").onclick = () => loadShards();
+
+    const list = $("#shard-list");
+    list.addEventListener("click", (e) => {
+      const t = e.target;
+      const ds = (k) => (t.closest(`[data-${k}]`) ? +t.closest(`[data-${k}]`).dataset[k] : null);
+      const del = ds("del"), up = ds("up"), down = ds("down");
+      if (del !== null) { SH.regions.splice(del, 1); SH.sel = -1; shardChanged(); return; }
+      if (up !== null && up > 0) { [SH.regions[up - 1], SH.regions[up]] = [SH.regions[up], SH.regions[up - 1]]; SH.sel = up - 1; shardChanged(); return; }
+      if (down !== null && down < SH.regions.length - 1) { [SH.regions[down + 1], SH.regions[down]] = [SH.regions[down], SH.regions[down + 1]]; SH.sel = down + 1; shardChanged(); return; }
+      if (t.closest("input")) return;
+      const row = t.closest(".shard-row");
+      if (row) {
+        SH.sel = +row.dataset.i;
+        renderShardList(); drawShards();
+        const layer = SH.layers[SH.sel];
+        if (layer) map.fitBounds(layer.getBounds().pad(0.2), { maxZoom: 0 });
+      }
+    });
+    list.addEventListener("change", (e) => {
+      const t = e.target;
+      if (t.classList.contains("shard-name")) {
+        const v = t.value.trim();
+        if (!v) { t.value = SH.regions[+t.dataset.i].server; return; }
+        SH.regions[+t.dataset.i].server = v;
+        shardChanged();
+      } else if (t.dataset.curve !== undefined) {
+        const r = SH.regions[+t.dataset.curve];
+        if (t.checked) r.smooth = true; else delete r.smooth;
+        shardChanged();
+      }
+    });
+    renderShardList();
+  }
+
   // ---------------------------------------------------------------- wiring
   function buildUi() {
     setupResTips();
+    setupShards();
     $$("#tools [data-tool]").forEach((b) => (b.onclick = () => setTool(b.dataset.tool)));
     $("#brush-size").oninput = (e) => setBrush(+e.target.value);
     $("#brush-size").onchange = (e) => e.target.blur();
@@ -2377,10 +2780,11 @@
       const typing = isTyping();
       if (e.key === "Escape") {
         closeModal();
-        if (!typing) { if (E.tool === "auto" && penStrokes.length) penReset(); else select([]); }
+        if (!typing) { if (E.tool === "shards" && SH.draft.length) shardCancelDraft(); else if (E.tool === "auto" && penStrokes.length) penReset(); else if (E.tool !== "shards") select([]); }
         return;
       }
       if (typing) return;
+      if (shardKey(e)) return;
       if (E.tool === "auto" && penStrokes.length && e.key === "Backspace") { e.preventDefault(); penUndo(); return; }
       const mod = e.ctrlKey || e.metaKey;
       if (mod && e.key.toLowerCase() === "z") { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }

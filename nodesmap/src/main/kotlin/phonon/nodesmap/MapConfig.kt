@@ -84,7 +84,7 @@ data class MapConfig(
         }
 
         /** Same shapes and maths as Reef's reef.yml regions: rectangle, polygon (optionally smooth), circle/ellipse. */
-        private fun parseShard(m: Map<*, *>): ShardRegion {
+        fun parseShard(m: Map<*, *>): ShardRegion {
             val server = m["server"].toString()
             val pts = ArrayList<DoubleArray>()
             val points = m["points"]
