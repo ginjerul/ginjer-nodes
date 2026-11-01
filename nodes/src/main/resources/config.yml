@@ -381,8 +381,16 @@ supplyDrops:
   discord: true
 
 # ===========================================
-# Discord: raids and warzones
+# Discord: war, flag war, raids and warzones
 # ===========================================
+# Discord webhook URLs (leave empty to turn that feed off).
+# discordWebhookWar: general war announcements (war start/end, surrenders, supply drops...)
+# discordWebhookFlagWar: flag attacks (flags placed, captured, defended)
+discordWebhookWar: ""
+discordWebhookFlagWar: ""
+discordRelayWar: true
+discordRelayFlagWar: true
+
 # separate webhooks for raid / warzone announcements
 # (leave empty to use discordWebhookWar)
 discordWebhookRaids: ""
