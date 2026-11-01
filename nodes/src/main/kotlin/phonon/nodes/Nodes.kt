@@ -155,6 +155,34 @@ public object Nodes {
         Nodes.logger = plugin.getLogger()
     }
 
+    /**
+     * An existing config.yml never gets options added by plugin updates. Copy the plain
+     * top-level options (not sections, so nothing an admin removed on purpose comes back)
+     * that the bundled config.yml has and this file lacks, with their comments.
+     */
+    private fun addMissingConfigOptions(plugin: org.bukkit.plugin.Plugin, config: YamlConfiguration, file: File) {
+        try {
+            val stream = plugin.getResource("config.yml") ?: return
+            val defaults = stream.use {
+                YamlConfiguration.loadConfiguration(java.io.InputStreamReader(it, Charsets.UTF_8))
+            }
+            var added = 0
+            for (key in defaults.getKeys(false)) {
+                if (defaults.isConfigurationSection(key) || config.contains(key, true)) continue
+                config.set(key, defaults.get(key))
+                config.setComments(key, defaults.getComments(key))
+                config.setInlineComments(key, defaults.getInlineComments(key))
+                added++
+            }
+            if (added > 0) {
+                config.save(file)
+                plugin.getLogger().info("config.yml: added $added new option(s) from this version (existing values kept)")
+            }
+        } catch (e: Exception) {
+            plugin.getLogger().warning("Could not add new options to config.yml: ${e.message}")
+        }
+    }
+
     internal fun reloadConfig() {
         val plugin = Nodes.plugin
         if (plugin === null) {
@@ -171,6 +199,7 @@ public object Nodes {
 
         val config = YamlConfiguration.loadConfiguration(configFile)
         if (config !== null) {
+            addMissingConfigOptions(plugin, config, configFile)
             Config.load(config)
         }
     }
