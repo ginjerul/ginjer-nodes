@@ -13,7 +13,7 @@ import phonon.nodes.stats.PlayerStats
 /**
  * /stats [player]
  * /kdr [player]
- * /top <kills|deaths|kdr|towns|nations>
+ * /top <kills|deaths|kdr|towns|nations|war>
  */
 class StatsCommand :
     CommandExecutor,
@@ -83,16 +83,24 @@ class StatsCommand :
             return
         }
         if (args.isEmpty()) {
-            Message.print(sender, "Usage: /leaderboard <kills|deaths|kdr|towns|nations>")
+            Message.print(sender, "Usage: /leaderboard <kills|deaths|kdr|towns|nations|war>")
             return
         }
         when (args[0].lowercase()) {
             "kills" -> PlayerStats.printTop(sender, "Top 10 Kills", PlayerStats.topKills(10))
             "deaths" -> PlayerStats.printTop(sender, "Top 10 Deaths", PlayerStats.topDeaths(10))
             "kdr" -> PlayerStats.printTop(sender, "Top 10 KDR", PlayerStats.topKdr(10))
+            "war" -> {
+                if (!phonon.nodes.stats.WarStats.isTracking()) {
+                    Message.print(sender, "No war is being tracked right now")
+                } else {
+                    val title = if (phonon.nodes.stats.WarStats.sessionType() == "skirmish") "Skirmish" else "This war"
+                    PlayerStats.printTop(sender, "$title: top 10 kills", phonon.nodes.stats.WarStats.snapshotSortedByKills().take(10))
+                }
+            }
             "towns", "town" -> PlayerStats.printTop(sender, "Top 10 Towns by KDR", PlayerStats.topTownsKdr(10))
             "nations", "nation" -> PlayerStats.printTop(sender, "Top 10 Nations by KDR", PlayerStats.topNationsKdr(10))
-            else -> Message.error(sender, "Usage: /leaderboard <kills|deaths|kdr|towns|nations>")
+            else -> Message.error(sender, "Usage: /leaderboard <kills|deaths|kdr|towns|nations|war>")
         }
     }
 
@@ -103,7 +111,7 @@ class StatsCommand :
         args: Array<out String>,
     ): List<String> {
         if ((alias.equals("leaderboard", true) || alias.equals("lb", true)) && args.size == 1) {
-            return listOf("kills", "deaths", "kdr", "towns", "nations")
+            return listOf("kills", "deaths", "kdr", "towns", "nations", "war")
                 .filter { it.startsWith(args[0].lowercase()) }
         }
         if (args.size == 1 && (alias.equals("stats", true) || alias.equals("kdr", true))) {

@@ -76,12 +76,26 @@
     ["towns", "Towns"], ["nations", "Nations"], ["diplomacy", "Diplomacy"],
     ["resources", "Resource"], ["supply", "Supply"], ["plain", "Terrain"],
   ];
+  /** what the View box shows: one checkbox per group, each switching one or more layers */
+  const GROUPS = [
+    ["Territory colors", ["territories"]],
+    ["Borders", ["borders"]],
+    ["Town & nation names", ["townLabels", "nationLabels"]],
+    ["Territory names", ["terrLabels"]],
+    ["Territory IDs", ["terrIds"]],
+    ["Resources", ["resources"]],
+    ["Players", ["players"]],
+    ["War", ["war", "warzones", "raids"]],
+    ["Buildings", ["forts", "outposts", "ports", "towers", "refineries", "drops"]],
+    ["Chunk grid", ["chunks"]],
+  ];
   const LAYERS = [
     ["territories", "Territory fill", true],
     ["borders", "Town borders", true],
     ["townLabels", "Town names", true],
     ["nationLabels", "Nation names", true],
     ["terrLabels", "Territory names", false],
+    ["terrIds", "Territory IDs", false],
     ["resources", "Resource icons", true],
     ["players", "Players", true],
     ["war", "War flags", true],
@@ -101,6 +115,8 @@
     resource: store.get("resource", ""),
     layers: Object.assign(Object.fromEntries(LAYERS.map(([k, , d]) => [k, d])), store.get("layers", {})),
     sidebar: store.get("sidebar", window.innerWidth > 760),
+    warOpen: store.get("warOpen", true),
+    view: false,
   };
 
   // ---------------------------------------------------------------- map
@@ -125,7 +141,7 @@
   };
 
   const G = {}; // layer groups by name
-  for (const k of ["terr", "occ", "borders", "zones", "townLabels", "nationLabels", "terrLabels", "resources", "players", "flags", "raids", "forts", "outposts", "ports", "towers", "refineries", "drops", "grid"]) {
+  for (const k of ["terr", "occ", "borders", "zones", "townLabels", "nationLabels", "terrLabels", "terrIds", "resources", "players", "flags", "raids", "forts", "outposts", "ports", "towers", "refineries", "drops", "grid"]) {
     G[k] = L.layerGroup();
   }
   const terrPolys = new Map(); // id -> L.Polygon
@@ -195,13 +211,15 @@
     for (const r of Object.values(R)) map.addLayer(r); // create svg containers up front (patterns live in them)
     for (const g of Object.values(G)) g.addTo(map);
     buildUi();
+    if (S.info.players === false) setPlayersEnabled(false);
     syncLayerVisibility();
 
     await pollVersions();
     pollPlayers();
     setInterval(pollVersions, 2500);
     setInterval(pollPlayers, 2000);
-    setInterval(pollTiles, 15000);
+    pollTiles();
+    setInterval(pollTiles, 8000);
     setInterval(tickTimers, 1000);
   }
 
@@ -230,13 +248,32 @@
     try {
       const d = await getJSON("data/players.json");
       S.players = d.players || [];
+      setPlayersEnabled(!d.disabled);
       if (prefs.layers.players) drawPlayers();
     } catch { /* ignore */ }
+  }
+
+  /** the server can turn player markers off entirely (/nodesmap players off) */
+  function setPlayersEnabled(on) {
+    if (S.playersOn === on) return;
+    S.playersOn = on;
+    const row = document.querySelector('#layer-toggles input[data-group="Players"]')?.closest("label");
+    if (row) row.hidden = !on;
+    const opt = document.querySelector('.sort[data-list="towns"] option[value="online"]');
+    if (opt) opt.hidden = !on;
+    if (!on) G.players.clearLayers();
   }
 
   async function pollTiles() {
     let d;
     try { d = await getJSON("data/tiles.json"); } catch { return; }
+    const rp = $("#render-progress");
+    if (!rp) { /* customised viewer without the progress element */ } else if (d.render && d.render.total > 0) {
+      rp.hidden = false;
+      rp.textContent = `Drawing map ${Math.floor((d.render.done / d.render.total) * 100)}%`;
+    } else {
+      rp.hidden = true;
+    }
     if (!S.tilesSince) { S.tilesSince = d.now; return; }
     for (const [key, ts] of d.updates || []) {
       if (ts <= S.tilesSince) continue;
@@ -420,36 +457,171 @@
   }
 
   // ---------------------------------------------------------------- labels + icons
+  // ---------------------------------------------------------------- labels
+  // Labels are laid out on screen after every zoom/pan: biggest first, and any
+  // label that would overlap one already placed is left out until there's room.
+  let labelDefs = [];
+  const prettyName = (s) => String(s ?? "").replace(/_/g, " ");
+  const measureCtx = document.createElement("canvas").getContext("2d");
+  let fontFamily = null;
+  function textWidth(text, px, weight, spacingEm) {
+    fontFamily = fontFamily || getComputedStyle(document.body).fontFamily;
+    measureCtx.font = `${weight} ${px}px ${fontFamily}`;
+    return measureCtx.measureText(text).width + text.length * px * spacingEm;
+  }
+
+  /** the nation's biggest connected group of territories (by chunks) */
+  function mainLandmass(ids) {
+    const set = new Set(ids);
+    const seen = new Set();
+    let best = [], bestSize = -1;
+    for (const id of ids) {
+      if (seen.has(id)) continue;
+      const comp = [id];
+      seen.add(id);
+      for (let i = 0; i < comp.length; i++) {
+        const t = S.terr.get(comp[i]);
+        for (const nb of (t && t.neighbors) || []) {
+          if (set.has(nb) && !seen.has(nb)) { seen.add(nb); comp.push(nb); }
+        }
+      }
+      const size = comp.reduce((a, cid) => a + ((S.terr.get(cid)?.chunks.length || 0) >> 1), 0);
+      if (size > bestSize) { bestSize = size; best = comp; }
+    }
+    return { ids: best, chunks: bestSize };
+  }
+
   function drawLabels() {
-    G.townLabels.clearLayers(); G.nationLabels.clearLayers(); G.terrLabels.clearLayers();
+    labelDefs = [];
     const capitals = new Set([...S.nations.values()].map((n) => n.capital));
+    for (const n of S.nations.values()) {
+      const ids = n.townList.flatMap((t) => t.territories).filter((id) => S.terr.has(id));
+      if (!ids.length) continue;
+      const main = mainLandmass(ids);
+      const c = NodesGeom.labelCell(main.ids.map((id) => S.terr.get(id).core));
+      if (!c) continue;
+      // block-space extent of the main landmass: the name is sized to fit inside it
+      let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+      for (const id of main.ids) {
+        const cs = S.terr.get(id).chunks;
+        for (let i = 0; i < cs.length; i += 2) {
+          if (cs[i] < x0) x0 = cs[i];
+          if (cs[i] > x1) x1 = cs[i];
+          if (cs[i + 1] < z0) z0 = cs[i + 1];
+          if (cs[i + 1] > z1) z1 = cs[i + 1];
+        }
+      }
+      labelDefs.push({
+        kind: "nation", latlng: chunkCenter(c[0], c[1]), priority: 1e7 + main.chunks,
+        text: prettyName(n.name).toUpperCase(), color: shade(n.color, 0.55), towns: n.townList.length,
+        spanX: (x1 - x0 + 1) * 16, spanZ: (z1 - z0 + 1) * 16,
+      });
+    }
     for (const t of S.towns.values()) {
       const home = S.terr.get(t.home);
       if (!home) continue;
-      const cap = capitals.has(t.name) ? `<span class="cap">★</span>` : "";
-      G.townLabels.addLayer(L.marker(chunkCenter(home.core[0], home.core[1]), {
-        pane: "labels", interactive: false, keyboard: false,
-        icon: L.divIcon({ className: "", iconSize: null, html: `<div class="lbl town">${cap}${esc(t.name)}</div>` }),
-      }));
-    }
-    for (const n of S.nations.values()) {
-      const cells = [];
-      for (const t of n.townList) for (const id of t.territories) { const tr = S.terr.get(id); if (tr) cells.push(tr.core); }
-      const c = NodesGeom.labelCell(cells);
-      if (!c) continue;
-      G.nationLabels.addLayer(L.marker(chunkCenter(c[0], c[1]), {
-        pane: "labels", interactive: false, keyboard: false,
-        icon: L.divIcon({ className: "", iconSize: null, html: `<div class="lbl nation" style="color:${shade(n.color, 0.55)}">${esc(n.name)}<span class="n">${n.townList.length} towns</span></div>` }),
-      }));
+      const isCap = capitals.has(t.name);
+      const text = (isCap ? "★ " : "") + prettyName(t.name);
+      labelDefs.push({
+        kind: "town", latlng: chunkCenter(home.core[0], home.core[1]), priority: 1e5 + t.territories.length * 10 + (isCap ? 5 : 0),
+        w: textWidth(text, 12.5, 700, 0), h: 15,
+        html: `<div class="lbl town">${isCap ? `<span class="cap">★</span>` : ""}${esc(prettyName(t.name))}</div>`,
+      });
     }
     for (const t of S.terr.values()) {
       if (!t.name) continue;
-      G.terrLabels.addLayer(L.marker(ll(t.core[0] * 16 + 8, t.core[1] * 16 + 20), {
+      labelDefs.push({
+        kind: "terr", latlng: ll(t.core[0] * 16 + 8, t.core[1] * 16 + 20), priority: (t.chunks.length >> 1),
+        w: textWidth(t.name, 10.5, 600, 0), h: 13,
+        html: `<div class="lbl terr">${esc(t.name)}</div>`,
+      });
+    }
+    for (const t of S.terr.values()) {
+      const txt = "#" + t.id;
+      labelDefs.push({
+        kind: "terrid", latlng: ll(t.core[0] * 16 + 8, t.core[1] * 16 + 8), priority: (t.chunks.length >> 1) - 1000,
+        w: textWidth(txt, 10.5, 600, 0), h: 13,
+        html: `<div class="lbl terr id">${txt}</div>`,
+      });
+    }
+    labelDefs.sort((a, b) => b.priority - a.priority);
+    layoutLabels();
+  }
+
+  let layoutTimer = 0;
+  function scheduleLayout() {
+    clearTimeout(layoutTimer);
+    layoutTimer = setTimeout(layoutLabels, 40);
+  }
+
+  /**
+   * Fit a nation name inside its land at the current zoom: font between 9 and
+   * 15px, wrapped onto two lines when that fits better.
+   */
+  function fitNation(d, scale) {
+    const areaW = d.spanX * scale * 0.9;
+    const areaH = d.spanZ * scale * 0.9;
+    const words = d.text.split(" ");
+    const options = [[d.text]];
+    if (words.length > 1) {
+      let best = null;
+      for (let i = 1; i < words.length; i++) {
+        const a = words.slice(0, i).join(" "), b = words.slice(i).join(" ");
+        const diff = Math.abs(a.length - b.length);
+        if (!best || diff < best[0]) best = [diff, [a, b]];
+      }
+      options.push(best[1]);
+    }
+    let pick = null;
+    for (const lines of options) {
+      const unit = Math.max(...lines.map((l) => textWidth(l, 10, 800, 0.05))) / 10; // width per px of font
+      const byWidth = areaW / unit;
+      const byHeight = areaH / (lines.length * 1.15);
+      const px = Math.max(9, Math.min(15, Math.floor(Math.min(byWidth, byHeight))));
+      if (!pick || px > pick.px) pick = { lines, px, unit };
+    }
+    const sub = d.towns > 1 && pick.px >= 11;
+    return {
+      w: pick.unit * pick.px,
+      h: pick.lines.length * pick.px * 1.12 + (sub ? 11 : 0),
+      html: `<div class="lbl nation" style="font-size:${pick.px}px;color:${d.color}">${pick.lines.map(esc).join("<br>")}${sub ? `<span class="n">${d.towns} towns</span>` : ""}</div>`,
+    };
+  }
+
+  function layoutLabels() {
+    G.townLabels.clearLayers(); G.nationLabels.clearLayers(); G.terrLabels.clearLayers(); G.terrIds.clearLayers();
+    const z = map.getZoom();
+    const scale = Math.pow(2, z); // screen pixels per block
+    const show = {
+      nation: prefs.layers.nationLabels && z <= -3,
+      town: prefs.layers.townLabels && z >= -3,
+      terr: prefs.layers.terrLabels && z >= 0,
+      terrid: prefs.layers.terrIds && z >= -1,
+    };
+    const size = map.getSize();
+    const pad = 3;
+    const placed = [];
+    const group = { nation: G.nationLabels, town: G.townLabels, terr: G.terrLabels, terrid: G.terrIds };
+    for (const d of labelDefs) {
+      if (!show[d.kind]) continue;
+      if (d.kind === "nation") Object.assign(d, fitNation(d, scale));
+      const p = map.latLngToContainerPoint(d.latlng);
+      const x0 = p.x - d.w / 2 - pad, x1 = p.x + d.w / 2 + pad;
+      const y0 = p.y - d.h / 2 - pad / 2, y1 = p.y + d.h / 2 + pad / 2;
+      if (x1 < -50 || y1 < -50 || x0 > size.x + 50 || y0 > size.y + 50) continue;
+      let hit = false;
+      for (const r of placed) {
+        if (x0 < r[2] && x1 > r[0] && y0 < r[3] && y1 > r[1]) { hit = true; break; }
+      }
+      if (hit) continue;
+      placed.push([x0, y0, x1, y1]);
+      group[d.kind].addLayer(L.marker(d.latlng, {
         pane: "labels", interactive: false, keyboard: false,
-        icon: L.divIcon({ className: "", iconSize: null, html: `<div class="lbl terr">${esc(t.name)}</div>` }),
+        icon: L.divIcon({ className: "", iconSize: null, html: d.html }),
       }));
     }
   }
+
 
   function resIconUrl(nodeName) {
     const r = S.resources[nodeName];
@@ -460,11 +632,11 @@
   function drawResources() {
     G.resources.clearLayers();
     for (const t of S.terr.values()) {
-      const urls = t.resources.map(resIconUrl).filter(Boolean).slice(0, 3);
-      if (!urls.length) continue;
+      const icons = t.resources.map((r) => [r, resIconUrl(r)]).filter(([, u]) => u).slice(0, 3);
+      if (!icons.length) continue;
       G.resources.addLayer(L.marker(ll(t.core[0] * 16 + 8, t.core[1] * 16 + 8), {
         pane: "labels", interactive: false, keyboard: false,
-        icon: L.divIcon({ className: "", iconSize: null, html: `<div class="res-stack" style="margin-top:18px">${urls.map((u) => `<img src="${esc(u)}" alt="">`).join("")}</div>` }),
+        icon: L.divIcon({ className: "", iconSize: null, html: `<div class="res-stack" style="margin-top:18px">${icons.map(([r, u]) => `<img src="${esc(u)}" alt="" data-tipres="${esc(r)}">`).join("")}</div>` }),
       }));
     }
   }
@@ -521,7 +693,7 @@
       const t = S.terr.get(+id);
       if (!t || !lvl) continue;
       const town = S.owner.get(+id);
-      const m = pin("fort", `F${lvl}`, ll(t.core[0] * 16 + 15, t.core[1] * 16 + 1), `<b>Fortification level ${lvl}</b><br>${esc(t.name || "Territory " + t.id)}`, () => showTerritory(t.id));
+      const m = pin("fort", `F${lvl}`, ll(t.core[0] * 16 + 15, t.core[1] * 16 + 1), `<b>Fortification level ${lvl}</b><br>${esc(t.name || "Territory #" + t.id)}`, () => showTerritory(t.id));
       m.options.icon.options.html = `<div class="pin fort" style="background:${town ? shade(town.color, -0.35) : "#333"}">F${lvl}</div>`;
       G.forts.addLayer(m);
     }
@@ -594,7 +766,7 @@
         pane: "flags",
         icon: L.divIcon({ className: "", iconSize: null, html: `<div class="flag" style="--c:${color};--p:${pct}"><div class="ring"></div><div class="core">${pct}</div></div>` }),
       });
-      m.bindTooltip(() => `<b>${esc(a.town)}</b> attacking ${esc(terr ? terr.name || "territory " + terr.id : "chunk")}<br>by ${esc(a.attacker || "?")} · ${pct}% · ${fmtDur(attackRemaining(a))} left`, { className: "nm-tip", direction: "top", offset: [0, -18] });
+      m.bindTooltip(() => `<b>${esc(a.town)}</b> attacking ${esc(terr ? terr.name || "territory #" + terr.id : "chunk")}<br>by ${esc(a.attacker || "?")} · ${pct}% · ${fmtDur(attackRemaining(a))} left`, { className: "nm-tip", direction: "top", offset: [0, -18] });
       if (terr) m.on("click", () => showTerritory(terr.id));
       G.flags.addLayer(m);
     }
@@ -658,9 +830,9 @@
     const zones = (live.warzones || []).filter((z) => z.enabled);
     const raids = live.raids || [];
     const drop = live.supplyDrop;
-    let h = `<div class="war-head ${war.enabled ? "on" : ""}"><b>${war.enabled ? "War is active" : "Peace time"}</b>${war.enabled && war.endsAt ? `<span>ends in <b data-countdown="${war.endsAt}">${fmtDur(war.endsAt - now())}</b></span>` : ""}</div>`;
+    let h = "";
 
-    h += `<h3>Flags in progress (${atk.length})</h3>`;
+    h += `<h3 style="margin-top:6px">Flags in progress (${atk.length})</h3>`;
     if (!atk.length) h += `<div class="empty">No active flag attacks.</div>`;
     for (const a of atk.slice().sort((x, y) => y.progress - x.progress)) {
       const terr = S.terr.get(S.chunkTerr.get(NodesGeom.key(a.cx, a.cz)));
@@ -704,7 +876,14 @@
       h += `</div>`;
     }
     $("#war-panel").innerHTML = h;
-    $('#tabs [data-tab="war"]').classList.toggle("has-alert", !!(war.enabled || atk.length || zones.length || raids.length));
+    const busy = !!(war.enabled || atk.length || zones.length || raids.length);
+    $("#war-sec").classList.toggle("on", !!war.enabled);
+    const bits = [];
+    if (war.enabled) bits.push(war.endsAt ? `ends in <b data-countdown="${war.endsAt}">${fmtDur(war.endsAt - now())}</b>` : "active");
+    else bits.push(busy ? "peace" : "Peace time");
+    if (atk.length) bits.push(`${atk.length} flag${atk.length > 1 ? "s" : ""}`);
+    if (raids.length) bits.push(`${raids.length} raid${raids.length > 1 ? "s" : ""}`);
+    $("#war-sum").innerHTML = bits.join(" · ");
     updateWarPill();
   }
 
@@ -718,38 +897,79 @@
   }
 
   // ---------------------------------------------------------------- sidebar lists
+  const navOpen = new Set(store.get("navOpen", []));
   function renderLists() {
-    const tf = ($('.filter[data-list="towns"]').value || "").toLowerCase();
-    const ts = $('.sort[data-list="towns"]').value;
-    let towns = [...S.towns.values()].filter((t) => !tf || t.name.toLowerCase().includes(tf) || (t.nation || "").toLowerCase().includes(tf));
-    const on = new Map(towns.map((t) => [t.name, onlineCount(t)]));
-    const sorters = {
+    const f = ($('.filter[data-list="all"]').value || "").toLowerCase();
+    const sort = $('.sort[data-list="all"]').value;
+    const on = new Map([...S.towns.values()].map((t) => [t.name, onlineCount(t)]));
+    const townSort = {
       territories: (a, b) => b.territories.length - a.territories.length,
+      towns: (a, b) => b.territories.length - a.territories.length,
       residents: (a, b) => b.residents.length - a.residents.length,
-      online: (a, b) => on.get(b.name) - on.get(a.name),
+      online: (a, b) => on.get(b.name) - on.get(a.name) || b.territories.length - a.territories.length,
       name: (a, b) => a.name.localeCompare(b.name),
-    };
-    towns.sort(sorters[ts] || sorters.territories);
-    $("#list-towns").innerHTML = towns.length ? towns.map((t) => `<div class="row" data-town="${esc(t.name)}"><span class="sw" style="background:${t.color}"></span><div><div class="nm">${esc(t.name)}</div><div class="sub">${esc(t.nation || "No nation")}${on.get(t.name) ? ` · <span style="color:var(--ok)">${on.get(t.name)} online</span>` : ""}</div></div><span class="stat">${t.territories.length} terr<br>${t.residents.length} res</span></div>`).join("") : `<div class="empty">No towns.</div>`;
-
-    const nf = ($('.filter[data-list="nations"]').value || "").toLowerCase();
-    const ns = $('.sort[data-list="nations"]').value;
-    let nations = [...S.nations.values()].filter((n) => !nf || n.name.toLowerCase().includes(nf));
-    const nsorters = {
-      territories: (a, b) => b.territories - a.territories,
-      towns: (a, b) => b.townList.length - a.townList.length,
-      residents: (a, b) => b.residents - a.residents,
-      name: (a, b) => a.name.localeCompare(b.name),
-    };
-    nations.sort(nsorters[ns] || nsorters.territories);
-    $("#list-nations").innerHTML = nations.length ? nations.map((n) => `<div class="row" data-nation="${esc(n.name)}"><span class="sw" style="background:${n.color}"></span><div><div class="nm">${esc(n.name)}</div><div class="sub">Capital ${esc(n.capital)} · ${n.townList.length} towns</div></div><span class="stat">${n.territories} terr<br>${n.residents} res</span></div>`).join("") : `<div class="empty">No nations.</div>`;
+    }[sort];
+    const townRow = (t) => `<div class="row town-row" data-town="${esc(t.name)}"><span class="sw" style="background:${t.color}"></span><div class="nm">${esc(prettyName(t.name))}${on.get(t.name) ? ` <span class="tag-online">· ${on.get(t.name)} online</span>` : ""}</div><span class="stat">${t.territories.length} terr · ${t.residents.length} res</span></div>`;
+    const nationOn = (n) => n.townList.reduce((a, t) => a + (on.get(t.name) || 0), 0);
+    const groups = [];
+    for (const n of S.nations.values()) {
+      const all = n.townList.slice();
+      const nameHit = !f || n.name.toLowerCase().includes(f);
+      const towns = (nameHit ? all : all.filter((t) => t.name.toLowerCase().includes(f))).sort(townSort);
+      if (!nameHit && !towns.length) continue;
+      groups.push({ n, towns });
+    }
+    const nsort = {
+      territories: (a, b) => b.n.territories - a.n.territories,
+      towns: (a, b) => b.n.townList.length - a.n.townList.length,
+      residents: (a, b) => b.n.residents - a.n.residents,
+      online: (a, b) => nationOn(b.n) - nationOn(a.n) || b.n.territories - a.n.territories,
+      name: (a, b) => a.n.name.localeCompare(b.n.name),
+    }[sort];
+    groups.sort(nsort);
+    const lone = [...S.towns.values()].filter((t) => !t.nation && (!f || t.name.toLowerCase().includes(f))).sort(townSort);
+    let h = "";
+    for (const { n, towns } of groups) {
+      const open = !!f || navOpen.has(n.name);
+      const online = nationOn(n);
+      h += `<div class="row nation-row ${open ? "open" : ""}" data-nation="${esc(n.name)}"><span class="sw" style="background:${n.color}"></span><div><div class="nm">${esc(prettyName(n.name))}</div><div class="sub">${n.townList.length} town${n.townList.length === 1 ? "" : "s"} · ${n.territories} terr${online ? ` · <span class="tag-online">${online} online</span>` : ""}</div></div><span class="stat">${n.residents} res</span><button class="twist" data-twist="${esc(n.name)}" aria-label="Show towns" title="Show towns"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></button></div>`;
+      if (open) h += towns.map(townRow).join("");
+    }
+    if (lone.length) h += `<h3>No nation</h3>` + lone.map(townRow).join("");
+    $("#list-tree").innerHTML = h || `<div class="empty">Nothing matches.</div>`;
   }
 
   // ---------------------------------------------------------------- info panels
   let infoTarget = null;
+  // sections remember whether you folded them; long lists start folded
+  const infoFolded = new Set(store.get("infoFolded", ["Residents", "Towns"]));
+  function sectionize(root) {
+    for (const h of [...root.querySelectorAll(".section-h")]) {
+      const title = h.textContent.trim();
+      const det = document.createElement("details");
+      det.className = "sec-d";
+      det.open = !infoFolded.has(title);
+      const sum = document.createElement("summary");
+      sum.textContent = title;
+      det.appendChild(sum);
+      let n = h.nextSibling;
+      h.parentNode.insertBefore(det, h);
+      while (n && !(n.nodeType === 1 && n.classList.contains("section-h"))) {
+        const next = n.nextSibling;
+        det.appendChild(n);
+        n = next;
+      }
+      h.remove();
+      det.addEventListener("toggle", () => {
+        if (det.open) infoFolded.delete(title); else infoFolded.add(title);
+        store.set("infoFolded", [...infoFolded]);
+      });
+    }
+  }
   function openInfo(html, target) {
     infoTarget = target;
     $("#info-body").innerHTML = html;
+    sectionize($("#info-body"));
     $("#info").hidden = false;
   }
   function refreshInfo() {
@@ -761,11 +981,11 @@
   }
   const townChip = (name) => {
     const t = S.towns.get(name);
-    return `<span class="chip" data-town="${esc(name)}"><span class="dot" style="background:${t ? t.color : "#777"}"></span>${esc(name)}</span>`;
+    return `<span class="chip" data-town="${esc(name)}"><span class="dot" style="background:${t ? t.color : "#777"}"></span>${esc(prettyName(name))}</span>`;
   };
   const nationChip = (name) => {
     const n = S.nations.get(name);
-    return `<span class="chip" data-nation="${esc(name)}"><span class="dot" style="background:${n ? n.color : "#777"}"></span>${esc(name)}</span>`;
+    return `<span class="chip" data-nation="${esc(name)}"><span class="dot" style="background:${n ? n.color : "#777"}"></span>${esc(prettyName(name))}</span>`;
   };
 
   function showTerritory(id, fly = false) {
@@ -786,10 +1006,11 @@
     if (fort) badges.push(`<span class="badge">Fort level ${fort}</span>`);
     if (town && town.supplied) badges.push(supplyCut(id, town) ? `<span class="badge war">Supply cut</span>` : `<span class="badge ok">Supplied</span>`);
     if (t.wild) badges.push(`<span class="badge">Borders wilderness</span>`);
-    const res = t.resources.map((r) => { const u = resIconUrl(r); return `<div class="res">${u ? `<img src="${esc(u)}" alt="">` : ""}${esc(r)}</div>`; }).join("");
+    if (t.atk && t.atk !== 1) badges.push(`<span class="badge ${t.atk > 1 ? "ok" : "war"}" title="Flag attacks here take ${+t.atk.toFixed(2)}× as long">${t.atk > 1 ? "Fortified" : "Weak"}: capture ×${+t.atk.toFixed(2)}</span>`);
+    const res = t.resources.map((r) => { const u = resIconUrl(r); return `<div class="res" data-tipres="${esc(r)}">${u ? `<img src="${esc(u)}" alt="">` : ""}${esc(prettyName(r))}</div>`; }).join("");
     openInfo(`
-      <div class="info-kicker">Territory #${t.id}</div>
-      <h2 class="info-title">${esc(t.name || "Unnamed territory")}</h2>
+      <div class="info-kicker">${t.name ? `Territory #${t.id}` : "Territory"}</div>
+      <h2 class="info-title">${t.name ? esc(t.name) : `#${t.id}`}</h2>
       <div class="info-sub">${town ? `Owned by ${townChip(town.name)}${town.nation ? " " + nationChip(town.nation) : ""}` : "Unclaimed"}</div>
       ${badges.length ? `<div class="badges">${badges.join("")}</div>` : ""}
       <dl class="kv">
@@ -817,7 +1038,7 @@
       return `<span class="chip plain ${online.has(r.toLowerCase()) ? "online" : ""}">${esc(r)}${role}</span>`;
     };
     const badges = [];
-    if (isCap) badges.push(`<span class="badge gold">Capital of ${esc(nation.name)}</span>`);
+    if (isCap) badges.push(`<span class="badge gold">Capital of ${esc(prettyName(nation.name))}</span>`);
     badges.push(`<span class="badge">${t.open ? "Open to join" : "Invite only"}</span>`);
     if (t.overlord) badges.push(`<span class="badge">Vassal of ${esc(t.overlord)}</span>`);
     if (zone) badges.push(`<span class="badge gold">Warzone${zone.enabled ? " · active" : ""}</span>`);
@@ -829,7 +1050,7 @@
     const sortedRes = t.residents.slice().sort((a, b) => (a === t.leader ? -1 : b === t.leader ? 1 : (online.has(b.toLowerCase()) - online.has(a.toLowerCase())) || a.localeCompare(b)));
     openInfo(`
       <div class="info-kicker">Town</div>
-      <h2 class="info-title"><span class="sw" style="background:${t.color}"></span>${esc(t.name)}</h2>
+      <h2 class="info-title"><span class="sw" style="background:${t.color}"></span>${esc(prettyName(t.name))}</h2>
       <div class="info-sub">${nation ? nationChip(nation.name) : "No nation"}</div>
       <div class="badges">${badges.join("")}</div>
       <dl class="kv">
@@ -856,7 +1077,7 @@
     if (!n) return;
     openInfo(`
       <div class="info-kicker">Nation</div>
-      <h2 class="info-title"><span class="sw" style="background:${n.color}"></span>${esc(n.name)}</h2>
+      <h2 class="info-title"><span class="sw" style="background:${n.color}"></span>${esc(prettyName(n.name))}</h2>
       <div class="info-sub">Capital ${townChip(n.capital)}</div>
       <dl class="kv">
         <dt>Towns</dt><dd>${n.townList.length}</dd>
@@ -878,8 +1099,8 @@
   let searchIndex = [];
   function buildSearch() {
     searchIndex = [];
-    for (const t of S.towns.values()) searchIndex.push({ kind: "town", label: t.name, color: t.color, go: () => showTown(t.name, true) });
-    for (const n of S.nations.values()) searchIndex.push({ kind: "nation", label: n.name, color: n.color, go: () => showNation(n.name, true) });
+    for (const t of S.towns.values()) searchIndex.push({ kind: "town", label: prettyName(t.name), color: t.color, go: () => showTown(t.name, true) });
+    for (const n of S.nations.values()) searchIndex.push({ kind: "nation", label: prettyName(n.name), color: n.color, go: () => showNation(n.name, true) });
     for (const t of S.terr.values()) if (t.name) searchIndex.push({ kind: "territory", label: t.name, go: () => showTerritory(t.id, true) });
     for (const t of S.towns.values()) for (const r of t.residents) searchIndex.push({ kind: "player", label: r, color: t.color, go: () => goPlayer(r) });
   }
@@ -892,7 +1113,7 @@
   let srSel = 0, srItems = [];
   function runSearch(q) {
     const box = $("#search-results");
-    q = q.trim().toLowerCase();
+    q = q.trim().toLowerCase().replace(/_/g, " ");
     if (!q) { box.hidden = true; return; }
     const coord = q.match(/^(-?\d+)[ ,]+(-?\d+)$/);
     srItems = [];
@@ -924,13 +1145,21 @@
     const t = S.terr.get(id);
     if (!t) return;
     const town = S.owner.get(id);
-    $("#hover-terr").textContent = `${t.name || "Territory " + t.id}${town ? " · " + town.name : ""}`;
+    $("#hover-terr").innerHTML = `${esc(t.name || "Territory #" + t.id)}${town ? " · " + esc(prettyName(town.name)) : ""}<span class="mouse-hint">${town ? "click: town · right-click: territory" : "click: territory"}</span>`;
   }
   // territory clicks: O(1) chunk lookup instead of thousands of interactive svg paths
+  // left click: the town that owns the land (or the territory if nobody does); right click / long press: the territory
+  const terrAt = (latlng) => S.chunkTerr.get(NodesGeom.key(Math.floor(latlng.lng) >> 4, Math.floor(latlng.lat) >> 4));
   map.on("click", (e) => {
-    const id = S.chunkTerr.get(NodesGeom.key(Math.floor(e.latlng.lng) >> 4, Math.floor(e.latlng.lat) >> 4));
-    if (id !== undefined) showTerritory(id);
+    const id = terrAt(e.latlng);
+    const town = id !== undefined ? S.owner.get(id) : null;
+    if (town) showTown(town.name);
+    else if (id !== undefined) showTerritory(id);
     else { $("#info").hidden = true; infoTarget = null; }
+  });
+  map.on("contextmenu", (e) => {
+    const id = terrAt(e.latlng);
+    if (id !== undefined) showTerritory(id);
   });
   map.on("mousemove", (e) => {
     const x = Math.floor(e.latlng.lng), z = Math.floor(e.latlng.lat);
@@ -952,7 +1181,63 @@
     if (prefs.layers.chunks) drawChunkGrid();
   });
   map.on("zoomend", syncLayerVisibility);
+  map.on("moveend zoomend resize", scheduleLayout);
   window.addEventListener("hashchange", applyHash);
+
+  // ---------------------------------------------------------------- resource hover cards
+  const RES_KEYS = { income: "Income", ore: "Mining drops", crops: "Crops", animals: "Animals" };
+  function fmtItem(k) { return prettyName(String(k).toLowerCase()); }
+  function resTipHtml(n) {
+    const r = S.resources[n] || {};
+    const u = resIconUrl(n);
+    let count = 0;
+    for (const t of S.terr.values()) if (t.resources.includes(n)) count++;
+    const rows = [];
+    for (const [k, label] of Object.entries(RES_KEYS)) {
+      const v = r[k];
+      if (!v || typeof v !== "object" || !Object.keys(v).length) continue;
+      const items = Object.entries(v).map(([item, amt]) => {
+        const a = Array.isArray(amt) ? `${+(amt[0] * 100).toFixed(2)}% · ${amt[1]}–${amt[2]}` : k === "ore" ? `${+(amt * 100).toFixed(2)}%` : `${amt}`;
+        return `<div><span>${esc(fmtItem(item))}</span><b>${esc(a)}</b></div>`;
+      }).join("");
+      rows.push(`<div class="tip-sec">${label}</div><div class="tip-grid">${items}</div>`);
+    }
+    const extra = [];
+    if (r.attacker_time_multiplier && r.attacker_time_multiplier !== 1) extra.push(`<div><span>Capture time</span><b>×${r.attacker_time_multiplier}</b></div>`);
+    if (r.defender_time_multiplier && r.defender_time_multiplier !== 1) extra.push(`<div><span>Retake time</span><b>×${r.defender_time_multiplier}</b></div>`);
+    if (r.cost && (r.cost.constant || (r.cost.scale && r.cost.scale !== 1))) extra.push(`<div><span>Claim cost</span><b>${r.cost.constant ? "+" + r.cost.constant : ""}${r.cost.scale && r.cost.scale !== 1 ? " ×" + r.cost.scale : ""}</b></div>`);
+    if (extra.length) rows.push(`<div class="tip-sec">Territory</div><div class="tip-grid">${extra.join("")}</div>`);
+    const known = new Set(["icon", "cost", "priority", "income", "ore", "crops", "animals", "attacker_time_multiplier", "defender_time_multiplier"]);
+    const rest = Object.fromEntries(Object.entries(r).filter(([k, v]) => !known.has(k) && !(v && typeof v === "object" && !Object.keys(v).length)));
+    if (Object.keys(rest).length) rows.push(`<div class="tip-sec">Other</div><pre>${esc(JSON.stringify(rest, null, 1))}</pre>`);
+    return `<div class="tip-h">${u ? `<img src="${esc(u)}" alt="">` : ""}<b>${esc(prettyName(n))}</b><span>${count} ${count === 1 ? "territory" : "territories"}</span></div>${rows.join("") || `<div class="tip-none">No extra details</div>`}`;
+  }
+  function setupResTips() {
+    const tip = document.createElement("div");
+    tip.id = "res-tip";
+    tip.hidden = true;
+    document.body.appendChild(tip);
+    let cur = null;
+    const place = (e) => {
+      const pad = 14, w = tip.offsetWidth, h = tip.offsetHeight;
+      let x = e.clientX + pad, y = e.clientY + pad;
+      if (x + w > innerWidth - 8) x = Math.max(8, e.clientX - w - pad);
+      if (y + h > innerHeight - 8) y = Math.max(8, innerHeight - h - 8);
+      tip.style.left = x + "px"; tip.style.top = y + "px";
+    };
+    document.addEventListener("mouseover", (e) => {
+      const el = e.target.closest ? e.target.closest("[data-tipres]") : null;
+      if (el === cur) return;
+      cur = el;
+      if (!el) { tip.hidden = true; return; }
+      tip.innerHTML = resTipHtml(el.dataset.tipres);
+      tip.hidden = false;
+      place(e);
+    });
+    document.addEventListener("mousemove", (e) => { if (cur) place(e); });
+    document.addEventListener("mousedown", () => { tip.hidden = true; cur = null; }, true);
+    map.on("zoomstart movestart", () => { tip.hidden = true; cur = null; });
+  }
 
   // ---------------------------------------------------------------- layers + modes
   function syncLayerVisibility() {
@@ -960,9 +1245,10 @@
     const want = {
       terr: true,
       borders: prefs.layers.borders && prefs.mode !== "plain",
-      townLabels: prefs.layers.townLabels && z >= -2,
-      nationLabels: prefs.layers.nationLabels && z <= -3,
-      terrLabels: prefs.layers.terrLabels && z >= -1,
+      townLabels: true, // layoutLabels decides what fits at each zoom
+      nationLabels: true,
+      terrLabels: true,
+      terrIds: true,
       resources: prefs.layers.resources && z >= -1,
       players: prefs.layers.players,
       occ: prefs.layers.war, flags: prefs.layers.war,
@@ -977,6 +1263,7 @@
       grid: prefs.layers.chunks,
     };
     map.getContainer().classList.toggle("far", z < -1);
+    document.body.classList.toggle("zlow", z <= -1);
     for (const [k, on] of Object.entries(want)) {
       const has = map.hasLayer(G[k]);
       if (on && !has) G[k].addTo(map);
@@ -989,6 +1276,7 @@
     $$("#modes button").forEach((b) => b.classList.toggle("active", b.dataset.mode === m));
     refreshModeExtra();
     styleTerritories(); drawBorders(); syncLayerVisibility();
+    syncPanel();
   }
 
   function refreshModeExtra() {
@@ -1013,42 +1301,128 @@
   }
 
   // ---------------------------------------------------------------- ui wiring
+  function setWarOpen(open) {
+    prefs.warOpen = open; store.set("warOpen", open);
+    $("#war-sec").classList.toggle("closed", !open);
+    $("#war-head").setAttribute("aria-expanded", String(open));
+  }
+  /** kept for the war pill and map timers: show the war section */
   function openTab(name) {
     setSidebar(true);
-    $$("#tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
-    $$(".tab").forEach((t) => t.classList.toggle("active", t.id === "tab-" + name));
+    if (name === "war") {
+      setWarOpen(true);
+      $("#war-sec").scrollIntoView({ block: "nearest" });
+    }
   }
   function setSidebar(open) {
     prefs.sidebar = open; store.set("sidebar", open);
     document.body.classList.toggle("sidebar-closed", !open);
   }
 
+  function setView(open) {
+    prefs.view = open;
+    $("#view").classList.toggle("open", open);
+    $("#layers-btn").setAttribute("aria-expanded", String(open));
+  }
+
+  // looks: one click sets mode + layers. Anything not listed is switched off.
+  const PRESETS = [
+    ["clean", "Clean", "towns", ["territories", "borders", "townLabels", "nationLabels", "war"]],
+    ["political", "Political", "nations", ["territories", "borders", "townLabels", "nationLabels"]],
+    ["war", "War", "towns", ["territories", "borders", "townLabels", "players", "war", "warzones", "raids", "forts", "outposts"]],
+    ["economy", "Economy", "towns", ["territories", "borders", "townLabels", "resources", "ports", "towers", "refineries", "drops"]],
+  ];
+  function activePreset() {
+    for (const [id, , mode, on] of PRESETS) {
+      if (prefs.mode !== mode) continue;
+      if (LAYERS.every(([k]) => !!prefs.layers[k] === on.includes(k))) return id;
+    }
+    return null;
+  }
+  function refreshLayers() {
+    styleTerritories(); drawWar(); drawZones(); drawPlayers(); drawChunkGrid();
+    syncLayerVisibility();
+    scheduleLayout();
+  }
+  function applyPreset(id) {
+    const p = PRESETS.find(([k]) => k === id);
+    if (!p) return;
+    for (const [k] of LAYERS) prefs.layers[k] = p[3].includes(k);
+    store.set("layers", prefs.layers);
+    if (prefs.mode !== p[2]) setMode(p[2]);
+    refreshLayers();
+    syncPanel();
+  }
+  function syncPanel() {
+    const cur = activePreset();
+    $$("#presets button").forEach((b) => b.classList.toggle("active", b.dataset.preset === cur));
+    $$("#layer-toggles input").forEach((i) => {
+      const keys = GROUPS.find(([l]) => l === i.dataset.group)[1];
+      const on = keys.filter((k) => prefs.layers[k]).length;
+      i.checked = on > 0;
+      i.indeterminate = on > 0 && on < keys.length;
+    });
+  }
+
   function buildUi() {
+    setupResTips();
     setSidebar(prefs.sidebar);
     $("#menu-btn").onclick = () => setSidebar(!prefs.sidebar);
-    $$("#tabs button").forEach((b) => (b.onclick = () => openTab(b.dataset.tab)));
+    $("#war-head").onclick = () => setWarOpen(!prefs.warOpen);
+    setWarOpen(prefs.warOpen);
     $("#war-pill").onclick = () => openTab("war");
+    setView(false);
+    $("#layers-btn").onclick = () => setView(!prefs.view);
+    $("#view-close").onclick = () => setView(false);
+    document.addEventListener("mousedown", (e) => {
+      if (prefs.view && !e.target.closest("#view, #layers-btn")) setView(false);
+    });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape" && prefs.view) setView(false); });
+    for (const el of [$("#view"), $("#sidebar"), $("#info")]) {
+      L.DomEvent.disableClickPropagation(el);
+      L.DomEvent.disableScrollPropagation(el);
+    }
     $("#info-close").onclick = () => { $("#info").hidden = true; infoTarget = null; };
 
     $("#modes").innerHTML = MODES.map(([k, l]) => `<button data-mode="${k}" class="${k === prefs.mode ? "active" : ""}">${l}</button>`).join("");
     $$("#modes button").forEach((b) => (b.onclick = () => setMode(b.dataset.mode)));
 
-    $("#layer-toggles").innerHTML = LAYERS.map(([k, l]) => `<label class="tgl"><input type="checkbox" data-layer="${k}" ${prefs.layers[k] ? "checked" : ""}>${l}</label>`).join("");
+    if (store.get("layers", null) === null && store.get("mode", null) === null) {
+      for (const [k] of LAYERS) prefs.layers[k] = PRESETS[0][3].includes(k);
+    }
+    $("#presets").innerHTML = PRESETS.map(([k, l]) => `<button data-preset="${k}">${l}</button>`).join("");
+    $$("#presets button").forEach((b) => (b.onclick = () => applyPreset(b.dataset.preset)));
+
+    $("#layer-toggles").innerHTML = GROUPS.map(([l]) => `<label class="tgl"><input type="checkbox" data-group="${l}">${l}</label>`).join("");
     $$("#layer-toggles input").forEach((i) => (i.onchange = () => {
-      prefs.layers[i.dataset.layer] = i.checked;
+      const keys = GROUPS.find(([l]) => l === i.dataset.group)[1];
+      for (const k of keys) prefs.layers[k] = i.checked;
       store.set("layers", prefs.layers);
-      if (["territories", "war"].includes(i.dataset.layer)) styleTerritories();
-      if (i.dataset.layer === "war") drawWar();
-      if (["warzones", "raids"].includes(i.dataset.layer)) drawZones();
-      if (i.dataset.layer === "players") drawPlayers();
-      if (i.dataset.layer === "chunks") drawChunkGrid();
-      syncLayerVisibility();
+      refreshLayers();
+      syncPanel();
+      i.blur();
     }));
+    const customOpen = (open) => {
+      $("#layer-toggles").hidden = !open;
+      $("#custom-toggle").setAttribute("aria-expanded", String(open));
+      store.set("customOpen", open);
+    };
+    $("#custom-toggle").onclick = () => customOpen($("#layer-toggles").hidden);
+    customOpen(!!store.get("customOpen", false));
+    syncPanel();
 
     $$(".filter, .sort").forEach((el) => (el.oninput = renderLists));
 
     // delegated clicks for chips/rows/cards anywhere in panels
     document.addEventListener("click", (e) => {
+      const tw = e.target.closest("[data-twist]");
+      if (tw) {
+        const n = tw.dataset.twist;
+        if (navOpen.has(n)) navOpen.delete(n); else navOpen.add(n);
+        store.set("navOpen", [...navOpen]);
+        renderLists();
+        return;
+      }
       const el = e.target.closest("[data-town],[data-nation],[data-terr],[data-fly],[data-town-fly]");
       if (!el || !el.closest("#sidebar,#info")) return;
       if (el.dataset.town) showTown(el.dataset.town, true);

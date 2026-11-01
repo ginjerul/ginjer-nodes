@@ -29,8 +29,10 @@ class PlayerTracker(
 
     fun start(cfg: MapConfig) {
         stop()
+        last = ""
         if (!cfg.playersShow) {
-            publish("""{"players":[]}""")
+            // tells open maps to clear players and hide the Players option
+            emit("""{"players":[],"disabled":true}""")
             return
         }
         task = Bukkit.getScheduler().runTaskTimer(plugin, Runnable { update(cfg) }, 20L, cfg.playersUpdateTicks)
@@ -70,6 +72,10 @@ class PlayerTracker(
         sb.append("]}")
         val json = sb.toString()
         if (json == last) return
+        emit(json)
+    }
+
+    private fun emit(json: String) {
         last = json
         publish(json)
         if (fileOut != null) {

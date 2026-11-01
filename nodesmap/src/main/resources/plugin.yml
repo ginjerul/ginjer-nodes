@@ -7,7 +7,7 @@ softdepend: [kotlin, nodes]
 
 commands:
   nodesmap:
-    description: NodesMap admin commands
+    description: Nodes web map commands
     aliases: [nmap]
     usage: /nodesmap help
 
@@ -15,6 +15,9 @@ permissions:
   nodesmap.admin:
     description: Use /nodesmap admin commands
     default: op
+  nodesmap.link:
+    description: Get a link to the web map (/nodesmap link)
+    default: true
   nodesmap.editor:
     description: Open the web map editor (/nodesmap editor)
     default: op

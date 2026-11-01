@@ -114,6 +114,42 @@
     return best;
   }
 
-  root.NodesGeom = { outline, labelCell, toSet, cellsOf, key: K };
+  /**
+   * The chunk deepest inside a shape: the one furthest (in chunk steps) from
+   * any border, so it's as hard as possible to reach from outside. Ties go to
+   * the chunk nearest the shape's average position.
+   */
+  function centerCell(cells) {
+    const list = cellsOf(cells);
+    if (!list.length) return null;
+    const idx = new Map();
+    list.forEach(([x, z], i) => idx.set(K(x, z), i));
+    const dist = new Int32Array(list.length).fill(-1);
+    const queue = [];
+    const N4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+    const N8 = [...N4, [1, 1], [1, -1], [-1, 1], [-1, -1]];
+    list.forEach(([x, z], i) => {
+      if (N4.some(([dx, dz]) => !idx.has(K(x + dx, z + dz)))) { dist[i] = 0; queue.push(i); }
+    });
+    for (let q = 0; q < queue.length; q++) {
+      const i = queue[q];
+      const [x, z] = list[i];
+      for (const [dx, dz] of N8) {
+        const j = idx.get(K(x + dx, z + dz));
+        if (j !== undefined && dist[j] < 0) { dist[j] = dist[i] + 1; queue.push(j); }
+      }
+    }
+    let sx = 0, sz = 0;
+    for (const [x, z] of list) { sx += x; sz += z; }
+    const mx = sx / list.length, mz = sz / list.length;
+    let best = 0, bestD = -1, bestC = Infinity;
+    for (let i = 0; i < list.length; i++) {
+      const c = (list[i][0] - mx) ** 2 + (list[i][1] - mz) ** 2;
+      if (dist[i] > bestD || (dist[i] === bestD && c < bestC)) { best = i; bestD = dist[i]; bestC = c; }
+    }
+    return list[best];
+  }
+
+  root.NodesGeom = { outline, labelCell, centerCell, toSet, cellsOf, key: K };
   if (typeof module !== "undefined") module.exports = root.NodesGeom;
 })(typeof window !== "undefined" ? window : globalThis);

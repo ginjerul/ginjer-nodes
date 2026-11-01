@@ -18,6 +18,14 @@ object BlockColors {
     private var table: IntArray = IntArray(0)
     private var waterLike: BooleanArray = BooleanArray(0)
 
+    /** "minecraft:oak_log" -> OAK_LOG, for blocks read from region files */
+    @Volatile private var names: Map<String, Material> = emptyMap()
+
+    fun byName(name: String): Material {
+        names[name]?.let { return it }
+        return if (name.indexOf(':') < 0) names["minecraft:$name"] ?: Material.AIR else Material.AIR
+    }
+
     private val overrides: Map<Material, Int> = mapOf(
         Material.WATER to 0x3F76E4,
         Material.BUBBLE_COLUMN to 0x3F76E4,
@@ -70,8 +78,12 @@ object BlockColors {
         val mats = Material.values()
         val t = IntArray(mats.size) { TRANSPARENT }
         val w = BooleanArray(mats.size)
+        val n = HashMap<String, Material>(2048)
         for (m in mats) {
             if (m.isLegacy || !m.isBlock) continue
+            try {
+                n[m.key.toString()] = m
+            } catch (_: Throwable) {}
             w[m.ordinal] = m in waterMaterials
             val o = overrides[m]
             if (o != null) {
@@ -91,6 +103,7 @@ object BlockColors {
         for (m in waterMaterials) t[m.ordinal] = overrides[Material.WATER]!!
         table = t
         waterLike = w
+        names = n
     }
 
     fun color(m: Material): Int = table[m.ordinal]

@@ -14,6 +14,8 @@
 
 package phonon.nodes.map
 
+import com.google.gson.JsonObject
+import com.google.gson.JsonParser
 import org.bukkit.Bukkit
 import org.bukkit.plugin.Plugin
 import org.bukkit.scheduler.BukkitTask
@@ -92,6 +94,11 @@ public object MapExporter {
         lastWorldRefs = emptyList()
     }
 
+    /** Re-export towns/nations now (after a web editor change) instead of waiting for the timer. */
+    public fun stateChanged() {
+        if (plugin != null) safe { exportState() }
+    }
+
     // ------------------------------------------------------------------
     // world
 
@@ -103,7 +110,15 @@ public object MapExporter {
         val resources = Nodes.resourceNodes.values.map { it.name to it.icon }
         val costBase = Config.territoryCostBase
         val costScale = Config.territoryCostScale
+        val details = Config.mapExportResourceDetails
+        val worldPath = Config.pathWorld
         submit("world") {
+            // full resource settings (income, ore, multipliers...) for the map's hover cards
+            val defs: JsonObject? = if (details) {
+                safe { JsonParser.parseString(Files.readString(worldPath)).asJsonObject.getAsJsonObject("nodes") }
+            } else {
+                null
+            }
             val j = Json(256 * refs.size + 1024)
             j.obj {
                 key("territories").arr {
@@ -125,6 +140,7 @@ public object MapExporter {
                             key("resources").arr { for (r in t.resourceNodes) str(r) }
                             key("cost").num(t.cost)
                             key("wild").bool(t.bordersWilderness)
+                            if (t.attackerTimeMultiplier != 1.0) key("atk").num(t.attackerTimeMultiplier)
                         }
                     }
                 }
@@ -133,7 +149,14 @@ public object MapExporter {
                     key("scale").num(costScale)
                 }
                 key("resources").obj {
-                    for ((name, icon) in resources) key(name).obj { key("icon").strOrNull(icon) }
+                    for ((name, icon) in resources) {
+                        val def = defs?.get(name)?.takeIf { it.isJsonObject }
+                        if (def != null) {
+                            key(name).raw(def.toString())
+                        } else {
+                            key(name).obj { key("icon").strOrNull(icon) }
+                        }
+                    }
                 }
             }
             j.toString()

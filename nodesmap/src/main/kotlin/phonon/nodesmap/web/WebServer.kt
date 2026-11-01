@@ -62,7 +62,7 @@ class WebServer(
         }
         s.start()
         server = s
-        logger.info("[NodesMap] web map on http://$bind:$port/")
+        logger.info("web map on http://$bind:$port/")
     }
 
     fun stop() {
@@ -157,7 +157,7 @@ class WebServer(
         val res = try {
             handler(ApiRequest(method, ex.requestURI.rawPath, query, token, body))
         } catch (e: Exception) {
-            logger.warning("[NodesMap] api error on ${ex.requestURI.rawPath}: $e")
+            logger.warning("api error on ${ex.requestURI.rawPath}: $e")
             ApiResponse(500, "{\"error\":\"server error\"}")
         }
         sendApi(ex, res)

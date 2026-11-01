@@ -20,20 +20,24 @@
   <div id="brand"><span class="brand-mark"></span><span>Map editor</span></div>
 
   <div id="tools" class="toolgroup" role="toolbar" aria-label="Tools">
-    <button data-tool="select" title="Select (V) · Shift+drag to box-select">
-      <svg viewBox="0 0 24 24"><path d="M5 3l14 8-6 2-2 6z"/></svg><span>Select</span><kbd>V</kbd></button>
-    <button data-tool="paint" title="Paint chunks into the selected territory (B)">
-      <svg viewBox="0 0 24 24"><path d="M4 20c3 0 5-2 5-5l9-9a2 2 0 0 0-3-3l-9 9c-3 0-5 2-2 8z"/></svg><span>Paint</span><kbd>B</kbd></button>
-    <button data-tool="new" title="Paint a brand new territory (N)">
-      <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>New</span><kbd>N</kbd></button>
-    <button data-tool="erase" title="Erase chunks back to wilderness (E)">
-      <svg viewBox="0 0 24 24"><path d="M16 3l5 5-11 11H5v-5zM9 21h12"/></svg><span>Erase</span><kbd>E</kbd></button>
-    <button data-tool="rect" title="Drag a rectangle to fill (R)">
-      <svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="1"/></svg><span>Box</span><kbd>R</kbd></button>
-    <button data-tool="fill" title="Fill a connected area of empty land, like an island (F)">
-      <svg viewBox="0 0 24 24"><path d="M5 11l7-7 7 7-7 7zM19 15c1 2 2 3 2 4a2 2 0 0 1-4 0c0-1 1-2 2-4z"/></svg><span>Fill</span><kbd>F</kbd></button>
+    <button data-tool="select" title="Select (V). Click or right-click a territory, Shift+drag to box-select">
+      <svg viewBox="0 0 24 24"><path d="M5 3l14 8-6 2-2 6z"/></svg><span>Select</span></button>
     <button data-tool="core" title="Click a chunk to make it its territory's core (C)">
-      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg><span>Core</span><kbd>C</kbd></button>
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg><span>Core</span></button>
+    <i class="tsep"></i>
+    <button data-tool="paint" title="Brush: paint into the selected territory (B, or tap Space). Right-drag paints, Ctrl+right-drag erases, Shift+move resizes">
+      <svg viewBox="0 0 24 24"><path d="M4 20c3 0 5-2 5-5l9-9a2 2 0 0 0-3-3l-9 9c-3 0-5 2-2 8z"/></svg><span>Paint</span></button>
+    <button data-tool="new" title="Paint a brand new territory (N)">
+      <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>New</span></button>
+    <button data-tool="erase" title="Erase chunks back to wilderness (E)">
+      <svg viewBox="0 0 24 24"><path d="M16 3l5 5-11 11H5v-5zM9 21h12"/></svg><span>Erase</span></button>
+    <button data-tool="fill" title="Fill a connected area of empty land, like an island (F)">
+      <svg viewBox="0 0 24 24"><path d="M5 11l7-7 7 7-7 7zM19 15c1 2 2 3 2 4a2 2 0 0 1-4 0c0-1 1-2 2-4z"/></svg><span>Fill</span></button>
+    <button data-tool="rect" title="Drag a rectangle to fill (R)">
+      <svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="1"/></svg><span>Box</span></button>
+    <i class="tsep"></i>
+    <button data-tool="auto" title="Pen: right-drag to draw border lines (left-drag pans), click inside the closed area to auto-generate territories there (G)">
+      <svg viewBox="0 0 24 24"><path d="M4 4h7v7H4zM13 4h7v4h-7zM13 10h7v10h-7zM4 13h7v7H4z"/></svg><span>Pen</span></button>
   </div>
 
   <div id="brush" class="toolgroup slim" title="Brush size ( [ and ] )">
@@ -49,11 +53,13 @@
 
   <div class="spacer"></div>
   <span id="save-state" class="pill">Loading…</span>
-  <button id="btn-check" class="btn">Check</button>
   <button id="btn-apply" class="btn primary">Apply to server</button>
+  <button id="opts-btn" class="icon-btn" aria-expanded="false" aria-controls="opts-pop" title="Settings: painting rules, colors, what to show"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
   <div class="menu-wrap">
     <button id="btn-menu" class="icon-btn" aria-label="More"><svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg></button>
     <div id="menu" class="menu" hidden>
+      <button id="btn-check" title="Validate the changes with the server without applying them">Check without applying</button>
+      <hr>
       <button data-act="download">Download world.json</button>
       <button data-act="import">Import world.json…</button>
       <button data-act="reload">Reload from server</button>
@@ -67,8 +73,8 @@
 <aside id="sidebar">
   <nav id="tabs">
     <button data-tab="terr" class="active">Territories</button>
+    <button data-tab="towns">Towns</button>
     <button data-tab="res">Resources</button>
-    <button data-tab="opts">Options</button>
   </nav>
   <section id="tab-terr" class="tab active">
     <div class="list-tools">
@@ -79,37 +85,64 @@
         <option value="name">Name</option>
         <option value="issues">Problems first</option>
       </select>
+      <button id="terr-dist" class="btn small" title="Spread resources over the selected territories (or all of them)">Resources…</button>
     </div>
     <div id="terr-summary" class="hint"></div>
     <div class="list" id="terr-list"></div>
+  </section>
+  <section id="tab-towns" class="tab">
+    <div class="list-tools">
+      <input id="town-filter" class="filter" placeholder="Search towns, nations, players">
+      <select id="town-sort">
+        <option value="name">Name</option>
+        <option value="nation">Nation</option>
+        <option value="land">Most land</option>
+        <option value="players">Most players</option>
+      </select>
+      <button id="town-new" class="btn small" title="Make a town from the territories selected on the map">New</button>
+    </div>
+    <div id="town-summary" class="hint"></div>
+    <div class="list" id="town-list"></div>
+    <div id="town-editor"></div>
+    <datalist id="nation-names"></datalist>
+    <datalist id="player-names"></datalist>
   </section>
   <section id="tab-res" class="tab">
     <div class="list-tools">
       <input id="res-filter" class="filter" placeholder="Search resources">
       <button id="res-new" class="btn small">New</button>
+      <button id="res-pack" class="btn small" title="Add the default resource nodes: basic, every ore, and defense tiers">Default pack…</button>
     </div>
     <div class="list" id="res-list"></div>
     <div id="res-editor"></div>
   </section>
-  <section id="tab-opts" class="tab">
+</aside>
+
+  <div id="opts-pop" class="popover" hidden>
+    <div class="pop-head"><b>Settings</b><button id="opts-close" class="icon-btn" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
     <h3>Painting</h3>
     <label class="tgl"><input type="checkbox" id="opt-land" checked>Land only (skip water and ungenerated chunks)</label>
     <label class="tgl"><input type="checkbox" id="opt-wild" checked>Only paint empty land (don't take chunks from other territories)</label>
-    <label class="tgl"><input type="checkbox" id="opt-lock" checked>Lock claimed territories (owned or occupied by towns)</label>
+    <label class="tgl"><input type="checkbox" id="opt-lock" checked>Lock claimed land (painting and erasing skip land owned by towns; names and resources stay editable)</label>
+    <h3>Color territories by</h3>
+    <div class="seg" id="color-by" style="grid-template-columns:1fr 1fr">
+      <button data-v="nation">Nation (like the map)</button>
+      <button data-v="territory">Territory colors</button>
+    </div>
     <h3>Show</h3>
     <label class="tgl"><input type="checkbox" id="opt-labels" checked>Territory names</label>
     <label class="tgl"><input type="checkbox" id="opt-icons" checked>Resource icons</label>
-    <label class="tgl"><input type="checkbox" id="opt-owners" checked>Claimed land (town colors)</label>
+    <label class="tgl"><input type="checkbox" id="opt-owners" checked>Nation and town borders</label>
     <label class="tgl"><input type="checkbox" id="opt-grid">Chunk grid</label>
-    <p class="hint">Hold <kbd>Space</kbd> and drag to pan while painting. Scroll to zoom.</p>
-  </section>
-</aside>
+    <p class="hint">Tap <kbd>Space</kbd> to turn the brush on/off like the old editor (left-drag pans, right-drag paints). Ctrl+right-drag erases, Shift+move resizes the brush, <kbd>A</kbd> starts a new territory. Hold <kbd>Space</kbd> and drag to pan. All controls: ⋯ menu → Shortcuts.</p>
+  </div>
 
 <aside id="inspector" hidden></aside>
 
 <footer id="statusbar">
   <span id="coords">x —  z —</span>
   <span id="hover-terr"></span>
+  <span id="mode-hint"></span>
   <span id="counts"></span>
 </footer>
 

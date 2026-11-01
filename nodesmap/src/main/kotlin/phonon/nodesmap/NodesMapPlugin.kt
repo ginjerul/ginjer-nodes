@@ -64,6 +64,7 @@ class NodesMapPlugin : JavaPlugin() {
         val s = RenderScheduler(this, world, r)
         s.budgetNanos = cfg.snapshotBudgetNanos
         s.concurrentLoads = cfg.fullRenderConcurrentLoads
+        s.readThreads = cfg.fullRenderThreads
         s.start(cfg.batchSeconds)
         scheduler = s
 
@@ -73,7 +74,7 @@ class NodesMapPlugin : JavaPlugin() {
 
         if (cfg.webEnabled) {
             try {
-                val ed = EditorApi(server, logger, cfg.editorSessionMinutes)
+                val ed = EditorApi(server, logger, cfg.editorSessionMinutes, java.io.File(dataFolder, "editor-sessions.json"))
                 editor = ed
                 web = WebServer(webRoot, cfg.webBind, cfg.webPort, cfg.webThreads, logger).also {
                     it.api = { req ->
@@ -86,7 +87,7 @@ class NodesMapPlugin : JavaPlugin() {
                     it.start()
                 }
             } catch (e: Exception) {
-                logger.severe("[NodesMap] could not start web server on ${cfg.webBind}:${cfg.webPort}: $e")
+                logger.severe("could not start web server on ${cfg.webBind}:${cfg.webPort}: $e")
             }
         }
         publishMapInfo()
@@ -98,9 +99,9 @@ class NodesMapPlugin : JavaPlugin() {
             if (web == null) webRoot.resolve("data").resolve("players.json") else null,
         ).also { it.start(cfg) }
 
-        server.scheduler.runTaskTimerAsynchronously(this, Runnable { publishTileUpdates() }, 100L, 200L)
+        server.scheduler.runTaskTimerAsynchronously(this, Runnable { publishTileUpdates() }, 100L, 100L)
 
-        logger.info("[NodesMap] rendering world '${world.name}'. Run /nodesmap fullrender once to draw the whole map.")
+        logger.info("rendering world '${world.name}'. Run /nodesmap fullrender once to draw the whole map.")
     }
 
     override fun onDisable() {
@@ -119,7 +120,7 @@ class NodesMapPlugin : JavaPlugin() {
         val nodes = server.pluginManager.getPlugin("nodes") != null
         val json = """{"title":${jsonStr(cfg.title)},"world":${jsonStr(world.name)},""" +
             """"tileSize":${TileRenderer.TILE},"zoomOutLevels":${cfg.zoomOutLevels},""" +
-            """"spawn":{"x":${spawn.blockX},"z":${spawn.blockZ}},"nodes":$nodes,""" +
+            """"spawn":{"x":${spawn.blockX},"z":${spawn.blockZ}},"nodes":$nodes,"players":${cfg.playersShow},""" +
             """"version":${jsonStr(description.version)}}"""
         web?.put("/data/map.json", json)
         try {
@@ -135,7 +136,11 @@ class NodesMapPlugin : JavaPlugin() {
             if (first.second >= cutoff) break
             tileUpdates.pollFirst()
         }
-        val sb = StringBuilder("{\"now\":").append(now).append(",\"updates\":[")
+        val sb = StringBuilder("{\"now\":").append(now)
+        scheduler?.fullRenderProgress()?.let { p ->
+            sb.append(",\"render\":{\"done\":").append(p.done).append(",\"total\":").append(p.total).append('}')
+        }
+        sb.append(",\"updates\":[")
         var first = true
         for ((k, t) in tileUpdates) {
             if (!first) sb.append(',')
@@ -154,80 +159,224 @@ class NodesMapPlugin : JavaPlugin() {
 
     private fun jsonStr(s: String) = "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
-    /** Copy the bundled viewer (resources/web/...) into plugins/NodesMap/web on version change. */
+    /**
+     * Copy the bundled viewer (resources/web/...) into plugins/NodesMap/web.
+     *
+     * Files are refreshed whenever their contents in the jar change (a fingerprint
+     * of every file's checksum), not just when the version number changes, and any
+     * missing file is always restored. With web.update-viewer: false, existing files
+     * are left alone (for customised viewers) but missing ones are still added.
+     */
     private fun extractViewer() {
         val marker = webRoot.resolve(".viewer-version")
-        val current = try {
+        val installed = try {
             Files.readString(marker).trim()
         } catch (_: Exception) {
             ""
         }
-        if (current == description.version && !description.version.endsWith("SNAPSHOT")) return
-        if (current.isNotEmpty() && !cfg.updateViewer) return
 
         JarFile(file).use { jar ->
-            for (entry in jar.entries()) {
-                if (entry.isDirectory || !entry.name.startsWith("web/")) continue
+            val entries = jar.entries().toList().filter { !it.isDirectory && it.name.startsWith("web/") }.sortedBy { it.name }
+            val crc = java.util.zip.CRC32()
+            for (e in entries) {
+                crc.update(e.name.toByteArray())
+                crc.update(e.crc.toString().toByteArray())
+            }
+            val fingerprint = "${description.version}-${crc.value.toString(36)}"
+            val refreshAll = installed != fingerprint && (installed.isEmpty() || cfg.updateViewer)
+
+            var written = 0
+            for (entry in entries) {
                 val target = webRoot.resolve(entry.name.removePrefix("web/")).normalize()
                 if (!target.startsWith(webRoot)) continue
+                if (!refreshAll && Files.exists(target)) continue
                 Files.createDirectories(target.parent)
                 jar.getInputStream(entry).use { Files.copy(it, target, StandardCopyOption.REPLACE_EXISTING) }
+                written++
             }
+            if (refreshAll) Files.writeString(marker, fingerprint)
+            if (written > 0) logger.info("installed $written viewer file(s) (${description.version})")
         }
-        Files.writeString(marker, description.version)
-        logger.info("[NodesMap] viewer files installed (${description.version})")
     }
 
     // ------------------------------------------------------------------
 
+    // ------------------------------------------------------------------
+    // messages: same look as Nodes' own commands (aqua text, white descriptions, red errors)
+
+    private fun msg(sender: CommandSender, text: String) = sender.sendMessage("${ChatColor.AQUA}$text")
+
+    private fun err(sender: CommandSender, text: String) = sender.sendMessage("${ChatColor.RED}$text")
+
+    private fun line(sender: CommandSender, label: String, value: String) = msg(sender, "$label${ChatColor.WHITE}: $value")
+
+    private fun mapUrl(): String = cfg.publicUrl.ifEmpty {
+        val host = server.ip.ifEmpty { "localhost" }.let { if (it == "0.0.0.0") "localhost" else it }
+        "http://$host:${cfg.webPort}"
+    }
+
+    private fun printHelp(sender: CommandSender) {
+        msg(sender, "${ChatColor.BOLD}[Nodes] Map commands:")
+        if (sender.hasPermission("nodesmap.link")) line(sender, "/nodesmap link", "Get a link to the web map")
+        if (sender.hasPermission("nodesmap.editor")) line(sender, "/nodesmap editor", "Open the map editor: /nodesmap editor [time like 2h] [true|false = survive restarts] (\"revoke\" to log out)")
+        if (sender.hasPermission("nodesmap.admin")) {
+            line(sender, "/nodesmap status", "Render queue, progress and web address")
+            line(sender, "/nodesmap fullrender [radius]", "Draw every generated chunk (or within radius chunks of you)")
+            line(sender, "/nodesmap render [radius]", "Redraw the loaded chunks around you")
+            line(sender, "/nodesmap cancel", "Stop all pending renders")
+            line(sender, "/nodesmap players [on|off]", "Show or hide players on the web map (now ${if (cfg.playersShow) "on" else "off"})")
+            line(sender, "/nodesmap reload", "Reload config.yml")
+        }
+    }
+
     override fun onCommand(sender: CommandSender, command: Command, label: String, args: Array<out String>): Boolean {
         val s = scheduler ?: return true
         val r = renderer ?: return true
-        val a = ChatColor.AQUA
-        val g = ChatColor.GRAY
-        val sub = args.getOrNull(0)?.lowercase()
-        if (sub == "editor") {
-            editorCommand(sender, args)
-            return true
-        }
-        if (!sender.hasPermission("nodesmap.admin")) {
-            if (sender.hasPermission("nodesmap.editor")) {
-                sender.sendMessage("$a[NodesMap]$g /nodesmap editor${ChatColor.DARK_GRAY} - open the map editor")
-            } else {
-                sender.sendMessage("${ChatColor.RED}You don't have permission to use this command.")
-            }
+        val sub = args.getOrNull(0)?.lowercase() ?: "help"
+        val adminOnly = setOf("status", "fullrender", "render", "cancel", "players", "reload")
+        if (sub in adminOnly && !sender.hasPermission("nodesmap.admin")) {
+            err(sender, "You don't have permission to use \"/nodesmap $sub\"")
             return true
         }
         when (sub) {
+            "help" -> printHelp(sender)
+            "link", "url" -> {
+                if (!sender.hasPermission("nodesmap.link")) {
+                    err(sender, "You don't have permission to use \"/nodesmap link\"")
+                    return true
+                }
+                if (web == null && cfg.publicUrl.isEmpty()) {
+                    err(sender, "[Nodes] The web map isn't running on this server")
+                    return true
+                }
+                val url = mapUrl() + "/"
+                if (sender is Player) {
+                    sender.sendMessage(
+                        Component.text("[Nodes] Web map: ", NamedTextColor.AQUA)
+                            .append(Component.text(url, NamedTextColor.WHITE).clickEvent(ClickEvent.openUrl(url))),
+                    )
+                } else {
+                    msg(sender, "[Nodes] Web map: ${ChatColor.WHITE}$url")
+                }
+            }
+            "editor" -> editorCommand(sender, args)
             "status" -> {
-                sender.sendMessage("$a[NodesMap]$g world: ${ChatColor.WHITE}${world.name}")
-                sender.sendMessage("$g  waiting to snapshot: ${ChatColor.WHITE}${s.pendingCount}$g, changed (next batch): ${ChatColor.WHITE}${s.dirtyCount}")
-                sender.sendMessage("$g  render queue: ${ChatColor.WHITE}${r.queued}$g, chunks drawn: ${ChatColor.WHITE}${r.chunksRendered.get()}$g, tiles written: ${ChatColor.WHITE}${r.tilesWritten.get()}")
-                if (s.fullRenderActive) sender.sendMessage("$g  full render: ${ChatColor.WHITE}${s.fullRenderTotal - s.pendingCount}/${s.fullRenderTotal}")
-                sender.sendMessage("$g  web: ${ChatColor.WHITE}${if (web != null) "http://${cfg.webBind}:${cfg.webPort}/" else "off (serve plugins/NodesMap/web yourself)"}")
+                msg(sender, "${ChatColor.BOLD}[Nodes] Map status:")
+                line(sender, "World", world.name)
+                line(sender, "Web map", if (web != null) mapUrl() + "/" else "off (serving plugins/NodesMap/web yourself)")
+                line(sender, "Players on map", if (cfg.playersShow) "shown" else "hidden")
+                line(sender, "Full render", s.fullRenderProgress()?.let { progressText(it) } ?: "not running")
+                line(sender, "Server loading", "${s.pendingCount} chunks (${s.dirtyCount} more changed, next batch)")
+                line(sender, "Renderer", "${r.queued} queued, ${r.chunksRendered.get()} chunks drawn, ${r.tilesWritten.get()} tiles written")
             }
             "fullrender" -> {
                 val radius = args.getOrNull(1)?.toIntOrNull()
                 val p = sender as? Player
                 val cx = if (radius != null && p != null) p.location.blockX shr 4 else null
                 val cz = if (radius != null && p != null) p.location.blockZ shr 4 else null
-                sender.sendMessage("$a[NodesMap]$g scanning region files...")
-                s.fullRender(cx, cz, radius) { n ->
-                    sender.sendMessage("$a[NodesMap]$g queued ${ChatColor.WHITE}$n$g chunks. Check progress with /nodesmap status")
-                }
+                msg(sender, "[Nodes] Map: reading region files...")
+                var reporter: org.bukkit.scheduler.BukkitTask? = null
+                s.fullRender(
+                    cx,
+                    cz,
+                    radius,
+                    started = { n ->
+                        if (n < 0) {
+                            err(sender, "[Nodes] A full render is already running. Use \"/nodesmap status\" to watch it or \"/nodesmap cancel\" to stop it")
+                        } else {
+                            msg(sender, "[Nodes] Map: drawing ${ChatColor.WHITE}%,d${ChatColor.AQUA} chunks in the background, progress every 10s".format(n))
+                            reporter = server.scheduler.runTaskTimer(
+                                this,
+                                Runnable {
+                                    val pr = s.fullRenderProgress() ?: return@Runnable
+                                    val text = "[Nodes] Map render ${progressText(pr)}"
+                                    if (sender is Player) {
+                                        if (sender.isOnline) sender.sendActionBar(Component.text(text, NamedTextColor.AQUA))
+                                    } else {
+                                        msg(sender, text)
+                                    }
+                                },
+                                200L,
+                                200L,
+                            )
+                        }
+                    },
+                    finished = { pr, cancelled ->
+                        reporter?.cancel()
+                        val secs = pr.elapsedMs / 1000
+                        val diskDone = pr.done - pr.fallback - pr.reasons.filterKeys { it.startsWith("skipped") }.values.sum()
+                        // "drawn anyway" entries are informational: those chunks are in diskDone
+                        val head = if (cancelled) {
+                            "[Nodes] Map render cancelled after %,d chunks".format(pr.done)
+                        } else {
+                            "[Nodes] Map: drew %,d chunks from disk in ${secs / 60}m ${secs % 60}s".format(diskDone)
+                        }
+                        val notify = { text: String ->
+                            logger.info(text.removePrefix("[Nodes] "))
+                            if (sender is Player && sender.isOnline) msg(sender, text)
+                        }
+                        notify(head)
+                        for ((reason, n) in pr.reasons.entries.sortedByDescending { it.value }) {
+                            notify("  %,d chunks ${reason}".format(n))
+                        }
+                        if (!cancelled && pr.fallback > 0) {
+                            notify("[Nodes] Map: the server is now loading %,d chunks it couldn't read from disk. This is slower; progress every 10s".format(pr.fallback))
+                            if (pr.reasons.keys.any { it.contains("1.18") || it.contains("old chunk format") }) {
+                                notify("[Nodes] Tip: your world has chunks saved in a pre-1.18 format. Starting the server once with --forceUpgrade converts them all, so future renders are fast")
+                            }
+                            // follow the server-side loads until they're all drawn
+                            var tracker: org.bukkit.scheduler.BukkitTask? = null
+                            tracker = server.scheduler.runTaskTimer(
+                                this,
+                                Runnable {
+                                    val left = s.pendingCount
+                                    if (left == 0 && r.queued == 0) {
+                                        tracker?.cancel()
+                                        notify("[Nodes] Map render finished: the server loaded the remaining chunks")
+                                    } else if (sender is Player && sender.isOnline) {
+                                        sender.sendActionBar(Component.text("[Nodes] Map: server loading chunks, %,d left".format(left), NamedTextColor.AQUA))
+                                    } else if (sender !is Player) {
+                                        msg(sender, "[Nodes] Map: server loading chunks, %,d left".format(left))
+                                    }
+                                },
+                                200L,
+                                200L,
+                            )
+                        } else if (!cancelled) {
+                            notify("[Nodes] Map render finished")
+                        }
+                    },
+                )
             }
             "render" -> {
                 val p = sender as? Player ?: run {
-                    sender.sendMessage("$g in-game only")
+                    err(sender, "\"/nodesmap render\" must be run in game")
                     return true
                 }
                 val radius = (args.getOrNull(1)?.toIntOrNull() ?: 8).coerceIn(1, 64)
                 val n = s.renderLoadedAround(p.location.blockX shr 4, p.location.blockZ shr 4, radius)
-                sender.sendMessage("$a[NodesMap]$g queued ${ChatColor.WHITE}$n$g loaded chunks around you")
+                msg(sender, "[Nodes] Map: redrawing ${ChatColor.WHITE}$n${ChatColor.AQUA} loaded chunks around you")
+            }
+            "players" -> {
+                val show = when (args.getOrNull(1)?.lowercase()) {
+                    "on", "show", "true" -> true
+                    "off", "hide", "false" -> false
+                    null -> !cfg.playersShow
+                    else -> {
+                        err(sender, "Usage: /nodesmap players [on|off]")
+                        return true
+                    }
+                }
+                config.set("players.show", show)
+                saveConfig()
+                cfg = MapConfig.load(config)
+                players?.start(cfg)
+                publishMapInfo()
+                msg(sender, "[Nodes] Players are now ${ChatColor.WHITE}${if (show) "shown" else "hidden"}${ChatColor.AQUA} on the web map")
             }
             "cancel" -> {
                 s.cancelAll()
-                sender.sendMessage("$a[NodesMap]$g cancelled all pending renders")
+                msg(sender, "[Nodes] Map: cancelled all pending renders")
             }
             "reload" -> {
                 reloadConfig()
@@ -235,72 +384,117 @@ class NodesMapPlugin : JavaPlugin() {
                 r.settings = settingsOf(cfg)
                 s.budgetNanos = cfg.snapshotBudgetNanos
                 s.concurrentLoads = cfg.fullRenderConcurrentLoads
+                s.readThreads = cfg.fullRenderThreads
                 s.restartBatch(cfg.batchSeconds)
                 players?.start(cfg)
                 editor?.sessionMinutes = cfg.editorSessionMinutes
                 editor?.resetBridge()
                 publishMapInfo()
-                sender.sendMessage("$a[NodesMap]$g config reloaded (web server and world changes need a restart)")
+                msg(sender, "[Nodes] Reloaded map config (web server and world changes need a restart)")
             }
-            else -> {
-                sender.sendMessage("$a[NodesMap] commands:")
-                sender.sendMessage("$g  /nodesmap status")
-                sender.sendMessage("$g  /nodesmap fullrender [radiusChunks]${ChatColor.DARK_GRAY} - draw every generated chunk")
-                sender.sendMessage("$g  /nodesmap render [radiusChunks]${ChatColor.DARK_GRAY} - redraw loaded chunks around you")
-                sender.sendMessage("$g  /nodesmap cancel")
-                sender.sendMessage("$g  /nodesmap reload")
-                sender.sendMessage("$g  /nodesmap editor [revoke]${ChatColor.DARK_GRAY} - get a login link for the map editor")
-            }
+            else -> err(sender, "Invalid command, use \"/nodesmap help\"")
         }
         return true
     }
 
+    private fun progressText(p: RenderScheduler.Progress): String {
+        if (p.total <= 0) return "counting chunks..."
+        val pct = p.done * 100 / p.total
+        val rate = if (p.elapsedMs > 0) p.done * 1000L / p.elapsedMs else 0
+        val left = if (rate > 0) (p.total - p.done) / rate else -1
+        val eta = when {
+            left < 0 -> ""
+            left < 60 -> ", under a minute left"
+            else -> ", about ${(left + 59) / 60} min left"
+        }
+        return "%d%% (%,d / %,d chunks, %,d/s%s)".format(pct, p.done, p.total, rate, eta)
+    }
+
+    /** "2h", "90m", "1h30m", "2d" -> minutes (1 minute to 7 days); null if invalid. A unit is required. */
+    private fun parseEditorDuration(text: String): Int? {
+        val m = Regex("^(?:(\\d+)d)?(?:(\\d+)h)?(?:(\\d+)m)?$", RegexOption.IGNORE_CASE).matchEntire(text) ?: return null
+        if (m.groupValues.drop(1).all { it.isEmpty() }) return null
+        val d = m.groupValues[1].toLongOrNull() ?: 0L
+        val h = m.groupValues[2].toLongOrNull() ?: 0L
+        val min = m.groupValues[3].toLongOrNull() ?: 0L
+        val total = d * 1440 + h * 60 + min
+        return if (total in 1..7 * 24 * 60) total.toInt() else null
+    }
+
+    private fun formatMinutes(total: Int): String {
+        val d = total / 1440
+        val h = total % 1440 / 60
+        val m = total % 60
+        return listOfNotNull(
+            if (d > 0) "${d}d" else null,
+            if (h > 0) "${h}h" else null,
+            if (m > 0) "${m}m" else null,
+        ).joinToString(" ")
+    }
+
     private fun editorCommand(sender: CommandSender, args: Array<out String>) {
-        val a = ChatColor.AQUA
-        val g = ChatColor.GRAY
         if (!sender.hasPermission("nodesmap.editor")) {
-            sender.sendMessage("${ChatColor.RED}You don't have permission to use the map editor.")
+            err(sender, "You don't have permission to use \"/nodesmap editor\"")
             return
         }
         val ed = editor
         if (ed == null || !cfg.editorEnabled) {
-            sender.sendMessage("$a[NodesMap]$g the editor is off (needs web.enabled and editor.enabled)")
+            err(sender, "[Nodes] The map editor is turned off (needs web.enabled and editor.enabled in NodesMap's config)")
             return
         }
         if (args.getOrNull(1)?.lowercase() == "revoke") {
             val all = args.getOrNull(2)?.lowercase() == "all" && sender.hasPermission("nodesmap.admin")
             val n = ed.revoke(if (all) null else sender.name)
-            sender.sendMessage("$a[NodesMap]$g ended $n editor session(s)")
+            msg(sender, "[Nodes] Ended ${ChatColor.WHITE}$n${ChatColor.AQUA} map editor session(s)")
             return
         }
-        val token = ed.createSession(sender.name, (sender as? Player)?.uniqueId)
-        val base = cfg.publicUrl.ifEmpty {
-            val host = server.ip.ifEmpty { "localhost" }.let { if (it == "0.0.0.0") "localhost" else it }
-            "http://$host:${cfg.webPort}"
+        var minutes = cfg.editorSessionMinutes
+        var persist = false
+        for (a in args.drop(1)) {
+            val flag = when (a.lowercase()) {
+                "true", "yes", "persist" -> true
+                "false", "no" -> false
+                else -> null
+            }
+            if (flag != null) {
+                persist = flag
+                continue
+            }
+            minutes = parseEditorDuration(a) ?: run {
+                err(sender, "Invalid time \"$a\". Use a time with a unit like 2h, 90m, 1h30m or 2d (max 7d), and true/false to keep the login across restarts")
+                return
+            }
         }
-        val url = "$base/editor.html#token=$token"
-        sender.sendMessage("$a[NodesMap]$g editor link (valid ${cfg.editorSessionMinutes} min, don't share it):")
+        val token = ed.createSession(sender.name, (sender as? Player)?.uniqueId, minutes, persist)
+        val url = "${mapUrl()}/editor.html#token=$token"
+        val restartNote = if (persist) "survives restarts" else "ends on restart"
+        msg(sender, "[Nodes] Map editor link (valid ${formatMinutes(minutes)}, $restartNote, don't share it):")
         if (sender is Player) {
             sender.sendMessage(
-                Component.text("  [Open map editor]", NamedTextColor.GREEN)
+                Component.text("[Open map editor]", NamedTextColor.GREEN)
                     .clickEvent(ClickEvent.openUrl(url))
-                    .append(Component.text("  click, or copy below", NamedTextColor.DARK_GRAY)),
+                    .append(Component.text("  or click the link below to copy it", NamedTextColor.GRAY)),
             )
             sender.sendMessage(Component.text(url, NamedTextColor.GRAY).clickEvent(ClickEvent.copyToClipboard(url)))
         } else {
             sender.sendMessage(url)
         }
-        sender.sendMessage("$g  end it early with /nodesmap editor revoke")
+        line(sender, "/nodesmap editor revoke", "Log out of the editor early")
     }
 
     override fun onTabComplete(sender: CommandSender, command: Command, alias: String, args: Array<out String>): List<String> {
         if (args.size == 1) {
-            val opts = ArrayList<String>()
-            if (sender.hasPermission("nodesmap.admin")) opts += listOf("status", "fullrender", "render", "cancel", "reload")
+            val opts = arrayListOf("help")
+            if (sender.hasPermission("nodesmap.link")) opts += "link"
             if (sender.hasPermission("nodesmap.editor")) opts += "editor"
+            if (sender.hasPermission("nodesmap.admin")) opts += listOf("status", "fullrender", "render", "cancel", "players", "reload")
             return opts.filter { it.startsWith(args[0].lowercase()) }
         }
-        if (args.size == 2 && args[0].equals("editor", true)) return listOf("revoke").filter { it.startsWith(args[1].lowercase()) }
+        if (args.size >= 2 && args[0].equals("editor", true)) {
+            val opts = if (args.size == 2) listOf("revoke", "30m", "2h", "6h", "12h", "1d", "true", "false") else listOf("true", "false")
+            return opts.filter { it.startsWith(args.last().lowercase()) }
+        }
+        if (args.size == 2 && args[0].equals("players", true)) return listOf("on", "off").filter { it.startsWith(args[1].lowercase()) }
         return emptyList()
     }
 }
