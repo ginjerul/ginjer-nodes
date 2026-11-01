@@ -735,7 +735,7 @@
   /** Space tap: brush on/off, like the old Dynmap editor's paint mode */
   function toggleBrush() {
     if (PAINT_TOOLS.has(E.tool)) {
-      setTool(prevTool && !PAINT_TOOLS.has(prevTool) ? prevTool : "select");
+      setTool("select");
       toast("Brush off");
     } else {
       setTool("paint", true);
