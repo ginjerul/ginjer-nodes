@@ -37,7 +37,7 @@ class EditorApi(
     @Volatile var shardsGet: (() -> String)? = null
     @Volatile var shardsSet: ((String) -> String)? = null
 
-    class Session(val user: String, val uuid: UUID?, val expiresAt: Long, val persist: Boolean = false)
+    class Session(val user: String, val uuid: UUID?, val expiresAt: Long, val persist: Boolean = false, val shards: Boolean = false)
 
     // keyed by SHA-256 of the token, so the saved file can't be used to log in
     private val sessions = ConcurrentHashMap<String, Session>()
@@ -62,7 +62,8 @@ class EditorApi(
                     val exp = o.get("expiresAt").asLong
                     if (exp < now) continue
                     val uuid = o.get("uuid")?.takeIf { !it.isJsonNull }?.asString?.let { UUID.fromString(it) }
-                    sessions[o.get("hash").asString] = Session(o.get("user").asString, uuid, exp, true)
+                    val shards = o.get("shards")?.takeIf { !it.isJsonNull }?.asBoolean ?: false
+                    sessions[o.get("hash").asString] = Session(o.get("user").asString, uuid, exp, true, shards)
                 }
             }
         } catch (e: Exception) {
@@ -81,6 +82,7 @@ class EditorApi(
                 o.addProperty("user", s.user)
                 o.addProperty("uuid", s.uuid?.toString())
                 o.addProperty("expiresAt", s.expiresAt)
+                o.addProperty("shards", s.shards)
                 arr.add(o)
             }
             val root = JsonObject()
@@ -93,12 +95,12 @@ class EditorApi(
     }
 
     /** [minutes] null = the configured default; [persist] keeps the login across server restarts. */
-    fun createSession(user: String, uuid: UUID?, minutes: Int? = null, persist: Boolean = false): String {
+    fun createSession(user: String, uuid: UUID?, minutes: Int? = null, persist: Boolean = false, shards: Boolean = false): String {
         purge()
         val bytes = ByteArray(32)
         random.nextBytes(bytes)
         val token = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
-        sessions[hash(token)] = Session(user, uuid, System.currentTimeMillis() + (minutes ?: sessionMinutes) * 60_000L, persist)
+        sessions[hash(token)] = Session(user, uuid, System.currentTimeMillis() + (minutes ?: sessionMinutes) * 60_000L, persist, shards)
         save()
         return token
     }
@@ -177,7 +179,7 @@ class EditorApi(
         return when (req.path) {
             "/api/editor/session" -> ApiResponse(
                 200,
-                "{\"user\":${q(s.user)},\"expiresAt\":${s.expiresAt},\"nodes\":${bridge() != null},\"towns\":${bridge()?.townsJson != null}}",
+                "{\"user\":${q(s.user)},\"expiresAt\":${s.expiresAt},\"nodes\":${bridge() != null},\"towns\":${bridge()?.townsJson != null},\"shards\":${s.shards}}",
             )
 
             "/api/editor/world" -> {
@@ -210,6 +212,7 @@ class EditorApi(
             }
 
             "/api/editor/shards" -> {
+                if (!s.shards) return err(403, "Editing server regions needs the nodesmap.shards permission. Ask an admin, then open the editor again with /nodesmap editor.")
                 if (req.method == "POST") {
                     val set = shardsSet ?: return err(404, "server regions aren't available")
                     val out = set(String(req.body, StandardCharsets.UTF_8))

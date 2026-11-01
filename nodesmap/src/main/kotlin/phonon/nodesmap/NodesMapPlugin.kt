@@ -526,7 +526,7 @@ class NodesMapPlugin : JavaPlugin() {
                 return
             }
         }
-        val token = ed.createSession(sender.name, (sender as? Player)?.uniqueId, minutes, persist)
+        val token = ed.createSession(sender.name, (sender as? Player)?.uniqueId, minutes, persist, shards = sender.hasPermission("nodesmap.shards"))
         val url = "${mapUrl()}/editor.html#token=$token"
         val restartNote = if (persist) "survives restarts" else "ends on restart"
         msg(sender, "[Nodes] Map editor link (valid ${formatMinutes(minutes)}, $restartNote, don't share it):")

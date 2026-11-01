@@ -21,6 +21,9 @@ permissions:
   nodesmap.editor:
     description: Open the web map editor (/nodesmap editor)
     default: op
+  nodesmap.shards:
+    description: Edit the server regions (Reef sharding) in the web map editor
+    default: op
   nodesmap.hidden:
     description: Player is never shown on the web map
     default: false

@@ -126,6 +126,8 @@
       E.user = s.user;
       E.nodesOnline = !!s.nodes;
       E.townsOnline = !!s.towns;
+      E.shardsAllowed = !!s.shards;
+      for (const el of $$("[data-tool=\"shards\"], [data-tab=\"shards\"]")) el.hidden = !E.shardsAllowed;
     } catch (e) {
       modal(`<h2>Session expired</h2><p>${esc(e.message)}</p><div class="foot"><button class="btn" data-close>Edit a file offline</button></div>`);
       E.token = null;
@@ -2582,7 +2584,7 @@
   }
 
   async function loadShards() {
-    if (!E.token) return;
+    if (!E.token || !E.shardsAllowed) return;
     try {
       const d = await api("api/editor/shards");
       SH.regions = (d.regions || []).filter((r) => r && typeof r.server === "string");
