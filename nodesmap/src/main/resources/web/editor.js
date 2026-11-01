@@ -755,7 +755,7 @@
     if (E.tool === "auto") {
       el.textContent = penStrokes.length ?
         "Click inside a closed area to fill it · drag to draw more border · Backspace: undo line · Esc: clear" :
-        "Drag to draw a border line · click inside a closed area to fill it (water and territories close areas too)";
+        "Drag to draw a border line (it clips onto borders, hold Alt to turn that off) · click inside a closed area to fill it";
       return;
     }
     el.textContent = !brush ? "" :
@@ -816,7 +816,39 @@
   let penDown = null;           // { sx, sy, moved, last: [cx, cz], stroke }
   const penStyle = { renderer: R.ui, color: "#f3d38d", weight: 3, opacity: 0.95, interactive: false };
 
+  // the pen clips onto nearby borders: free chunks touching a territory (or the coast with Land only) and the ends of lines you drew
+  const penMarker = L.circleMarker([0, 0], { renderer: R.ui, radius: 5, weight: 2, color: "#fff", fillColor: "#f3d38d", fillOpacity: 0.9, interactive: false });
+  function penEdge(k) {
+    if (E.owner.has(k)) return false;
+    const x = KX(k), z = KZ(k);
+    const nb = [K(x + 1, z), K(x - 1, z), K(x, z + 1), K(x, z - 1)];
+    if (nb.some((n) => E.owner.has(n))) return true;
+    if (E.opt.land && isLand(k) === true) return nb.some((n) => isLand(n) === false);
+    return false;
+  }
+  function penSnap(cx, cz, oe) {
+    if (oe && oe.altKey) return [cx, cz, false];
+    const r = Math.max(1, Math.min(6, Math.round(14 / (16 * Math.pow(2, map.getZoom())))));
+    const own = penDown && penDown.stroke ? penDown.stroke.keySet : null;
+    let best = null, bd = Infinity;
+    for (let dz = -r; dz <= r; dz++) {
+      for (let dx = -r; dx <= r; dx++) {
+        const k = K(cx + dx, cz + dz);
+        if (own && own.has(k)) continue;
+        if (!(penWalls.has(k) || penEdge(k))) continue;
+        const d = dx * dx + dz * dz;
+        if (d < bd) { bd = d; best = [cx + dx, cz + dz, true]; }
+      }
+    }
+    return best || [cx, cz, false];
+  }
+  function penShowMarker(cx, cz, snapped) {
+    penMarker.setLatLng(ll(cx * 16 + 8, cz * 16 + 8));
+    penMarker.setStyle({ fillColor: snapped ? "#7ee08a" : "#f3d38d" });
+    G.ui.addLayer(penMarker);
+  }
   function penReset() {
+    G.ui.removeLayer(penMarker);
     for (const st of penStrokes) G.ui.removeLayer(st.line);
     penStrokes = [];
     penWalls.clear();
@@ -833,24 +865,30 @@
   }
   map.on("mousedown", (e) => {
     if (E.tool !== "auto" || spaceDown || e.originalEvent.button !== 0) return;
-    const [cx, cz] = chunkAt(e.latlng);
+    const [rx, rz] = chunkAt(e.latlng);
+    const [cx, cz] = penSnap(rx, rz, e.originalEvent);
     penDown = { sx: e.originalEvent.clientX, sy: e.originalEvent.clientY, moved: false, last: [cx, cz], start: [cx, cz], stroke: null };
   });
   function penMove(e) {
-    if (!penDown) return;
     const oe = e.originalEvent || e;
+    const ev = e.latlng || map.mouseEventToLatLng(e);
+    const [rx, rz] = chunkAt(ev);
+    const [sx, sz, snapped] = penSnap(rx, rz, oe);
+    penShowMarker(sx, sz, snapped);
+    if (!penDown) return;
     if (!penDown.moved) {
       if (Math.hypot(oe.clientX - penDown.sx, oe.clientY - penDown.sy) < 6) return;
       penDown.moved = true;
-      penDown.stroke = { keys: [K(penDown.start[0], penDown.start[1])], pts: [ll(penDown.start[0] * 16 + 8, penDown.start[1] * 16 + 8)], line: L.polyline([], penStyle) };
+      penDown.stroke = { keySet: new Set([K(penDown.start[0], penDown.start[1])]), keys: [K(penDown.start[0], penDown.start[1])], pts: [ll(penDown.start[0] * 16 + 8, penDown.start[1] * 16 + 8)], line: L.polyline([], penStyle) };
       G.ui.addLayer(penDown.stroke.line);
       penWalls.add(penDown.stroke.keys[0]);
     }
-    const [cx, cz] = chunkAt(e.latlng || map.mouseEventToLatLng(e));
+    const cx = sx, cz = sz;
     if (cx === penDown.last[0] && cz === penDown.last[1]) return;
     for (const [x, z] of line(penDown.last[0], penDown.last[1], cx, cz).slice(1)) {
       const k = K(x, z);
       penDown.stroke.keys.push(k);
+      penDown.stroke.keySet.add(k);
       penWalls.add(k);
     }
     penDown.stroke.pts.push(ll(cx * 16 + 8, cz * 16 + 8));
@@ -2376,7 +2414,7 @@
   }
 
   // handy from the browser console, e.g. NodesEditor.serialize()
-  window.NodesEditor = { state: E, map, serialize, select, undo, redo };
+  window.NodesEditor = { state: E, map, serialize, select, undo, redo, penWalls };
 
   setInterval(pollState, 5000);
   init().catch((e) => { console.error(e); toast("Editor failed to load: " + e.message, true); });
