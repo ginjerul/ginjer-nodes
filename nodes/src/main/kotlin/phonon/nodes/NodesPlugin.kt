@@ -96,6 +96,7 @@ public class NodesPlugin : JavaPlugin() {
         Nodes.war.initialize(Config.flagMaterials)
 
         val pluginPath = Config.pathPlugin
+        ensureDefaultWorld()
         logger.info("Loading world from: $pluginPath")
         try {
             if (Nodes.loadWorld() == true) {
@@ -277,6 +278,20 @@ public class NodesPlugin : JavaPlugin() {
         if (Nodes.initialized) {
             Nodes.saveWorld(checkIfNeedsSave = false, async = false)
             Nodes.saveTruce(async = false)
+        }
+    }
+
+    /** First start: write a default world.json (empty map, a basic resource node) so the editor and map have something to open. */
+    private fun ensureDefaultWorld() {
+        try {
+            val path = Config.pathWorld
+            if (java.nio.file.Files.exists(path)) return
+            val stream = this.getResource("world.json") ?: return
+            java.nio.file.Files.createDirectories(path.parent)
+            stream.use { java.nio.file.Files.copy(it, path) }
+            logger.info("No world.json found, created a default one at $path (empty map with a basic resource node). Draw territories with /nodesmap editor.")
+        } catch (e: Exception) {
+            logger.warning("Could not create default world.json: ${e.message}")
         }
     }
 }

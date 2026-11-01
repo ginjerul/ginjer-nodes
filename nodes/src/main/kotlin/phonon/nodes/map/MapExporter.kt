@@ -53,6 +53,7 @@ public object MapExporter {
 
     // main thread only
     private var lastWorldRefs: List<Territory> = emptyList()
+    private var worldExported = false
     private val supplyCache = HashMap<UUID, IntArray>()
     private var supplyCursor = 0
 
@@ -68,6 +69,7 @@ public object MapExporter {
         this.writer = Executors.newSingleThreadExecutor { r -> Thread(r, "Nodes-MapExport").apply { isDaemon = true } }
         hashes.clear()
         lastWorldRefs = emptyList()
+        worldExported = false
         supplyCache.clear()
 
         val s = Bukkit.getScheduler()
@@ -92,6 +94,7 @@ public object MapExporter {
     /** Force a world re-export on the next check (e.g. after /nda reload world). */
     public fun worldChanged() {
         lastWorldRefs = emptyList()
+        worldExported = false
     }
 
     /** Re-export towns/nations now (after a web editor change) instead of waiting for the timer. */
@@ -104,7 +107,8 @@ public object MapExporter {
 
     private fun exportWorld() {
         val refs = Nodes.territories.values.toList()
-        if (refs.size == lastWorldRefs.size && refs.indices.all { refs[it] === lastWorldRefs[it] }) return
+        if (worldExported && refs.size == lastWorldRefs.size && refs.indices.all { refs[it] === lastWorldRefs[it] }) return
+        worldExported = true // always write the first export, even for an empty world
         lastWorldRefs = refs
         // territories are immutable after load, so they can be read off-thread
         val resources = Nodes.resourceNodes.values.map { it.name to it.icon }
