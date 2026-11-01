@@ -62,3 +62,15 @@ players:
   hide-invisible: true
   hide-spectators: true
   # Players with nodesmap.hidden are always hidden.
+
+shards:
+  # Draw the borders between servers on the map, for Reef sharding (one world split across several servers).
+  # Paste the same 'regions' list you use in Reef's reef.yml. Leave it empty if you don't use sharding.
+  show: true
+  # Shapes (same as Reef): rectangle, polygon, curved polygon, circle/ellipse.
+  # regions:
+  #   - {server: s1, min-x: -100000, min-z: -100000, max-x: 0,      max-z: 100000}
+  #   - {server: s2, points: [[0, -100000], [100000, -100000], [100000, 100000], [0, 100000]]}
+  #   - {server: s3, smooth: true, points: [[0, 0], [500, 0], [700, 400], [0, 600]]}
+  #   - {server: s4, center-x: 5000, center-z: 0, radius: 800}
+  regions: []

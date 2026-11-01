@@ -42,6 +42,11 @@ In the editor, "Lock claimed territories" (on by default) also stops you from pa
 
 Set `web.public-url` if players reach the map through a domain or reverse proxy, so the editor link points there. Editing over plain HTTP sends the session token unencrypted, so use HTTPS (a reverse proxy) if your map is public.
 
+
+## Server borders (Reef sharding)
+
+If your world is split across several servers with Reef sharding, NodesMap can draw each server's area on the map as a dashed, labelled outline, so players can see where the borders are. Paste the same `regions` list you use in Reef's `reef.yml` into NodesMap's `config.yml` under `shards.regions` (same server names), then run `/nodesmap reload` and refresh the page. Regions can be rectangles, polygons, curves (`smooth: true`) or circles, exactly as in Reef. Players can switch it off in the View box ("Server borders"). Leave the list empty to hide the feature.
+
 ## Commands
 
 `/nodesmap help` shows only the commands you're allowed to use. Admin commands need `nodesmap.admin` (op by default).

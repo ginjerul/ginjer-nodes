@@ -114,6 +114,22 @@ class NodesMapPlugin : JavaPlugin() {
 
     private fun settingsOf(c: MapConfig) = RenderSettings(c.shading, c.waterDepth, c.chunkGrid, c.zoomOutLevels)
 
+    /** Region outlines for the "Server borders" layer, as [{"server":..,"points":[[x,z],..]},..] */
+    private fun shardsJson(): String {
+        val sb = StringBuilder("[")
+        for ((n, sh) in cfg.shards.withIndex()) {
+            if (n > 0) sb.append(',')
+            sb.append("{\"server\":").append(jsonStr(sh.server)).append(",\"points\":[")
+            for (i in sh.xs.indices) {
+                if (i > 0) sb.append(',')
+                sb.append('[').append(String.format(java.util.Locale.ROOT, "%.1f", sh.xs[i]))
+                    .append(',').append(String.format(java.util.Locale.ROOT, "%.1f", sh.zs[i])).append(']')
+            }
+            sb.append("]}")
+        }
+        return sb.append(']').toString()
+    }
+
     /** /data/map.json: everything the viewer needs to set itself up */
     private fun publishMapInfo() {
         val spawn = world.spawnLocation
@@ -121,6 +137,7 @@ class NodesMapPlugin : JavaPlugin() {
         val json = """{"title":${jsonStr(cfg.title)},"world":${jsonStr(world.name)},""" +
             """"tileSize":${TileRenderer.TILE},"zoomOutLevels":${cfg.zoomOutLevels},""" +
             """"spawn":{"x":${spawn.blockX},"z":${spawn.blockZ}},"nodes":$nodes,"players":${cfg.playersShow},""" +
+            """"shards":${shardsJson()},""" +
             """"version":${jsonStr(description.version)}}"""
         web?.put("/data/map.json", json)
         try {

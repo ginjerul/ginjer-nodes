@@ -88,6 +88,7 @@
     ["War", ["war", "warzones", "raids"]],
     ["Buildings", ["forts", "outposts", "ports", "towers", "refineries", "drops"]],
     ["Chunk grid", ["chunks"]],
+    ["Server borders", ["shards"]],
   ];
   const LAYERS = [
     ["territories", "Territory fill", true],
@@ -108,6 +109,7 @@
     ["refineries", "Refineries", true],
     ["drops", "Supply drops", true],
     ["chunks", "Chunk grid", false],
+    ["shards", "Server borders", true],
   ];
   const prefs = {
     mode: store.get("mode", "towns"),
@@ -131,7 +133,7 @@
   }
   pane("terr", 410); pane("occ", 420); pane("borders", 430); pane("zones", 440);
   pane("labels", 610); pane("pins", 620); pane("players", 640); pane("flags", 650);
-  pane("grid", 405);
+  pane("grid", 405); pane("shards", 445);
   const R = {
     terr: L.svg({ pane: "terr", padding: 0.5 }),
     occ: L.svg({ pane: "occ", padding: 0.5 }),
@@ -141,7 +143,7 @@
   };
 
   const G = {}; // layer groups by name
-  for (const k of ["terr", "occ", "borders", "zones", "townLabels", "nationLabels", "terrLabels", "terrIds", "resources", "players", "flags", "raids", "forts", "outposts", "ports", "towers", "refineries", "drops", "grid"]) {
+  for (const k of ["terr", "occ", "borders", "zones", "townLabels", "nationLabels", "terrLabels", "terrIds", "resources", "players", "flags", "raids", "forts", "outposts", "ports", "towers", "refineries", "drops", "grid", "shards"]) {
     G[k] = L.layerGroup();
   }
   const terrPolys = new Map(); // id -> L.Polygon
@@ -211,6 +213,7 @@
     for (const r of Object.values(R)) map.addLayer(r); // create svg containers up front (patterns live in them)
     for (const g of Object.values(G)) g.addTo(map);
     buildUi();
+    drawShards();
     if (S.info.players === false) setPlayersEnabled(false);
     syncLayerVisibility();
 
@@ -441,6 +444,25 @@
       }
       if (!rings.length) continue;
       G.borders.addLayer(L.polygon(rings, { renderer: R.borders, fill: false, color: shade(g.color, 0.35), weight: byNation ? 3.5 : 2.5, opacity: 0.95, interactive: false }));
+    }
+  }
+
+  /** Server borders (Reef sharding): one dashed outline per region, labelled with its server. */
+  function drawShards() {
+    G.shards.clearLayers();
+    const shards = S.info.shards || [];
+    const group = document.querySelector('#layer-toggles input[data-group="Server borders"]')?.closest("label");
+    if (group) group.hidden = !shards.length;
+    if (!shards.length) return;
+    const names = [...new Set(shards.map((s) => s.server))];
+    const colors = ["#ff7a45", "#36cfc9", "#b37feb", "#ffd666", "#73d13d", "#ff85c0", "#69b1ff", "#ffa940"];
+    for (const s of shards) {
+      const color = colors[names.indexOf(s.server) % colors.length];
+      const rect = L.polygon(s.points.map(([x, z]) => ll(x, z)), {
+        pane: "shards", color, weight: 3, opacity: 0.95, dashArray: "10 8", fill: true, fillColor: color, fillOpacity: 0.05, interactive: false,
+      });
+      rect.bindTooltip(`Server ${s.server}`, { permanent: true, direction: "center", className: "shard-label", opacity: 0.9 });
+      G.shards.addLayer(rect);
     }
   }
 
@@ -1265,6 +1287,7 @@
       refineries: prefs.layers.refineries && z >= -2,
       drops: prefs.layers.drops,
       grid: prefs.layers.chunks,
+      shards: prefs.layers.shards,
     };
     map.getContainer().classList.toggle("far", z < -1);
     document.body.classList.toggle("zlow", z <= -1);

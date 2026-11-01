@@ -266,3 +266,13 @@ body.zlow .res-stack[data-more]::after { content: "+" attr(data-more); align-sel
 .sec-d > summary::after { content: ""; width: 7px; height: 7px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(-45deg); transition: transform 0.15s; margin-right: 3px; }
 .sec-d[open] > summary::after { transform: rotate(45deg); }
 .sec-d > summary:hover { color: var(--muted); }
+
+.shard-label {
+  background: rgba(20, 22, 28, 0.78);
+  border: 0;
+  color: #fff;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  box-shadow: none;
+}
+.shard-label::before { display: none; }
