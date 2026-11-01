@@ -42,8 +42,42 @@ class NodesMapPlugin : JavaPlugin() {
     /** recently redrawn tiles, so open browsers can swap just those images */
     private val tileUpdates = ConcurrentLinkedDeque<Pair<String, Long>>()
 
+    /**
+     * An existing config.yml never gets new options when the plugin updates. Copy every key
+     * the bundled config.yml has and the server's file lacks (with its comments), keeping
+     * everything the admin already set.
+     */
+    private fun addMissingConfigKeys() {
+        try {
+            val stream = getResource("config.yml") ?: return
+            val defaults = stream.use {
+                org.bukkit.configuration.file.YamlConfiguration.loadConfiguration(java.io.InputStreamReader(it, Charsets.UTF_8))
+            }
+            var added = 0
+            for (key in defaults.getKeys(true)) {
+                if (config.contains(key, true)) continue
+                if (defaults.isConfigurationSection(key)) {
+                    // new section: only carry its header comments over; its keys follow
+                    config.createSection(key)
+                } else {
+                    config.set(key, defaults.get(key))
+                    added++
+                }
+                config.setComments(key, defaults.getComments(key))
+                config.setInlineComments(key, defaults.getInlineComments(key))
+            }
+            if (added > 0) {
+                saveConfig()
+                logger.info("config.yml: added $added new option(s) from this version (existing values kept)")
+            }
+        } catch (e: Exception) {
+            logger.warning("Could not update config.yml with new options: ${e.message}")
+        }
+    }
+
     override fun onEnable() {
         saveDefaultConfig()
+        addMissingConfigKeys()
         cfg = MapConfig.load(config)
         webRoot = dataFolder.toPath().resolve("web").toAbsolutePath().normalize()
         Files.createDirectories(webRoot.resolve("data").resolve("nodes"))
@@ -441,6 +475,7 @@ class NodesMapPlugin : JavaPlugin() {
             }
             "reload" -> {
                 reloadConfig()
+                addMissingConfigKeys()
                 cfg = MapConfig.load(config)
                 r.settings = settingsOf(cfg)
                 s.budgetNanos = cfg.snapshotBudgetNanos
