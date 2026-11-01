@@ -754,8 +754,8 @@
     const btn = E.classic ? "right-drag" : "drag";
     if (E.tool === "auto") {
       el.textContent = penStrokes.length ?
-        "Click inside a closed area to fill it · drag to draw more border · Backspace: undo line · Esc: clear" :
-        "Drag to draw a border line (it clips onto borders, hold Alt to turn that off) · click inside a closed area to fill it";
+        "Click inside a closed area to fill it · right-drag to draw more border · Backspace: undo line · Esc: clear" :
+        "Right-drag to draw a border line (it clips onto borders, Alt turns that off) · left-drag pans · click inside a closed area to fill it";
       return;
     }
     el.textContent = !brush ? "" :
@@ -766,7 +766,7 @@
   }
   function syncDragging() {
     const brushPaints = PAINT_TOOLS.has(E.tool) && !E.classic;
-    const paintMode = brushPaints || E.tool === "rect" || E.tool === "auto" || stroke || rectStart || (E.tool === "select" && shiftDown);
+    const paintMode = brushPaints || E.tool === "rect" || stroke || rectStart || (E.tool === "select" && shiftDown);
     if (paintMode && !spaceDown) map.dragging.disable(); else map.dragging.enable();
     document.body.classList.toggle("panning", spaceDown);
   }
@@ -893,7 +893,7 @@
     updateModeHint();
   }
   map.on("mousedown", (e) => {
-    if (E.tool !== "auto" || spaceDown || e.originalEvent.button !== 0) return;
+    if (E.tool !== "auto" || spaceDown || e.originalEvent.button !== 2) return;
     const [rx, rz] = chunkAt(e.latlng);
     const [cx, cz] = penSnap(rx, rz, e.originalEvent);
     penDown = { sx: e.originalEvent.clientX, sy: e.originalEvent.clientY, moved: false, last: [cx, cz], start: [cx, cz], stroke: null };
@@ -939,6 +939,12 @@
       return;
     }
     penFill(d.start[0], d.start[1]);
+  });
+  // left click (not a drag, which pans) also fills
+  map.on("click", (e) => {
+    if (E.tool !== "auto" || spaceDown) return;
+    const [cx, cz] = chunkAt(e.latlng);
+    penFill(cx, cz);
   });
 
   /** flood fill of free land around (cx, cz), stopped by drawn borders, territories and (with Land only) water */
@@ -1010,6 +1016,7 @@
    *              Ctrl+click adds/removes the resource picked in the Resources tab
    */
   function rightDown(cx, cz, oe) {
+    if (E.tool === "auto") return; // the pen handles its own right button
     if (PAINT_TOOLS.has(E.tool)) return startStroke(cx, cz, brushMode(oe));
     const id = E.owner.get(K(cx, cz));
     if (oe.ctrlKey || oe.metaKey) return toggleResourceAt(id);

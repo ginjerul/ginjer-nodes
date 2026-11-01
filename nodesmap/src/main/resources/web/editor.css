@@ -159,3 +159,13 @@ kbd { font: 600 11px var(--mono); border: 1px solid var(--line-strong); border-r
 #modal .drow { display: grid; grid-template-columns: 1fr 74px 1.2fr 28px; gap: 6px; margin-bottom: 6px; }
 #modal .drow select, #modal .drow input { height: 32px; border-radius: 7px; border: 1px solid var(--line); background: rgba(0,0,0,0.25); color: var(--text); padding: 0 8px; min-width: 0; }
 #modal .drow select option { background: var(--panel-solid); }
+
+/* sidebar tabs (the editor's panel; the viewer no longer uses tabs) */
+#tabs { display: flex; padding: 6px; gap: 4px; border-bottom: 1px solid var(--line); }
+#tabs button { flex: 1; padding: 7px 0; border: 0; border-radius: 7px; background: transparent; color: var(--muted); cursor: pointer; font-weight: 550; font-size: 13px; }
+#tabs button:hover { color: var(--text); }
+#tabs button.active { background: rgba(255,255,255,0.07); color: var(--text); }
+.tab { display: none; flex: 1; min-height: 0; flex-direction: column; overflow: auto; padding: 10px; }
+.tab.active { display: flex; }
+.tab h3 { margin: 14px 2px 8px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--faint); font-weight: 600; }
+.tab h3:first-child { margin-top: 2px; }
