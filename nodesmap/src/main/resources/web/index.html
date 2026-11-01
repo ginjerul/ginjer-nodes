@@ -25,36 +25,26 @@
 </header>
 
 <aside id="sidebar">
-  <nav id="tabs">
-    <button data-tab="towns" class="active">Towns</button>
-    <button data-tab="nations">Nations</button>
-    <button data-tab="war">War</button>
-  </nav>
-  <section id="tab-towns" class="tab active">
-    <div class="list-tools">
-      <input class="filter" data-list="towns" placeholder="Filter towns">
-      <select class="sort" data-list="towns">
-        <option value="territories">Most land</option>
-        <option value="residents">Most residents</option>
-        <option value="online">Most online</option>
-        <option value="name">Name</option>
-      </select>
-    </div>
-    <div class="list" id="list-towns"></div>
-  </section>
-  <section id="tab-nations" class="tab">
-    <div class="list-tools">
-      <input class="filter" data-list="nations" placeholder="Filter nations">
-      <select class="sort" data-list="nations">
-        <option value="territories">Most land</option>
-        <option value="towns">Most towns</option>
-        <option value="residents">Most residents</option>
-        <option value="name">Name</option>
-      </select>
-    </div>
-    <div class="list" id="list-nations"></div>
-  </section>
-  <section id="tab-war" class="tab"><div id="war-panel"></div></section>
+  <div class="list-tools side-tools">
+    <input class="filter" data-list="all" placeholder="Filter nations and towns">
+    <select class="sort" data-list="all" aria-label="Sort">
+      <option value="territories">Most land</option>
+      <option value="towns">Most towns</option>
+      <option value="residents">Most residents</option>
+      <option value="online">Most online</option>
+      <option value="name">Name</option>
+    </select>
+  </div>
+  <div id="side-scroll">
+    <section id="war-sec" class="sec">
+      <button id="war-head" class="sec-head" aria-expanded="true" title="War status">
+        <span class="wdot"></span><span class="sec-title">War</span><span id="war-sum"></span>
+        <svg class="chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+      </button>
+      <div id="war-panel"></div>
+    </section>
+    <div id="list-tree"></div>
+  </div>
 </aside>
 
 <div id="view" class="view">

@@ -115,6 +115,7 @@
     resource: store.get("resource", ""),
     layers: Object.assign(Object.fromEntries(LAYERS.map(([k, , d]) => [k, d])), store.get("layers", {})),
     sidebar: store.get("sidebar", window.innerWidth > 760),
+    warOpen: store.get("warOpen", true),
     view: store.get("view", window.innerWidth > 760),
   };
 
@@ -829,9 +830,9 @@
     const zones = (live.warzones || []).filter((z) => z.enabled);
     const raids = live.raids || [];
     const drop = live.supplyDrop;
-    let h = `<div class="war-head ${war.enabled ? "on" : ""}"><b>${war.enabled ? "War is active" : "Peace time"}</b>${war.enabled && war.endsAt ? `<span>ends in <b data-countdown="${war.endsAt}">${fmtDur(war.endsAt - now())}</b></span>` : ""}</div>`;
+    let h = "";
 
-    h += `<h3>Flags in progress (${atk.length})</h3>`;
+    h += `<h3 style="margin-top:6px">Flags in progress (${atk.length})</h3>`;
     if (!atk.length) h += `<div class="empty">No active flag attacks.</div>`;
     for (const a of atk.slice().sort((x, y) => y.progress - x.progress)) {
       const terr = S.terr.get(S.chunkTerr.get(NodesGeom.key(a.cx, a.cz)));
@@ -875,7 +876,14 @@
       h += `</div>`;
     }
     $("#war-panel").innerHTML = h;
-    $('#tabs [data-tab="war"]').classList.toggle("has-alert", !!(war.enabled || atk.length || zones.length || raids.length));
+    const busy = !!(war.enabled || atk.length || zones.length || raids.length);
+    $("#war-sec").classList.toggle("on", !!war.enabled);
+    const bits = [];
+    if (war.enabled) bits.push(war.endsAt ? `ends in <b data-countdown="${war.endsAt}">${fmtDur(war.endsAt - now())}</b>` : "active");
+    else bits.push(busy ? "peace" : "Peace time");
+    if (atk.length) bits.push(`${atk.length} flag${atk.length > 1 ? "s" : ""}`);
+    if (raids.length) bits.push(`${raids.length} raid${raids.length > 1 ? "s" : ""}`);
+    $("#war-sum").innerHTML = bits.join(" · ");
     updateWarPill();
   }
 
@@ -889,31 +897,46 @@
   }
 
   // ---------------------------------------------------------------- sidebar lists
+  const navOpen = new Set(store.get("navOpen", []));
   function renderLists() {
-    const tf = ($('.filter[data-list="towns"]').value || "").toLowerCase();
-    const ts = $('.sort[data-list="towns"]').value;
-    let towns = [...S.towns.values()].filter((t) => !tf || t.name.toLowerCase().includes(tf) || (t.nation || "").toLowerCase().includes(tf));
-    const on = new Map(towns.map((t) => [t.name, onlineCount(t)]));
-    const sorters = {
+    const f = ($('.filter[data-list="all"]').value || "").toLowerCase();
+    const sort = $('.sort[data-list="all"]').value;
+    const on = new Map([...S.towns.values()].map((t) => [t.name, onlineCount(t)]));
+    const townSort = {
       territories: (a, b) => b.territories.length - a.territories.length,
+      towns: (a, b) => b.territories.length - a.territories.length,
       residents: (a, b) => b.residents.length - a.residents.length,
-      online: (a, b) => on.get(b.name) - on.get(a.name),
+      online: (a, b) => on.get(b.name) - on.get(a.name) || b.territories.length - a.territories.length,
       name: (a, b) => a.name.localeCompare(b.name),
-    };
-    towns.sort(sorters[ts] || sorters.territories);
-    $("#list-towns").innerHTML = towns.length ? towns.map((t) => `<div class="row" data-town="${esc(t.name)}"><span class="sw" style="background:${t.color}"></span><div><div class="nm">${esc(prettyName(t.name))}</div><div class="sub">${esc(t.nation ? prettyName(t.nation) : "No nation")}${on.get(t.name) ? ` · <span style="color:var(--ok)">${on.get(t.name)} online</span>` : ""}</div></div><span class="stat">${t.territories.length} terr<br>${t.residents.length} res</span></div>`).join("") : `<div class="empty">No towns.</div>`;
-
-    const nf = ($('.filter[data-list="nations"]').value || "").toLowerCase();
-    const ns = $('.sort[data-list="nations"]').value;
-    let nations = [...S.nations.values()].filter((n) => !nf || n.name.toLowerCase().includes(nf));
-    const nsorters = {
-      territories: (a, b) => b.territories - a.territories,
-      towns: (a, b) => b.townList.length - a.townList.length,
-      residents: (a, b) => b.residents - a.residents,
-      name: (a, b) => a.name.localeCompare(b.name),
-    };
-    nations.sort(nsorters[ns] || nsorters.territories);
-    $("#list-nations").innerHTML = nations.length ? nations.map((n) => `<div class="row" data-nation="${esc(n.name)}"><span class="sw" style="background:${n.color}"></span><div><div class="nm">${esc(prettyName(n.name))}</div><div class="sub">Capital ${esc(prettyName(n.capital))} · ${n.townList.length} towns</div></div><span class="stat">${n.territories} terr<br>${n.residents} res</span></div>`).join("") : `<div class="empty">No nations.</div>`;
+    }[sort];
+    const townRow = (t) => `<div class="row town-row" data-town="${esc(t.name)}"><span class="sw" style="background:${t.color}"></span><div class="nm">${esc(prettyName(t.name))}${on.get(t.name) ? ` <span class="tag-online">· ${on.get(t.name)} online</span>` : ""}</div><span class="stat">${t.territories.length} terr · ${t.residents.length} res</span></div>`;
+    const nationOn = (n) => n.townList.reduce((a, t) => a + (on.get(t.name) || 0), 0);
+    const groups = [];
+    for (const n of S.nations.values()) {
+      const all = n.townList.slice();
+      const nameHit = !f || n.name.toLowerCase().includes(f);
+      const towns = (nameHit ? all : all.filter((t) => t.name.toLowerCase().includes(f))).sort(townSort);
+      if (!nameHit && !towns.length) continue;
+      groups.push({ n, towns });
+    }
+    const nsort = {
+      territories: (a, b) => b.n.territories - a.n.territories,
+      towns: (a, b) => b.n.townList.length - a.n.townList.length,
+      residents: (a, b) => b.n.residents - a.n.residents,
+      online: (a, b) => nationOn(b.n) - nationOn(a.n) || b.n.territories - a.n.territories,
+      name: (a, b) => a.n.name.localeCompare(b.n.name),
+    }[sort];
+    groups.sort(nsort);
+    const lone = [...S.towns.values()].filter((t) => !t.nation && (!f || t.name.toLowerCase().includes(f))).sort(townSort);
+    let h = "";
+    for (const { n, towns } of groups) {
+      const open = !!f || navOpen.has(n.name);
+      const online = nationOn(n);
+      h += `<div class="row nation-row ${open ? "open" : ""}" data-nation="${esc(n.name)}"><span class="sw" style="background:${n.color}"></span><div><div class="nm">${esc(prettyName(n.name))}</div><div class="sub">${n.townList.length} town${n.townList.length === 1 ? "" : "s"} · ${n.territories} terr${online ? ` · <span class="tag-online">${online} online</span>` : ""}</div></div><span class="stat">${n.residents} res</span><button class="twist" data-twist="${esc(n.name)}" aria-label="Show towns" title="Show towns"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></button></div>`;
+      if (open) h += towns.map(townRow).join("");
+    }
+    if (lone.length) h += `<h3>No nation</h3>` + lone.map(townRow).join("");
+    $("#list-tree").innerHTML = h || `<div class="empty">Nothing matches.</div>`;
   }
 
   // ---------------------------------------------------------------- info panels
@@ -1250,10 +1273,18 @@
   }
 
   // ---------------------------------------------------------------- ui wiring
+  function setWarOpen(open) {
+    prefs.warOpen = open; store.set("warOpen", open);
+    $("#war-sec").classList.toggle("closed", !open);
+    $("#war-head").setAttribute("aria-expanded", String(open));
+  }
+  /** kept for the war pill and map timers: show the war section */
   function openTab(name) {
     setSidebar(true);
-    $$("#tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
-    $$(".tab").forEach((t) => t.classList.toggle("active", t.id === "tab-" + name));
+    if (name === "war") {
+      setWarOpen(true);
+      $("#war-sec").scrollIntoView({ block: "nearest" });
+    }
   }
   function setSidebar(open) {
     prefs.sidebar = open; store.set("sidebar", open);
@@ -1270,7 +1301,8 @@
     setupResTips();
     setSidebar(prefs.sidebar);
     $("#menu-btn").onclick = () => setSidebar(!prefs.sidebar);
-    $$("#tabs button").forEach((b) => (b.onclick = () => openTab(b.dataset.tab)));
+    $("#war-head").onclick = () => setWarOpen(!prefs.warOpen);
+    setWarOpen(prefs.warOpen);
     $("#war-pill").onclick = () => openTab("war");
     setView(prefs.view);
     $("#view-head").onclick = () => setView(!prefs.view);
@@ -1315,6 +1347,14 @@
 
     // delegated clicks for chips/rows/cards anywhere in panels
     document.addEventListener("click", (e) => {
+      const tw = e.target.closest("[data-twist]");
+      if (tw) {
+        const n = tw.dataset.twist;
+        if (navOpen.has(n)) navOpen.delete(n); else navOpen.add(n);
+        store.set("navOpen", [...navOpen]);
+        renderLists();
+        return;
+      }
       const el = e.target.closest("[data-town],[data-nation],[data-terr],[data-fly],[data-town-fly]");
       if (!el || !el.closest("#sidebar,#info")) return;
       if (el.dataset.town) showTown(el.dataset.town, true);
