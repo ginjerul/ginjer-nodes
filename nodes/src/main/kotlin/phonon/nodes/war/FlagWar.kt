@@ -862,7 +862,7 @@ public object FlagWar {
         }
 
         try {
-            attack.armorstand?.remove()
+            attack.hologram?.remove()
         } catch (e: Exception) {
             Nodes.logger?.warning("Failed to remove attack hologram: ${e.message}")
         }
@@ -922,7 +922,7 @@ public object FlagWar {
         }
 
         try {
-            attack.armorstand?.remove()
+            attack.hologram?.remove()
         } catch (e: Exception) {
             Nodes.logger?.warning("Failed to remove attack hologram: ${e.message}")
         }
@@ -1126,11 +1126,11 @@ public object FlagWar {
             }
             attack.progressBar.setTitle("$baseTitle [$timeStr]")
 
-            val stand = attack.armorstand
+            val stand = attack.hologram
             if (stand != null && Config.flagHologramsEnabled) {
                 if (stand.isValid()) {
                     try {
-                        stand.sendPackets()
+                        stand.update()
                     } catch (e: Exception) {
                         e.printStackTrace()
                     }

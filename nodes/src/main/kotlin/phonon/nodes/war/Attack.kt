@@ -6,21 +6,22 @@
 
 package phonon.nodes.war
 
+import net.kyori.adventure.text.Component
+import net.kyori.adventure.text.format.NamedTextColor
 import org.bukkit.Bukkit
+import org.bukkit.Color
 import org.bukkit.Location
 import org.bukkit.NamespacedKey
 import org.bukkit.World
 import org.bukkit.block.Block
 import org.bukkit.boss.BossBar
-import org.bukkit.entity.ArmorStand
+import org.bukkit.entity.Display
+import org.bukkit.entity.TextDisplay
 import org.bukkit.persistence.PersistentDataType
 import phonon.nodes.Config
 import phonon.nodes.Nodes
-import phonon.nodes.nms.createArmorStandNamePacket
-import phonon.nodes.nms.sendPacket
 import phonon.nodes.objects.Coord
 import phonon.nodes.objects.Town
-import phonon.nodes.objects.townNametagViewedByPlayer
 import java.util.UUID
 
 public class Attack(
@@ -47,9 +48,9 @@ public class Attack(
     @Volatile
     var cancelled: Boolean = false
 
-    val armorstand: AttackArmorStand? =
+    val hologram: AttackHologram? =
         if (Config.flagHologramsEnabled) {
-            AttackArmorStand(this, flagBase.world, flagBase.location.clone().add(0.5, 1.75, 0.5))
+            AttackHologram(this, flagBase.world, flagBase.location.clone().add(0.5, 1.75, 0.5))
         } else {
             null
         }
@@ -78,7 +79,7 @@ public class Attack(
         )
 
         try {
-            this.armorstand?.sendPackets()
+            this.hologram?.update()
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -122,91 +123,67 @@ private fun generateFixedJsonBase(
     return s
 }
 
-public class AttackArmorStand(
+/**
+ * Floating label above a capture flag: attacking town name and time left.
+ * One TextDisplay entity per attack, text only changes once per second.
+ */
+public class AttackHologram(
     val attack: Attack,
     val world: World,
     val loc: Location,
-    val maxViewDistance: Int = 3,
 ) {
-    var townNameArmorstand = createArmorStand(world, loc)
-    var progressArmorstand = createArmorStand(world, loc.clone().add(0.0, -0.25, 0.0))
-
-    val minViewChunkX: Int
-    val maxViewChunkX: Int
-    val minViewChunkZ: Int
-    val maxViewChunkZ: Int
-
-    init {
-        val chunk = this.loc.chunk
-        val chunkX = chunk.x
-        val chunkZ = chunk.z
-        minViewChunkX = chunkX - this.maxViewDistance
-        maxViewChunkX = chunkX + this.maxViewDistance
-        minViewChunkZ = chunkZ - this.maxViewDistance
-        maxViewChunkZ = chunkZ + this.maxViewDistance
-    }
+    var display: TextDisplay = createTextDisplay(world, loc)
+    private var lastLabel: String = ""
 
     public fun remove() {
         try {
-            this.townNameArmorstand.remove()
-        } catch (_: Exception) {
-        }
-        try {
-            this.progressArmorstand.remove()
+            this.display.remove()
         } catch (_: Exception) {
         }
     }
 
-    public fun isValid(): Boolean = this.townNameArmorstand.isValid && this.progressArmorstand.isValid
+    public fun isValid(): Boolean = this.display.isValid
 
     public fun respawn() {
         this.remove()
-        this.townNameArmorstand = createArmorStand(this.world, this.loc)
-        this.progressArmorstand = createArmorStand(this.world, this.loc.clone().add(0.0, -0.25, 0.0))
+        this.display = createTextDisplay(this.world, this.loc)
+        this.lastLabel = ""
     }
 
-    public fun sendPackets() {
+    public fun update() {
         if (!this.world.isChunkLoaded(this.loc.chunk)) {
             return
         }
 
-        for (player in world.players) {
-            val playerChunk = player.location.chunk
-            val playerChunkX = playerChunk.x
-            val playerChunkZ = playerChunk.z
+        val remainingSeconds = (this.attack.attackTime - this.attack.progress) / 20
+        val minutes = remainingSeconds / 60
+        val seconds = remainingSeconds % 60
+        val timeText = "$minutes:${seconds.toString().padStart(2, '0')}"
 
-            if (playerChunkX < minViewChunkX ||
-                playerChunkX > maxViewChunkX ||
-                playerChunkZ < minViewChunkZ ||
-                playerChunkZ > maxViewChunkZ
-            ) {
-                continue
-            }
-
-            val label = townNametagViewedByPlayer(attack.town, player).dropLast(1)
-            val townNamePacket = this.townNameArmorstand.createArmorStandNamePacket(label)
-            player.sendPacket(townNamePacket)
-
-            val remainingSeconds = (attack.attackTime - attack.progress) / 20
-            val minutes = remainingSeconds / 60
-            val seconds = remainingSeconds % 60
-            val colorCode = townNametagViewedByPlayer(attack.town, player).take(2)
-            val formattedProgress = "$colorCode[$minutes:${seconds.toString().padStart(2, '0')}]"
-            val progressPacket = this.progressArmorstand.createArmorStandNamePacket(formattedProgress)
-            player.sendPacket(progressPacket)
+        val label = "${this.attack.town.name}|$timeText"
+        if (label == this.lastLabel) {
+            return
         }
+        this.lastLabel = label
+
+        this.display.text(
+            Component.text(this.attack.town.name, NamedTextColor.WHITE)
+                .append(Component.newline())
+                .append(Component.text("[$timeText]", NamedTextColor.GOLD)),
+        )
     }
 }
 
 internal val NODES_ARMORSTAND_KEY = NamespacedKey("nodes", "armorstand")
 
-private fun createArmorStand(
+private fun createTextDisplay(
     world: World,
     loc: Location,
-): ArmorStand {
-    val armorstand = world.spawn(loc, ArmorStand::class.java)
-    armorstand.isSmall = true
-    armorstand.setGravity(false)
-    armorstand.persistentDataContainer.set(NODES_ARMORSTAND_KEY, PersistentDataType.INTEGER, 0)
-    return armorstand
+): TextDisplay {
+    val display = world.spawn(loc, TextDisplay::class.java)
+    display.billboard = Display.Billboard.CENTER
+    display.alignment = TextDisplay.TextAlignment.CENTER
+    display.backgroundColor = Color.fromARGB(0, 0, 0, 0)
+    display.persistentDataContainer.set(NODES_ARMORSTAND_KEY, PersistentDataType.INTEGER, 0)
+    return display
 }
