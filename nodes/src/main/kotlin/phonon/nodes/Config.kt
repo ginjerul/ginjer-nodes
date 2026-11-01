@@ -358,7 +358,7 @@ public object Config {
 
     /**
      * Cooldown (ms) before joining a town in a different nation after leaving or being
-     * kicked from a town in a nation. Set in minutes in config.yml. <= 0 = disabled.
+     * kicked from a town in a nation. Set in config.yml as a duration string (2h, 2d, 30m). <= 0 = disabled.
      */
     public var nationJoinCooldown: Long = -1L
 
@@ -723,8 +723,13 @@ public object Config {
 
         Config.skullsGUIToggle = config.getInt("skullsGUIToggle", Config.skullsGUIToggle)
 
-        val joinCooldownMinutes = config.getLong("nationJoinCooldown", -1L)
-        Config.nationJoinCooldown = if (joinCooldownMinutes > 0L) joinCooldownMinutes * 60_000L else -1L
+        // duration string like "2h", "2d", "1d12h", "30m"; a plain number is minutes; -1/off = disabled
+        val joinCooldownRaw = config.getString("nationJoinCooldown", "-1") ?: "-1"
+        val joinCooldownMs = phonon.nodes.war.Warzone.parseDurationMs(joinCooldownRaw)
+        Config.nationJoinCooldown = if (joinCooldownMs != null && joinCooldownMs > 0L) joinCooldownMs else -1L
+        if (joinCooldownMs == null && joinCooldownRaw.trim().lowercase() !in listOf("-1", "0", "off", "false", "none", "")) {
+            Nodes.logger?.warning("config.yml: nationJoinCooldown \"$joinCooldownRaw\" is not a duration (use e.g. 2h, 2d, 1d12h, 30m). Cooldown disabled.")
+        }
 
         Config.allowDestructionDuringSkirmish = config.getBoolean("allowDestructionDuringSkirmish", Config.allowDestructionDuringSkirmish)
         Config.canLeaveTownDuringWar = config.getBoolean("canLeaveTownDuringWar", Config.canLeaveTownDuringWar)

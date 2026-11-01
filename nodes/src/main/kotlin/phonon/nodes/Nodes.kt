@@ -1753,8 +1753,16 @@ public object Nodes {
             val wait = nationJoinCooldownLeft(resident, nation)
             if (wait > 0L) {
                 if (player != null) {
-                    val mins = (wait + 59_999L) / 60_000L
-                    Message.error(player, "You left a nation recently and cannot join another nation's town for $mins more minute(s)")
+                    val totalMin = (wait + 59_999L) / 60_000L
+                    val d = totalMin / 1440
+                    val h = (totalMin % 1440) / 60
+                    val m = totalMin % 60
+                    val left = when {
+                        d > 0 -> "${d}d ${h}h"
+                        h > 0 -> "${h}h ${m}m"
+                        else -> "${m}m"
+                    }
+                    Message.error(player, "You left a nation recently and cannot join another nation's town for $left")
                 }
                 return false
             }
