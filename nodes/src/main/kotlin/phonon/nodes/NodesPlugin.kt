@@ -96,7 +96,7 @@ public class NodesPlugin : JavaPlugin() {
         Nodes.war.initialize(Config.flagMaterials)
 
         val pluginPath = Config.pathPlugin
-        ensureDefaultWorld()
+        ensureDefaultFiles()
         logger.info("Loading world from: $pluginPath")
         try {
             if (Nodes.loadWorld() == true) {
@@ -281,17 +281,26 @@ public class NodesPlugin : JavaPlugin() {
         }
     }
 
-    /** First start: write a default world.json (empty map, a basic resource node) so the editor and map have something to open. */
-    private fun ensureDefaultWorld() {
+    /** First start: write a default world.json (empty map, a basic resource node) and an empty towns.json, so the editor and map have something to open. */
+    private fun ensureDefaultFiles() {
         try {
-            val path = Config.pathWorld
-            if (java.nio.file.Files.exists(path)) return
-            val stream = this.getResource("world.json") ?: return
-            java.nio.file.Files.createDirectories(path.parent)
-            stream.use { java.nio.file.Files.copy(it, path) }
-            logger.info("No world.json found, created a default one at $path (empty map with a basic resource node). Draw territories with /nodesmap editor.")
+            val world = Config.pathWorld
+            if (!java.nio.file.Files.exists(world)) {
+                val stream = this.getResource("world.json")
+                if (stream != null) {
+                    java.nio.file.Files.createDirectories(world.parent)
+                    stream.use { java.nio.file.Files.copy(it, world) }
+                    logger.info("No world.json found, created a default one at $world (empty map with a basic resource node). Draw territories with /nodesmap editor.")
+                }
+            }
+            val towns = Config.pathTowns
+            if (!java.nio.file.Files.exists(towns)) {
+                java.nio.file.Files.createDirectories(towns.parent)
+                java.nio.file.Files.writeString(towns, "{\"meta\":{\"type\":\"towns\"},\"residents\":{},\"towns\":{},\"nations\":{}}")
+                logger.info("No towns.json found, created an empty one at $towns")
+            }
         } catch (e: Exception) {
-            logger.warning("Could not create default world.json: ${e.message}")
+            logger.warning("Could not create default world/towns files: ${e.message}")
         }
     }
 }
