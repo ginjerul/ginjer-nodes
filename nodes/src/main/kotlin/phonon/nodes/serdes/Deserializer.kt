@@ -78,6 +78,10 @@ public object Deserializer {
 
                 val townCreateCooldown: Long = resident.get("townCool")?.getAsLong() ?: 0L
 
+                val leftNationJson = resident.get("leftNation")
+                val leftNation: String? = if (leftNationJson != null && !leftNationJson.isJsonNull) leftNationJson.getAsString() else null
+                val leftNationAt: Long = resident.get("leftNationAt")?.getAsLong() ?: 0L
+
                 Nodes.loadResident(
                     UUID.fromString(uuid),
                     claims,
@@ -86,6 +90,8 @@ public object Deserializer {
                     suffix,
                     trusted,
                     townCreateCooldown,
+                    leftNation,
+                    leftNationAt,
                 )
             }
         }

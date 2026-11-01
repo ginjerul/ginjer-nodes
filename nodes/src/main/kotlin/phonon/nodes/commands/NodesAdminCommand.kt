@@ -1332,7 +1332,7 @@ public class NodesAdminCommand :
         }
 
         for (r in residents) {
-            Nodes.addResidentToTown(town, r)
+            Nodes.addResidentToTown(town, r, ignoreCooldown = true)
             Message.print(sender, "Added \"${r.name}\" to town \"${town.name}\"")
         }
     }

@@ -324,7 +324,7 @@ public object MapTownApi {
                 if (r.town === t) return "${r.name} is already in ${t.name}"
                 val from = r.town?.name
                 leaveTown(r)
-                if (!Nodes.addResidentToTown(t, r)) throw Fail("${r.name} can't join: the nation is at its player cap")
+                if (!Nodes.addResidentToTown(t, r, ignoreCooldown = true)) throw Fail("${r.name} can't join: the nation is at its player cap")
                 return "added ${r.name} to ${t.name}" + if (from != null) " (left $from)" else ""
             }
 

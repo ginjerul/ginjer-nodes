@@ -478,6 +478,14 @@ globalResources:
 
 ---
 
+### nationJoinCooldown
+
+**Type:** integer (minutes)  
+**Default:** `-1` (disabled)  
+**Description:** After a player leaves a town in a nation, or is kicked from one, they cannot join a town in a *different* nation for this many minutes. Rejoining their old nation is always allowed, and admin commands ignore the cooldown.
+
+---
+
 ### flagBeaconSize / flagBeaconMinSkyLevel / flagBeaconSkyLevel
 
 **Type:** integer  

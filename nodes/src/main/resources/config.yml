@@ -301,6 +301,10 @@ antiBlockGlitchDurationTicks: 60
 warPlayerWhiteList: false
 whitelistDenyCommand: "kick %player% Not on the war whitelist"
 
+# Minutes a player must wait after leaving (or being kicked from) a town in a nation
+# before joining a town in a different nation. -1 = no cooldown. Admin commands ignore it.
+nationJoinCooldown: -1
+
 # Skulls in the GUI: 0 = always, 1 = not during war, 2 = never
 skullsGUIToggle: 1
 

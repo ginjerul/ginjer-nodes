@@ -357,8 +357,8 @@ public object Config {
     public var skullsGUIToggle: Int = 1
 
     /**
-     * Cooldown (ms) before joining a town in a different nation after leave/kick.
-     * -1 = disabled.
+     * Cooldown (ms) before joining a town in a different nation after leaving or being
+     * kicked from a town in a nation. Set in minutes in config.yml. <= 0 = disabled.
      */
     public var nationJoinCooldown: Long = -1L
 
@@ -723,7 +723,8 @@ public object Config {
 
         Config.skullsGUIToggle = config.getInt("skullsGUIToggle", Config.skullsGUIToggle)
 
-        Config.nationJoinCooldown = config.getLong("nationJoinCooldown", Config.nationJoinCooldown)
+        val joinCooldownMinutes = config.getLong("nationJoinCooldown", -1L)
+        Config.nationJoinCooldown = if (joinCooldownMinutes > 0L) joinCooldownMinutes * 60_000L else -1L
 
         Config.allowDestructionDuringSkirmish = config.getBoolean("allowDestructionDuringSkirmish", Config.allowDestructionDuringSkirmish)
         Config.canLeaveTownDuringWar = config.getBoolean("canLeaveTownDuringWar", Config.canLeaveTownDuringWar)
@@ -761,13 +762,6 @@ public object Config {
         Config.discordRelayRaids = config.getBoolean("discordRelayRaids", Config.discordRelayRaids)
         Config.discordRelayWarzones = config.getBoolean("discordRelayWarzones", Config.discordRelayWarzones)
 
-        if (config.isString("nationJoinCooldown")) {
-            val raw = config.getString("nationJoinCooldown")
-            if (raw != null && raw.trim() == "-1") {
-                Config.nationJoinCooldown = -1L
-            } else {
-            }
-        }
     }
 }
 

@@ -885,6 +885,8 @@ public object Nodes {
         suffix: String,
         trusted: Boolean,
         townCreateCooldown: Long,
+        leftNation: String? = null,
+        leftNationAt: Long = 0L,
     ) {
         var playerName: String? = Bukkit.getPlayer(uuid)?.let { player ->
             player.name
@@ -907,6 +909,8 @@ public object Nodes {
         resident.needsUpdate()
 
         resident.townCreateCooldown = townCreateCooldown
+        resident.leftNation = leftNation
+        resident.leftNationAt = leftNationAt
 
         residents.put(uuid, resident)
     }
@@ -1720,9 +1724,41 @@ public object Nodes {
         return true
     }
 
-    public fun addResidentToTown(town: Town, resident: Resident): Boolean {
+    /**
+     * Remember that this resident left (or was kicked from) a town in a nation, so
+     * Config.nationJoinCooldown can stop them hopping straight into another nation.
+     */
+    public fun markResidentLeftNation(resident: Resident, town: Town) {
+        val nation = town.nation ?: return
+        resident.leftNation = nation.name
+        resident.leftNationAt = System.currentTimeMillis()
+        resident.needsUpdate()
+        Nodes.needsSave = true
+    }
+
+    /** Milliseconds left before this resident may join a town of [nation], 0 if allowed. */
+    public fun nationJoinCooldownLeft(resident: Resident, nation: Nation): Long {
+        val cooldown = Config.nationJoinCooldown
+        val left = resident.leftNation
+        if (cooldown <= 0L || left == null || left == nation.name) {
+            return 0L
+        }
+        return Math.max(0L, resident.leftNationAt + cooldown - System.currentTimeMillis())
+    }
+
+    public fun addResidentToTown(town: Town, resident: Resident, ignoreCooldown: Boolean = false): Boolean {
         val nation = town.nation
         val player = resident.player()
+        if (nation != null && !ignoreCooldown) {
+            val wait = nationJoinCooldownLeft(resident, nation)
+            if (wait > 0L) {
+                if (player != null) {
+                    val mins = (wait + 59_999L) / 60_000L
+                    Message.error(player, "You left a nation recently and cannot join another nation's town for $mins more minute(s)")
+                }
+                return false
+            }
+        }
         if (nation != null && player != null) {
             if (!RallyCap.canJoinNationTown(nation, player)) {
                 Message.error(player, RallyCap.denyMessage(nation))
