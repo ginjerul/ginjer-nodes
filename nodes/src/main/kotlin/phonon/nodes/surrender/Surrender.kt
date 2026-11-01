@@ -52,6 +52,15 @@ object Surrender {
         return "${town.name} can leave or surrender again in ${MiningTowers.formatDuration(left / 1000)}"
     }
 
+    /** Clears the surrender/leave cooldown of [town]; returns false if it had none. */
+    fun resetCooldown(town: Town): Boolean {
+        val had = readyAt.remove(town.uuid) != null
+        if (had) {
+            save()
+        }
+        return had
+    }
+
     private fun validate(town: Town, target: Nation): String? {
         if (Vassals.isVassal(town)) {
             return "Vassals cannot surrender"
