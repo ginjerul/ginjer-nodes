@@ -1,4 +1,4 @@
-version = "0.0.15"
+version = "0.1.0"
 
 val outputJarName = "nodes"
 

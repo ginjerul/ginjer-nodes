@@ -109,7 +109,7 @@ Set `web.enabled: false`, then serve `plugins/GinjerMap/web/` as static files. G
 
 ```
 cd ginjermap
-./gradlew build      # -> build/libs/ginjermap-0.3.0.jar
+./gradlew build      # -> build/libs/ginjermap-0.4.0.jar
 ```
 
 Like Nodes, it needs the Kotlin runtime plugin on the server.
