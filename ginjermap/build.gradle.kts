@@ -1,7 +1,7 @@
 version = "0.4.0"
 
 plugins {
-    id("org.jetbrains.kotlin.jvm") version "2.3.0-RC"
+    id("org.jetbrains.kotlin.jvm") version "2.3.0"
     id("com.gradleup.shadow") version "8.3.6"
 }
 

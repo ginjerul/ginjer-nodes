@@ -100,9 +100,9 @@ See `dynmap/README.md` for full instructions. Requirements: Node.js and Rust.
 |------|--------------------|
 | phonon | Original plugin author |
 | Jonathan | Coding + map painting |
-| Doneions | Coding + testing |
-| dmccoystephenson | Maintenance + development |
 | ginjer | development as documented above |
+| Doneions | Coding + testing |
+| dmccoystephenson | development (before detachment of fork) |
 
 ## License
 
