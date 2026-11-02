@@ -1,0 +1,616 @@
+package phonon.ginjermap
+
+import org.bukkit.Bukkit
+import org.bukkit.ChatColor
+import org.bukkit.World
+import org.bukkit.command.Command
+import org.bukkit.command.CommandSender
+import org.bukkit.entity.Player
+import org.bukkit.event.HandlerList
+import org.bukkit.plugin.java.JavaPlugin
+import net.kyori.adventure.text.Component
+import net.kyori.adventure.text.event.ClickEvent
+import net.kyori.adventure.text.format.NamedTextColor
+import phonon.ginjermap.editor.EditorApi
+import phonon.ginjermap.live.PlayerTracker
+import phonon.ginjermap.render.BlockColors
+import phonon.ginjermap.render.ChangeListener
+import phonon.ginjermap.render.RenderScheduler
+import phonon.ginjermap.render.RenderSettings
+import phonon.ginjermap.render.TileRenderer
+import phonon.ginjermap.web.WebServer
+import java.io.File
+import java.nio.file.Files
+import java.nio.file.Path
+import java.nio.file.StandardCopyOption
+import java.util.concurrent.ConcurrentLinkedDeque
+import java.util.jar.JarFile
+
+class GinjerMapPlugin : JavaPlugin() {
+    lateinit var cfg: MapConfig
+        private set
+    lateinit var webRoot: Path
+        private set
+    private lateinit var world: World
+
+    private var renderer: TileRenderer? = null
+    private var scheduler: RenderScheduler? = null
+    private var listener: ChangeListener? = null
+    private var web: WebServer? = null
+    private var players: PlayerTracker? = null
+    private var editor: EditorApi? = null
+
+    /** recently redrawn tiles, so open browsers can swap just those images */
+    private val tileUpdates = ConcurrentLinkedDeque<Pair<String, Long>>()
+
+    /**
+     * An existing config.yml never gets new options when the plugin updates. Copy every key
+     * the bundled config.yml has and the server's file lacks (with its comments), keeping
+     * everything the admin already set.
+     */
+    private fun addMissingConfigKeys() {
+        try {
+            val stream = getResource("config.yml") ?: return
+            val defaults = stream.use {
+                org.bukkit.configuration.file.YamlConfiguration.loadConfiguration(java.io.InputStreamReader(it, Charsets.UTF_8))
+            }
+            var added = 0
+            for (key in defaults.getKeys(true)) {
+                if (config.contains(key, true)) continue
+                if (defaults.isConfigurationSection(key)) {
+                    // new section: only carry its header comments over; its keys follow
+                    config.createSection(key)
+                } else {
+                    config.set(key, defaults.get(key))
+                    added++
+                }
+                config.setComments(key, defaults.getComments(key))
+                config.setInlineComments(key, defaults.getInlineComments(key))
+            }
+            if (added > 0) {
+                saveConfig()
+                logger.info("config.yml: added $added new option(s) from this version (existing values kept)")
+            }
+        } catch (e: Exception) {
+            logger.warning("Could not update config.yml with new options: ${e.message}")
+        }
+    }
+
+    /** The plugin used to be called NodesMap: move its folder (config, tiles, editor sessions) over once. */
+    private fun migrateOldFolder() {
+        try {
+            val old = File(dataFolder.parentFile, "NodesMap")
+            if (old.isDirectory && !dataFolder.exists()) {
+                if (old.renameTo(dataFolder)) logger.info("Moved the old plugins/NodesMap folder to plugins/${dataFolder.name}")
+            }
+        } catch (e: Exception) {
+            logger.warning("Could not move the old NodesMap folder: ${e.message}")
+        }
+    }
+
+    override fun onEnable() {
+        migrateOldFolder()
+        // anonymous usage statistics (bStats); servers can turn this off in plugins/bStats/config.yml
+        try {
+            org.bstats.bukkit.Metrics(this, 35082)
+        } catch (e: Throwable) {
+            logger.warning("Could not start bStats: $e")
+        }
+        saveDefaultConfig()
+        addMissingConfigKeys()
+        cfg = MapConfig.load(config)
+        webRoot = dataFolder.toPath().resolve("web").toAbsolutePath().normalize()
+        Files.createDirectories(webRoot.resolve("data").resolve("nodes"))
+
+        world = (if (cfg.world.isNotEmpty()) Bukkit.getWorld(cfg.world) else null) ?: Bukkit.getWorlds()[0]
+
+        extractViewer()
+        BlockColors.init()
+
+        val r = TileRenderer(webRoot.resolve("tiles").resolve(world.name), settingsOf(cfg), logger)
+        r.onTileWritten = { level, x, z ->
+            tileUpdates.addLast("$level/${x}_$z" to System.currentTimeMillis())
+            while (tileUpdates.size > 4000) tileUpdates.pollFirst()
+        }
+        r.start()
+        renderer = r
+
+        val s = RenderScheduler(this, world, r)
+        s.budgetNanos = cfg.snapshotBudgetNanos
+        s.concurrentLoads = cfg.fullRenderConcurrentLoads
+        s.readThreads = cfg.fullRenderThreads
+        s.start(cfg.batchSeconds)
+        scheduler = s
+
+        if (cfg.liveUpdates) {
+            listener = ChangeListener(s).also { server.pluginManager.registerEvents(it, this) }
+        }
+
+        if (cfg.webEnabled) {
+            try {
+                val ed = EditorApi(server, logger, cfg.editorSessionMinutes, java.io.File(dataFolder, "editor-sessions.json"))
+                editor = ed
+                ed.shardsGet = { onMainThread { shardsGetJson() } }
+                ed.shardsSet = { body -> onMainThread { shardsSetJson(body) } }
+                web = WebServer(webRoot, cfg.webBind, cfg.webPort, cfg.webThreads, logger).also {
+                    it.api = { req ->
+                        if (req.path.startsWith("/api/editor/") && cfg.editorEnabled) {
+                            ed.handle(req)
+                        } else {
+                            WebServer.ApiResponse(404, "{\"error\":\"not found\"}")
+                        }
+                    }
+                    it.start()
+                }
+            } catch (e: Exception) {
+                logger.severe("could not start web server on ${cfg.webBind}:${cfg.webPort}: $e")
+            }
+        }
+        publishMapInfo()
+
+        players = PlayerTracker(
+            this,
+            world,
+            { json -> web?.put("/data/players.json", json) },
+            if (web == null) webRoot.resolve("data").resolve("players.json") else null,
+        ).also { it.start(cfg) }
+
+        server.scheduler.runTaskTimerAsynchronously(this, Runnable { publishTileUpdates() }, 100L, 100L)
+
+        logger.info("rendering world '${world.name}'. Run /ginjermap fullrender once to draw the whole map.")
+    }
+
+    override fun onDisable() {
+        players?.stop()
+        scheduler?.stop()
+        listener?.let { HandlerList.unregisterAll(it) }
+        web?.stop()
+        renderer?.shutdown()
+    }
+
+    private fun settingsOf(c: MapConfig) = RenderSettings(c.shading, c.waterDepth, c.chunkGrid, c.zoomOutLevels)
+
+    /** Runs on the server thread (config and map info live there) and waits for the result. */
+    private fun <T> onMainThread(block: () -> T): T =
+        server.scheduler.callSyncMethod(this, java.util.concurrent.Callable { block() }).get(10, java.util.concurrent.TimeUnit.SECONDS)
+
+    private fun shardsGetJson(): String =
+        com.google.gson.Gson().toJson(mapOf("regions" to config.getMapList("shards.regions")))
+
+    /** JSON from the editor -> plain maps/lists for config.yml (whole numbers stay whole) */
+    private fun jsonToConfigValue(el: com.google.gson.JsonElement): Any? = when {
+        el.isJsonNull -> null
+        el.isJsonArray -> el.asJsonArray.map { jsonToConfigValue(it) }
+        el.isJsonObject -> el.asJsonObject.entrySet().associate { it.key to jsonToConfigValue(it.value) }
+        el.asJsonPrimitive.isBoolean -> el.asBoolean
+        el.asJsonPrimitive.isNumber -> el.asDouble.let { d -> if (d == Math.rint(d) && Math.abs(d) < 1e12) d.toLong() else d }
+        else -> el.asString
+    }
+
+    private fun shardsSetJson(body: String): String {
+        return try {
+            val regions = com.google.gson.JsonParser.parseString(body).asJsonObject.getAsJsonArray("regions")
+            val out = ArrayList<Any?>()
+            for ((i, el) in regions.withIndex()) {
+                val m = jsonToConfigValue(el) as? Map<*, *> ?: return shardError("Region ${i + 1} isn't valid")
+                try {
+                    MapConfig.parseShard(m)
+                } catch (e: Exception) {
+                    return shardError("Region ${i + 1} (${m["server"]}) isn't valid: ${e.message ?: "bad shape"}")
+                }
+                out.add(m)
+            }
+            config.set("shards.regions", out)
+            saveConfig()
+            cfg = MapConfig.load(config)
+            publishMapInfo()
+            "{\"ok\":true,\"count\":${out.size}}"
+        } catch (e: Exception) {
+            shardError("Couldn't read the regions: ${e.message}")
+        }
+    }
+
+    private fun shardError(msg: String) = "{\"error\":${jsonStr(msg)}}"
+
+    /** Region outlines for the "Server borders" layer, as [{"server":..,"points":[[x,z],..]},..] */
+    private fun shardsJson(): String {
+        val sb = StringBuilder("[")
+        for ((n, sh) in cfg.shards.withIndex()) {
+            if (n > 0) sb.append(',')
+            sb.append("{\"server\":").append(jsonStr(sh.server)).append(",\"points\":[")
+            for (i in sh.xs.indices) {
+                if (i > 0) sb.append(',')
+                sb.append('[').append(String.format(java.util.Locale.ROOT, "%.1f", sh.xs[i]))
+                    .append(',').append(String.format(java.util.Locale.ROOT, "%.1f", sh.zs[i])).append(']')
+            }
+            sb.append("]}")
+        }
+        return sb.append(']').toString()
+    }
+
+    /** /data/map.json: everything the viewer needs to set itself up */
+    private fun publishMapInfo() {
+        val spawn = world.spawnLocation
+        val nodes = server.pluginManager.getPlugin("nodes") != null
+        val json = """{"title":${jsonStr(cfg.title)},"world":${jsonStr(world.name)},""" +
+            """"tileSize":${TileRenderer.TILE},"zoomOutLevels":${cfg.zoomOutLevels},""" +
+            """"spawn":{"x":${spawn.blockX},"z":${spawn.blockZ}},"nodes":$nodes,"players":${cfg.playersShow},""" +
+            """"shards":${shardsJson()},""" +
+            """"version":${jsonStr(description.version)}}"""
+        web?.put("/data/map.json", json)
+        try {
+            Files.writeString(webRoot.resolve("data").resolve("map.json"), json)
+        } catch (_: Exception) {}
+    }
+
+    private fun publishTileUpdates() {
+        val now = System.currentTimeMillis()
+        val cutoff = now - 10 * 60_000L
+        while (true) {
+            val first = tileUpdates.peekFirst() ?: break
+            if (first.second >= cutoff) break
+            tileUpdates.pollFirst()
+        }
+        val sb = StringBuilder("{\"now\":").append(now)
+        scheduler?.fullRenderProgress()?.let { p ->
+            sb.append(",\"render\":{\"done\":").append(p.done).append(",\"total\":").append(p.total).append('}')
+        }
+        sb.append(",\"updates\":[")
+        var first = true
+        for ((k, t) in tileUpdates) {
+            if (!first) sb.append(',')
+            first = false
+            sb.append("[\"").append(k).append("\",").append(t).append(']')
+        }
+        sb.append("]}")
+        val json = sb.toString()
+        web?.put("/data/tiles.json", json)
+        if (web == null) {
+            try {
+                Files.writeString(webRoot.resolve("data").resolve("tiles.json"), json)
+            } catch (_: Exception) {}
+        }
+    }
+
+    private fun jsonStr(s: String) = "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+
+    /**
+     * Copy the bundled viewer (resources/web/...) into plugins/GinjerMap/web.
+     *
+     * Files are refreshed whenever their contents in the jar change (a fingerprint
+     * of every file's checksum), not just when the version number changes, and any
+     * missing file is always restored. With web.update-viewer: false, existing files
+     * are left alone (for customised viewers) but missing ones are still added.
+     */
+    private fun extractViewer() {
+        val marker = webRoot.resolve(".viewer-version")
+        val installed = try {
+            Files.readString(marker).trim()
+        } catch (_: Exception) {
+            ""
+        }
+
+        JarFile(file).use { jar ->
+            val entries = jar.entries().toList().filter { !it.isDirectory && it.name.startsWith("web/") }.sortedBy { it.name }
+            val crc = java.util.zip.CRC32()
+            for (e in entries) {
+                crc.update(e.name.toByteArray())
+                crc.update(e.crc.toString().toByteArray())
+            }
+            val fingerprint = "${description.version}-${crc.value.toString(36)}"
+            val refreshAll = installed != fingerprint && (installed.isEmpty() || cfg.updateViewer)
+
+            var written = 0
+            for (entry in entries) {
+                val target = webRoot.resolve(entry.name.removePrefix("web/")).normalize()
+                if (!target.startsWith(webRoot)) continue
+                if (!refreshAll && Files.exists(target)) continue
+                Files.createDirectories(target.parent)
+                jar.getInputStream(entry).use { Files.copy(it, target, StandardCopyOption.REPLACE_EXISTING) }
+                written++
+            }
+            if (refreshAll) Files.writeString(marker, fingerprint)
+            if (written > 0) logger.info("installed $written viewer file(s) (${description.version})")
+        }
+    }
+
+    // ------------------------------------------------------------------
+
+    // ------------------------------------------------------------------
+    // messages: same look as Nodes' own commands (aqua text, white descriptions, red errors)
+
+    private fun msg(sender: CommandSender, text: String) = sender.sendMessage("${ChatColor.AQUA}$text")
+
+    private fun err(sender: CommandSender, text: String) = sender.sendMessage("${ChatColor.RED}$text")
+
+    private fun line(sender: CommandSender, label: String, value: String) = msg(sender, "$label${ChatColor.WHITE}: $value")
+
+    private fun mapUrl(): String = cfg.publicUrl.ifEmpty {
+        val host = server.ip.ifEmpty { "localhost" }.let { if (it == "0.0.0.0") "localhost" else it }
+        "http://$host:${cfg.webPort}"
+    }
+
+    private fun printHelp(sender: CommandSender) {
+        msg(sender, "${ChatColor.BOLD}[Nodes] Map commands:")
+        if (sender.hasPermission("ginjermap.link")) line(sender, "/ginjermap link", "Get a link to the web map")
+        if (sender.hasPermission("ginjermap.editor")) line(sender, "/ginjermap editor", "Open the map editor: /ginjermap editor [time like 2h] [true|false = survive restarts] (\"revoke\" to log out)")
+        if (sender.hasPermission("ginjermap.admin")) {
+            line(sender, "/ginjermap status", "Render queue, progress and web address")
+            line(sender, "/ginjermap fullrender [radius]", "Draw every generated chunk (or within radius chunks of you)")
+            line(sender, "/ginjermap render [radius]", "Redraw the loaded chunks around you")
+            line(sender, "/ginjermap cancel", "Stop all pending renders")
+            line(sender, "/ginjermap players [on|off]", "Show or hide players on the web map (now ${if (cfg.playersShow) "on" else "off"})")
+            line(sender, "/ginjermap reload", "Reload config.yml")
+        }
+    }
+
+    override fun onCommand(sender: CommandSender, command: Command, label: String, args: Array<out String>): Boolean {
+        val s = scheduler ?: return true
+        val r = renderer ?: return true
+        val sub = args.getOrNull(0)?.lowercase() ?: "help"
+        val adminOnly = setOf("status", "fullrender", "render", "cancel", "players", "reload")
+        if (sub in adminOnly && !sender.hasPermission("ginjermap.admin")) {
+            err(sender, "You don't have permission to use \"/ginjermap $sub\"")
+            return true
+        }
+        when (sub) {
+            "help" -> printHelp(sender)
+            "link", "url" -> {
+                if (!sender.hasPermission("ginjermap.link")) {
+                    err(sender, "You don't have permission to use \"/ginjermap link\"")
+                    return true
+                }
+                if (web == null && cfg.publicUrl.isEmpty()) {
+                    err(sender, "[Nodes] The web map isn't running on this server")
+                    return true
+                }
+                val url = mapUrl() + "/"
+                if (sender is Player) {
+                    sender.sendMessage(
+                        Component.text("[Nodes] Web map: ", NamedTextColor.AQUA)
+                            .append(Component.text(url, NamedTextColor.WHITE).clickEvent(ClickEvent.openUrl(url))),
+                    )
+                } else {
+                    msg(sender, "[Nodes] Web map: ${ChatColor.WHITE}$url")
+                }
+            }
+            "editor" -> editorCommand(sender, args)
+            "status" -> {
+                msg(sender, "${ChatColor.BOLD}[Nodes] Map status:")
+                line(sender, "World", world.name)
+                line(sender, "Web map", if (web != null) mapUrl() + "/" else "off (serving plugins/GinjerMap/web yourself)")
+                line(sender, "Players on map", if (cfg.playersShow) "shown" else "hidden")
+                line(sender, "Full render", s.fullRenderProgress()?.let { progressText(it) } ?: "not running")
+                line(sender, "Server loading", "${s.pendingCount} chunks (${s.dirtyCount} more changed, next batch)")
+                line(sender, "Renderer", "${r.queued} queued, ${r.chunksRendered.get()} chunks drawn, ${r.tilesWritten.get()} tiles written")
+            }
+            "fullrender" -> {
+                val radius = args.getOrNull(1)?.toIntOrNull()
+                val p = sender as? Player
+                val cx = if (radius != null && p != null) p.location.blockX shr 4 else null
+                val cz = if (radius != null && p != null) p.location.blockZ shr 4 else null
+                msg(sender, "[Nodes] Map: reading region files...")
+                var reporter: org.bukkit.scheduler.BukkitTask? = null
+                s.fullRender(
+                    cx,
+                    cz,
+                    radius,
+                    started = { n ->
+                        if (n < 0) {
+                            err(sender, "[Nodes] A full render is already running. Use \"/ginjermap status\" to watch it or \"/ginjermap cancel\" to stop it")
+                        } else {
+                            msg(sender, "[Nodes] Map: drawing ${ChatColor.WHITE}%,d${ChatColor.AQUA} chunks in the background, progress every 10s".format(n))
+                            reporter = server.scheduler.runTaskTimer(
+                                this,
+                                Runnable {
+                                    val pr = s.fullRenderProgress() ?: return@Runnable
+                                    val text = "[Nodes] Map render ${progressText(pr)}"
+                                    if (sender is Player) {
+                                        if (sender.isOnline) sender.sendActionBar(Component.text(text, NamedTextColor.AQUA))
+                                    } else {
+                                        msg(sender, text)
+                                    }
+                                },
+                                200L,
+                                200L,
+                            )
+                        }
+                    },
+                    finished = { pr, cancelled ->
+                        reporter?.cancel()
+                        val secs = pr.elapsedMs / 1000
+                        val diskDone = pr.done - pr.fallback - pr.reasons.filterKeys { it.startsWith("skipped") }.values.sum()
+                        // "drawn anyway" entries are informational: those chunks are in diskDone
+                        val head = if (cancelled) {
+                            "[Nodes] Map render cancelled after %,d chunks".format(pr.done)
+                        } else {
+                            "[Nodes] Map: drew %,d chunks from disk in ${secs / 60}m ${secs % 60}s".format(diskDone)
+                        }
+                        val notify = { text: String ->
+                            logger.info(text.removePrefix("[Nodes] "))
+                            if (sender is Player && sender.isOnline) msg(sender, text)
+                        }
+                        notify(head)
+                        for ((reason, n) in pr.reasons.entries.sortedByDescending { it.value }) {
+                            notify("  %,d chunks ${reason}".format(n))
+                        }
+                        if (!cancelled && pr.fallback > 0) {
+                            notify("[Nodes] Map: the server is now loading %,d chunks it couldn't read from disk. This is slower; progress every 10s".format(pr.fallback))
+                            if (pr.reasons.keys.any { it.contains("1.18") || it.contains("old chunk format") }) {
+                                notify("[Nodes] Tip: your world has chunks saved in a pre-1.18 format. Starting the server once with --forceUpgrade converts them all, so future renders are fast")
+                            }
+                            // follow the server-side loads until they're all drawn
+                            var tracker: org.bukkit.scheduler.BukkitTask? = null
+                            tracker = server.scheduler.runTaskTimer(
+                                this,
+                                Runnable {
+                                    val left = s.pendingCount
+                                    if (left == 0 && r.queued == 0) {
+                                        tracker?.cancel()
+                                        notify("[Nodes] Map render finished: the server loaded the remaining chunks")
+                                    } else if (sender is Player && sender.isOnline) {
+                                        sender.sendActionBar(Component.text("[Nodes] Map: server loading chunks, %,d left".format(left), NamedTextColor.AQUA))
+                                    } else if (sender !is Player) {
+                                        msg(sender, "[Nodes] Map: server loading chunks, %,d left".format(left))
+                                    }
+                                },
+                                200L,
+                                200L,
+                            )
+                        } else if (!cancelled) {
+                            notify("[Nodes] Map render finished")
+                        }
+                    },
+                )
+            }
+            "render" -> {
+                val p = sender as? Player ?: run {
+                    err(sender, "\"/ginjermap render\" must be run in game")
+                    return true
+                }
+                val radius = (args.getOrNull(1)?.toIntOrNull() ?: 8).coerceIn(1, 64)
+                val n = s.renderLoadedAround(p.location.blockX shr 4, p.location.blockZ shr 4, radius)
+                msg(sender, "[Nodes] Map: redrawing ${ChatColor.WHITE}$n${ChatColor.AQUA} loaded chunks around you")
+            }
+            "players" -> {
+                val show = when (args.getOrNull(1)?.lowercase()) {
+                    "on", "show", "true" -> true
+                    "off", "hide", "false" -> false
+                    null -> !cfg.playersShow
+                    else -> {
+                        err(sender, "Usage: /ginjermap players [on|off]")
+                        return true
+                    }
+                }
+                config.set("players.show", show)
+                saveConfig()
+                cfg = MapConfig.load(config)
+                players?.start(cfg)
+                publishMapInfo()
+                msg(sender, "[Nodes] Players are now ${ChatColor.WHITE}${if (show) "shown" else "hidden"}${ChatColor.AQUA} on the web map")
+            }
+            "cancel" -> {
+                s.cancelAll()
+                msg(sender, "[Nodes] Map: cancelled all pending renders")
+            }
+            "reload" -> {
+                reloadConfig()
+                addMissingConfigKeys()
+                cfg = MapConfig.load(config)
+                r.settings = settingsOf(cfg)
+                s.budgetNanos = cfg.snapshotBudgetNanos
+                s.concurrentLoads = cfg.fullRenderConcurrentLoads
+                s.readThreads = cfg.fullRenderThreads
+                s.restartBatch(cfg.batchSeconds)
+                players?.start(cfg)
+                editor?.sessionMinutes = cfg.editorSessionMinutes
+                editor?.resetBridge()
+                publishMapInfo()
+                msg(sender, "[Nodes] Reloaded map config (web server and world changes need a restart)")
+            }
+            else -> err(sender, "Invalid command, use \"/ginjermap help\"")
+        }
+        return true
+    }
+
+    private fun progressText(p: RenderScheduler.Progress): String {
+        if (p.total <= 0) return "counting chunks..."
+        val pct = p.done * 100 / p.total
+        val rate = if (p.elapsedMs > 0) p.done * 1000L / p.elapsedMs else 0
+        val left = if (rate > 0) (p.total - p.done) / rate else -1
+        val eta = when {
+            left < 0 -> ""
+            left < 60 -> ", under a minute left"
+            else -> ", about ${(left + 59) / 60} min left"
+        }
+        return "%d%% (%,d / %,d chunks, %,d/s%s)".format(pct, p.done, p.total, rate, eta)
+    }
+
+    /** "2h", "90m", "1h30m", "2d" -> minutes (1 minute to 7 days); null if invalid. A unit is required. */
+    private fun parseEditorDuration(text: String): Int? {
+        val m = Regex("^(?:(\\d+)d)?(?:(\\d+)h)?(?:(\\d+)m)?$", RegexOption.IGNORE_CASE).matchEntire(text) ?: return null
+        if (m.groupValues.drop(1).all { it.isEmpty() }) return null
+        val d = m.groupValues[1].toLongOrNull() ?: 0L
+        val h = m.groupValues[2].toLongOrNull() ?: 0L
+        val min = m.groupValues[3].toLongOrNull() ?: 0L
+        val total = d * 1440 + h * 60 + min
+        return if (total in 1..7 * 24 * 60) total.toInt() else null
+    }
+
+    private fun formatMinutes(total: Int): String {
+        val d = total / 1440
+        val h = total % 1440 / 60
+        val m = total % 60
+        return listOfNotNull(
+            if (d > 0) "${d}d" else null,
+            if (h > 0) "${h}h" else null,
+            if (m > 0) "${m}m" else null,
+        ).joinToString(" ")
+    }
+
+    private fun editorCommand(sender: CommandSender, args: Array<out String>) {
+        if (!sender.hasPermission("ginjermap.editor")) {
+            err(sender, "You don't have permission to use \"/ginjermap editor\"")
+            return
+        }
+        val ed = editor
+        if (ed == null || !cfg.editorEnabled) {
+            err(sender, "[Nodes] The map editor is turned off (needs web.enabled and editor.enabled in GinjerMap's config)")
+            return
+        }
+        if (args.getOrNull(1)?.lowercase() == "revoke") {
+            val all = args.getOrNull(2)?.lowercase() == "all" && sender.hasPermission("ginjermap.admin")
+            val n = ed.revoke(if (all) null else sender.name)
+            msg(sender, "[Nodes] Ended ${ChatColor.WHITE}$n${ChatColor.AQUA} map editor session(s)")
+            return
+        }
+        var minutes = cfg.editorSessionMinutes
+        var persist = false
+        for (a in args.drop(1)) {
+            val flag = when (a.lowercase()) {
+                "true", "yes", "persist" -> true
+                "false", "no" -> false
+                else -> null
+            }
+            if (flag != null) {
+                persist = flag
+                continue
+            }
+            minutes = parseEditorDuration(a) ?: run {
+                err(sender, "Invalid time \"$a\". Use a time with a unit like 2h, 90m, 1h30m or 2d (max 7d), and true/false to keep the login across restarts")
+                return
+            }
+        }
+        val token = ed.createSession(sender.name, (sender as? Player)?.uniqueId, minutes, persist, shards = sender.hasPermission("ginjermap.shards"))
+        val url = "${mapUrl()}/editor.html#token=$token"
+        val restartNote = if (persist) "survives restarts" else "ends on restart"
+        msg(sender, "[Nodes] Map editor link (valid ${formatMinutes(minutes)}, $restartNote, don't share it):")
+        if (sender is Player) {
+            sender.sendMessage(
+                Component.text("[Open map editor]", NamedTextColor.GREEN)
+                    .clickEvent(ClickEvent.openUrl(url))
+                    .append(Component.text("  or click the link below to copy it", NamedTextColor.GRAY)),
+            )
+            sender.sendMessage(Component.text(url, NamedTextColor.GRAY).clickEvent(ClickEvent.copyToClipboard(url)))
+        } else {
+            sender.sendMessage(url)
+        }
+        line(sender, "/ginjermap editor revoke", "Log out of the editor early")
+    }
+
+    override fun onTabComplete(sender: CommandSender, command: Command, alias: String, args: Array<out String>): List<String> {
+        if (args.size == 1) {
+            val opts = arrayListOf("help")
+            if (sender.hasPermission("ginjermap.link")) opts += "link"
+            if (sender.hasPermission("ginjermap.editor")) opts += "editor"
+            if (sender.hasPermission("ginjermap.admin")) opts += listOf("status", "fullrender", "render", "cancel", "players", "reload")
+            return opts.filter { it.startsWith(args[0].lowercase()) }
+        }
+        if (args.size >= 2 && args[0].equals("editor", true)) {
+            val opts = if (args.size == 2) listOf("revoke", "30m", "2h", "6h", "12h", "1d", "true", "false") else listOf("true", "false")
+            return opts.filter { it.startsWith(args.last().lowercase()) }
+        }
+        if (args.size == 2 && args[0].equals("players", true)) return listOf("on", "off").filter { it.startsWith(args[1].lowercase()) }
+        return emptyList()
+    }
+}

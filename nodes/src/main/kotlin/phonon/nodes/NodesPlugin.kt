@@ -80,6 +80,13 @@ public class NodesPlugin : JavaPlugin() {
     override fun onEnable() {
         val timeStart = System.currentTimeMillis()
 
+        // anonymous usage statistics (bStats); servers can turn this off in plugins/bStats/config.yml
+        try {
+            org.bstats.bukkit.Metrics(this, 35059)
+        } catch (e: Throwable) {
+            this.getLogger().warning("Could not start bStats: $e")
+        }
+
         val logger = this.getLogger()
         val pluginManager = this.getServer().getPluginManager()
 
@@ -96,6 +103,7 @@ public class NodesPlugin : JavaPlugin() {
         Nodes.war.initialize(Config.flagMaterials)
 
         val pluginPath = Config.pathPlugin
+        ensureDefaultFiles()
         logger.info("Loading world from: $pluginPath")
         try {
             if (Nodes.loadWorld() == true) {
@@ -232,6 +240,18 @@ public class NodesPlugin : JavaPlugin() {
         Surrender.load()
         Fortifications.load()
 
+        // web map export (after every system above has loaded its state)
+        phonon.nodes.map.MapExporter.start(this)
+
+        // a timed war keeps counting down across restarts (boss bar + auto end)
+        server.scheduler.runTask(
+            this,
+            Runnable {
+                phonon.nodes.stats.WarStats.load()
+                phonon.nodes.war.WarTimer.restore()
+            },
+        )
+
         val timeEnd = System.currentTimeMillis()
         val timeLoad = timeEnd - timeStart
         logger.info("Enabled in ${timeLoad}ms")
@@ -241,11 +261,13 @@ public class NodesPlugin : JavaPlugin() {
 
     override fun onDisable() {
         logger.info("ginjer is the goat but disabled")
+        phonon.nodes.map.MapExporter.stop()
         Warzone.shutdown()
         Raid.shutdown()
         MiningBoost.shutdown()
         MiningTowers.shutdown()
         PlayerStats.shutdown()
+        phonon.nodes.stats.WarStats.shutdown()
         Refineries.shutdown()
         Plots.shutdown()
         RallyCap.save()
@@ -263,6 +285,29 @@ public class NodesPlugin : JavaPlugin() {
         if (Nodes.initialized) {
             Nodes.saveWorld(checkIfNeedsSave = false, async = false)
             Nodes.saveTruce(async = false)
+        }
+    }
+
+    /** First start: write a default world.json (empty map, a basic resource node) and an empty towns.json, so the editor and map have something to open. */
+    private fun ensureDefaultFiles() {
+        try {
+            val world = Config.pathWorld
+            if (!java.nio.file.Files.exists(world)) {
+                val stream = this.getResource("world.json")
+                if (stream != null) {
+                    java.nio.file.Files.createDirectories(world.parent)
+                    stream.use { java.nio.file.Files.copy(it, world) }
+                    logger.info("No world.json found, created a default one at $world (empty map with a basic resource node). Draw territories with /ginjermap editor.")
+                }
+            }
+            val towns = Config.pathTowns
+            if (!java.nio.file.Files.exists(towns)) {
+                java.nio.file.Files.createDirectories(towns.parent)
+                java.nio.file.Files.writeString(towns, "{\"meta\":{\"type\":\"towns\"},\"residents\":{},\"towns\":{},\"nations\":{}}")
+                logger.info("No towns.json found, created an empty one at $towns")
+            }
+        } catch (e: Exception) {
+            logger.warning("Could not create default world/towns files: ${e.message}")
         }
     }
 }

@@ -1,0 +1,32 @@
+{
+  "meta": {
+    "type": "world"
+  },
+  "nodes": {
+    "basic": {
+      "icon": "iron_pickaxe",
+      "cost": {
+        "constant": 0,
+        "scale": 1.0
+      },
+      "priority": 0,
+      "income": {
+        "coal": 2,
+        "copper_ingot": 2,
+        "iron_ingot": 1,
+        "gold_ingot": 0.5,
+        "diamond": 0.2
+      },
+      "ore": {
+        "coal": 0.01,
+        "raw_copper": 0.01,
+        "raw_iron": 0.008,
+        "raw_gold": 0.004,
+        "diamond": 0.001
+      },
+      "crops": {},
+      "animals": {}
+    }
+  },
+  "territories": {}
+}

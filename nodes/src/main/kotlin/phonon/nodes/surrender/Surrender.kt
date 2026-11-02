@@ -52,6 +52,15 @@ object Surrender {
         return "${town.name} can leave or surrender again in ${MiningTowers.formatDuration(left / 1000)}"
     }
 
+    /** Clears the surrender/leave cooldown of [town]; returns false if it had none. */
+    fun resetCooldown(town: Town): Boolean {
+        val had = readyAt.remove(town.uuid) != null
+        if (had) {
+            save()
+        }
+        return had
+    }
+
     private fun validate(town: Town, target: Nation): String? {
         if (Vassals.isVassal(town)) {
             return "Vassals cannot surrender"
@@ -70,7 +79,7 @@ object Surrender {
         Message.print(
             player,
             "${town.name} will join ${target.name}. Territories, income and claims stay. " +
-                "Wars with ${target.name} end. Cooldown: 1 day.",
+                "You inherit ${target.name}'s wars and alliances, as if invited. Cooldown: 1 day.",
         )
         player.sendMessage(
             Component.text("[Confirm]", NamedTextColor.GREEN)
@@ -107,10 +116,6 @@ object Surrender {
 
         val oldNation = town.nation
 
-        // wars and alliances with towns outside both nations are kept
-        val keepEnemies = town.enemies.filter { it.nation !== target && it.nation !== oldNation }
-        val keepAllies = town.allies.filter { it.nation !== target && it.nation !== oldNation }
-
         if (oldNation != null) {
             if (oldNation.capital === town) {
                 val newCapital = oldNation.towns.filter { it !== town }.maxByOrNull { it.territories.size }
@@ -124,17 +129,6 @@ object Surrender {
         val joined = Nodes.addTownToNation(target, town)
         if (joined.isFailure) {
             return "Could not join ${target.name}: ${joined.exceptionOrNull()?.message}"
-        }
-
-        for (enemy in keepEnemies) {
-            town.enemies.add(enemy)
-            enemy.enemies.add(town)
-            enemy.needsUpdate()
-        }
-        for (ally in keepAllies) {
-            town.allies.add(ally)
-            ally.allies.add(town)
-            ally.needsUpdate()
         }
 
         town.needsUpdate()

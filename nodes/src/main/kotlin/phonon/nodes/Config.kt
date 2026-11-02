@@ -55,6 +55,15 @@ public object Config {
 
     public var dynmapCopyTowns: Boolean = false
 
+    // GinjerMap web map export (see ginjermap/ in the repo)
+    public var mapExportEnabled: Boolean = true
+    public var mapExportAlways: Boolean = false // export even if GinjerMap isn't installed (external web server)
+    public var mapExportPath: String = "plugins/GinjerMap/web/data/nodes"
+    public var mapExportStatePeriodTicks: Long = 100L
+    public var mapExportLivePeriodTicks: Long = 40L
+    public var mapExportSupplyLines: Boolean = true
+    public var mapExportResourceDetails: Boolean = true // resource income/ore/etc. on the public map
+
     // ===================================
     // nametag configs
     // ===================================
@@ -348,8 +357,8 @@ public object Config {
     public var skullsGUIToggle: Int = 1
 
     /**
-     * Cooldown (ms) before joining a town in a different nation after leave/kick.
-     * -1 = disabled.
+     * Cooldown (ms) before joining a town in a different nation after leaving or being
+     * kicked from a town in a nation. Set in config.yml as a duration string (2h, 2d, 30m). <= 0 = disabled.
      */
     public var nationJoinCooldown: Long = -1L
 
@@ -482,6 +491,19 @@ public object Config {
         Config.nametagUpdatePeriod = config.getLong("nametagUpdatePeriod", Config.nametagUpdatePeriod)
         Config.nametagPipelineTicks = config.getInt("nametagPipelineTicks", Config.nametagPipelineTicks)
         Config.dynmapCopyTowns = config.getBoolean("dynmapCopyTowns", Config.dynmapCopyTowns)
+
+        val mapExportSec = config.getConfigurationSection("mapExport")
+        if (mapExportSec != null) {
+            Config.mapExportEnabled = mapExportSec.getBoolean("enabled", Config.mapExportEnabled)
+            Config.mapExportAlways = mapExportSec.getBoolean("always", Config.mapExportAlways)
+            Config.mapExportPath = mapExportSec.getString("path", Config.mapExportPath) ?: Config.mapExportPath
+            // the map plugin used to be called NodesMap
+            if (Config.mapExportPath == "plugins/NodesMap/web/data/nodes") Config.mapExportPath = "plugins/GinjerMap/web/data/nodes"
+            Config.mapExportStatePeriodTicks = mapExportSec.getLong("statePeriodTicks", Config.mapExportStatePeriodTicks).coerceIn(20L, 12000L)
+            Config.mapExportLivePeriodTicks = mapExportSec.getLong("livePeriodTicks", Config.mapExportLivePeriodTicks).coerceIn(10L, 1200L)
+            Config.mapExportSupplyLines = mapExportSec.getBoolean("supplyLines", Config.mapExportSupplyLines)
+            Config.mapExportResourceDetails = mapExportSec.getBoolean("resourceDetails", Config.mapExportResourceDetails)
+        }
 
         Config.useNametags = config.getBoolean("useNametags", Config.useNametags)
 
@@ -703,7 +725,13 @@ public object Config {
 
         Config.skullsGUIToggle = config.getInt("skullsGUIToggle", Config.skullsGUIToggle)
 
-        Config.nationJoinCooldown = config.getLong("nationJoinCooldown", Config.nationJoinCooldown)
+        // duration string like "2h", "2d", "1d12h", "30m"; a plain number is minutes; -1/off = disabled
+        val joinCooldownRaw = config.getString("nationJoinCooldown", "-1") ?: "-1"
+        val joinCooldownMs = phonon.nodes.war.Warzone.parseDurationMs(joinCooldownRaw)
+        Config.nationJoinCooldown = if (joinCooldownMs != null && joinCooldownMs > 0L) joinCooldownMs else -1L
+        if (joinCooldownMs == null && joinCooldownRaw.trim().lowercase() !in listOf("-1", "0", "off", "false", "none", "")) {
+            Nodes.logger?.warning("config.yml: nationJoinCooldown \"$joinCooldownRaw\" is not a duration (use e.g. 2h, 2d, 1d12h, 30m). Cooldown disabled.")
+        }
 
         Config.allowDestructionDuringSkirmish = config.getBoolean("allowDestructionDuringSkirmish", Config.allowDestructionDuringSkirmish)
         Config.canLeaveTownDuringWar = config.getBoolean("canLeaveTownDuringWar", Config.canLeaveTownDuringWar)
@@ -740,14 +768,6 @@ public object Config {
         Config.discordWebhookWarzones = config.getString("discordWebhookWarzones", Config.discordWebhookWarzones)?.trim() ?: ""
         Config.discordRelayRaids = config.getBoolean("discordRelayRaids", Config.discordRelayRaids)
         Config.discordRelayWarzones = config.getBoolean("discordRelayWarzones", Config.discordRelayWarzones)
-
-        if (config.isString("nationJoinCooldown")) {
-            val raw = config.getString("nationJoinCooldown")
-            if (raw != null && raw.trim() == "-1") {
-                Config.nationJoinCooldown = -1L
-            } else {
-            }
-        }
     }
 }
 

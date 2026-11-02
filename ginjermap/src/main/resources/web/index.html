@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Ginjer Map</title>
+<link rel="icon" href="icons/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="map"></div>
+
+<header id="topbar">
+  <button id="menu-btn" class="icon-btn" aria-label="Toggle sidebar">
+    <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+  </button>
+  <div id="brand"><span class="brand-mark"></span><span id="title">Ginjer Map</span></div>
+  <div id="search-wrap">
+    <svg class="search-ico" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>
+    <input id="search" type="search" placeholder="Search towns, nations, players, territories" autocomplete="off" spellcheck="false">
+    <div id="search-results" hidden></div>
+  </div>
+  <button id="layers-btn" class="pill-btn" aria-expanded="false" aria-controls="view" title="Map layers and view options">
+    <svg viewBox="0 0 24 24"><path d="M12 3l9 5-9 5-9-5zM3 13l9 5 9-5"/></svg><span>Layers</span>
+  </button>
+  <div id="war-pill" hidden></div>
+</header>
+
+<aside id="sidebar">
+  <div class="list-tools side-tools">
+    <input class="filter" data-list="all" placeholder="Filter…">
+    <select class="sort" data-list="all" aria-label="Sort">
+      <option value="territories">Most land</option>
+      <option value="towns">Most towns</option>
+      <option value="residents">Most residents</option>
+      <option value="online">Most online</option>
+      <option value="name">Name</option>
+    </select>
+  </div>
+  <div id="side-scroll">
+    <section id="war-sec" class="sec">
+      <button id="war-head" class="sec-head" aria-expanded="true" title="War status">
+        <span class="wdot"></span><span class="sec-title">War</span><span id="war-sum"></span>
+        <svg class="chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+      </button>
+      <div id="war-panel"></div>
+    </section>
+    <div id="list-tree"></div>
+  </div>
+</aside>
+
+<div id="view" class="view">
+  <div id="view-head">
+    <span>Map layers</span>
+    <button id="view-close" class="icon-btn" aria-label="Close">
+      <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </button>
+  </div>
+  <div id="view-body">
+    <div class="fh">Look</div>
+    <div id="presets" class="seg seg4"></div>
+    <div class="fh">Colour by</div>
+    <div id="modes" class="seg"></div>
+    <div id="mode-extra"></div>
+    <button id="custom-toggle" class="link-btn" aria-expanded="false"><span>Customize layers</span><svg class="chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>
+    <div id="layer-toggles" hidden></div>
+  </div>
+</div>
+
+<aside id="info" hidden>
+  <button id="info-close" class="icon-btn" aria-label="Close">
+    <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+  </button>
+  <div id="info-body"></div>
+</aside>
+
+<footer id="statusbar">
+  <span id="coords">x —  z —</span>
+  <span id="hover-terr"></span>
+  <span id="render-progress" hidden></span>
+  <span id="live-dot" title="Live data"></span>
+</footer>
+
+<script src="vendor/leaflet/leaflet.js"></script>
+<script src="geometry.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

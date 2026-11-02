@@ -2,10 +2,12 @@ package phonon.nodes.stats
 
 import com.google.gson.GsonBuilder
 import com.google.gson.JsonObject
+import com.google.gson.JsonParser
 import org.bukkit.Bukkit
 import org.bukkit.ChatColor
 import phonon.nodes.Message
 import phonon.nodes.Nodes
+import phonon.nodes.war.FlagWar
 import java.io.FileWriter
 import java.nio.file.Files
 import java.nio.file.Paths
@@ -17,9 +19,13 @@ import java.util.concurrent.ConcurrentHashMap
 /**
  * Session K/D while /nda war enable OR /nda war skirmish is active.
  * On disable: war-kdr-* or skirmish-kdr-* under plugins/nodes/
+ * The running session is kept in warSession.json so restarts don't lose it.
  */
 object WarStats {
     private val gson = GsonBuilder().setPrettyPrinting().create()
+    private val sessionFile = Paths.get("plugins/nodes/warSession.json")
+    private var dirty = false
+    private var saveTask: org.bukkit.scheduler.BukkitTask? = null
 
     private var active: Boolean = false
     private var sessionType: String = "war"
@@ -41,16 +47,19 @@ object WarStats {
             .format(DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm"))
         val label = if (fullWar) "War" else "Skirmish"
         Message.broadcast("${ChatColor.GRAY}[$label] Session KDR tracking started")
+        saveSession()
     }
 
     fun addKill(uuid: UUID) {
         if (!active) return
         records.getOrPut(uuid) { KillDeathRecord() }.kills += 1
+        dirty = true
     }
 
     fun addDeath(uuid: UUID) {
         if (!active) return
         records.getOrPut(uuid) { KillDeathRecord() }.deaths += 1
+        dirty = true
     }
 
     fun endWarSessionAndSave(silent: Boolean = false) {
@@ -58,9 +67,75 @@ object WarStats {
         active = false
         saveFiles()
         records.clear()
+        dirty = false
+        try {
+            Files.deleteIfExists(sessionFile)
+        } catch (_: Exception) {
+        }
         if (!silent) {
             val label = if (sessionType == "skirmish") "Skirmish" else "War"
             Message.broadcast("${ChatColor.GRAY}[$label] Session KDR saved to plugins/nodes/")
+        }
+    }
+
+    /**
+     * On startup: pick up the session that was running before the restart.
+     * If a full war is on but nothing was saved (war started before this
+     * existed), start tracking now so kills count again.
+     */
+    fun load() {
+        val plugin = Nodes.plugin ?: return
+        if (Files.exists(sessionFile)) {
+            try {
+                val o = JsonParser.parseString(Files.readString(sessionFile)).asJsonObject
+                records.clear()
+                sessionType = o.get("type")?.asString ?: "war"
+                sessionStartedAt = o.get("startedAt")?.asString ?: ""
+                o.getAsJsonObject("players")?.entrySet()?.forEach { (k, v) ->
+                    val a = v.asJsonArray
+                    records[UUID.fromString(k)] = KillDeathRecord(a[0].asInt, a[1].asInt)
+                }
+                active = true
+                Nodes.logger?.info("[WarStats] resumed $sessionType session from $sessionStartedAt (${records.size} players)")
+            } catch (e: Exception) {
+                Nodes.logger?.warning("[WarStats] couldn't read warSession.json: ${e.message}")
+            }
+        }
+        if (active && !Nodes.war.enabled) {
+            // war ended while the server was down: write the results
+            endWarSessionAndSave(silent = true)
+        } else if (!active && Nodes.war.enabled && !FlagWar.canOnlyAttackBorders) {
+            startWarSession(fullWar = true)
+        }
+        saveTask?.cancel()
+        saveTask = Bukkit.getScheduler().runTaskTimer(plugin, Runnable { if (dirty) saveSession() }, 600L, 600L)
+    }
+
+    fun shutdown() {
+        saveTask?.cancel()
+        saveTask = null
+        if (active) saveSession()
+    }
+
+    private fun saveSession() {
+        if (!active) return
+        dirty = false
+        try {
+            val root = JsonObject()
+            root.addProperty("type", sessionType)
+            root.addProperty("startedAt", sessionStartedAt)
+            val players = JsonObject()
+            for ((uuid, rec) in records) {
+                val a = com.google.gson.JsonArray()
+                a.add(rec.kills)
+                a.add(rec.deaths)
+                players.add(uuid.toString(), a)
+            }
+            root.add("players", players)
+            Files.createDirectories(sessionFile.parent)
+            Files.writeString(sessionFile, root.toString())
+        } catch (e: Exception) {
+            Nodes.logger?.warning("[WarStats] couldn't save warSession.json: ${e.message}")
         }
     }
 

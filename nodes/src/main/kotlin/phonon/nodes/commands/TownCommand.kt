@@ -965,6 +965,7 @@ public class TownCommand :
         }
 
         Message.print(player, "You have left ${town.name}")
+        Nodes.markResidentLeftNation(resident, town)
         Nodes.removeResidentFromTown(town, resident)
     }
 
@@ -1019,6 +1020,7 @@ public class TownCommand :
             Message.print(targetPlayer, "${ChatColor.DARK_RED}You have been kicked from ${town.name}")
         }
 
+        Nodes.markResidentLeftNation(target, town)
         Nodes.removeResidentFromTown(town, target)
     }
 

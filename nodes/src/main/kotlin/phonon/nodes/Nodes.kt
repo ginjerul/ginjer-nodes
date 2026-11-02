@@ -155,6 +155,34 @@ public object Nodes {
         Nodes.logger = plugin.getLogger()
     }
 
+    /**
+     * An existing config.yml never gets options added by plugin updates. Copy the plain
+     * top-level options (not sections, so nothing an admin removed on purpose comes back)
+     * that the bundled config.yml has and this file lacks, with their comments.
+     */
+    private fun addMissingConfigOptions(plugin: org.bukkit.plugin.Plugin, config: YamlConfiguration, file: File) {
+        try {
+            val stream = plugin.getResource("config.yml") ?: return
+            val defaults = stream.use {
+                YamlConfiguration.loadConfiguration(java.io.InputStreamReader(it, Charsets.UTF_8))
+            }
+            var added = 0
+            for (key in defaults.getKeys(false)) {
+                if (defaults.isConfigurationSection(key) || config.contains(key, true)) continue
+                config.set(key, defaults.get(key))
+                config.setComments(key, defaults.getComments(key))
+                config.setInlineComments(key, defaults.getInlineComments(key))
+                added++
+            }
+            if (added > 0) {
+                config.save(file)
+                plugin.getLogger().info("config.yml: added $added new option(s) from this version (existing values kept)")
+            }
+        } catch (e: Exception) {
+            plugin.getLogger().warning("Could not add new options to config.yml: ${e.message}")
+        }
+    }
+
     internal fun reloadConfig() {
         val plugin = Nodes.plugin
         if (plugin === null) {
@@ -171,6 +199,7 @@ public object Nodes {
 
         val config = YamlConfiguration.loadConfiguration(configFile)
         if (config !== null) {
+            addMissingConfigOptions(plugin, config, configFile)
             Config.load(config)
         }
     }
@@ -856,6 +885,8 @@ public object Nodes {
         suffix: String,
         trusted: Boolean,
         townCreateCooldown: Long,
+        leftNation: String? = null,
+        leftNationAt: Long = 0L,
     ) {
         var playerName: String? = Bukkit.getPlayer(uuid)?.let { player ->
             player.name
@@ -878,6 +909,8 @@ public object Nodes {
         resident.needsUpdate()
 
         resident.townCreateCooldown = townCreateCooldown
+        resident.leftNation = leftNation
+        resident.leftNationAt = leftNationAt
 
         residents.put(uuid, resident)
     }
@@ -1691,9 +1724,49 @@ public object Nodes {
         return true
     }
 
-    public fun addResidentToTown(town: Town, resident: Resident): Boolean {
+    /**
+     * Remember that this resident left (or was kicked from) a town in a nation, so
+     * Config.nationJoinCooldown can stop them hopping straight into another nation.
+     */
+    public fun markResidentLeftNation(resident: Resident, town: Town) {
+        val nation = town.nation ?: return
+        resident.leftNation = nation.name
+        resident.leftNationAt = System.currentTimeMillis()
+        resident.needsUpdate()
+        Nodes.needsSave = true
+    }
+
+    /** Milliseconds left before this resident may join a town of [nation], 0 if allowed. */
+    public fun nationJoinCooldownLeft(resident: Resident, nation: Nation): Long {
+        val cooldown = Config.nationJoinCooldown
+        val left = resident.leftNation
+        if (cooldown <= 0L || left == null || left == nation.name) {
+            return 0L
+        }
+        return Math.max(0L, resident.leftNationAt + cooldown - System.currentTimeMillis())
+    }
+
+    public fun addResidentToTown(town: Town, resident: Resident, ignoreCooldown: Boolean = false): Boolean {
         val nation = town.nation
         val player = resident.player()
+        if (nation != null && !ignoreCooldown) {
+            val wait = nationJoinCooldownLeft(resident, nation)
+            if (wait > 0L) {
+                if (player != null) {
+                    val totalMin = (wait + 59_999L) / 60_000L
+                    val d = totalMin / 1440
+                    val h = (totalMin % 1440) / 60
+                    val m = totalMin % 60
+                    val left = when {
+                        d > 0 -> "${d}d ${h}h"
+                        h > 0 -> "${h}h ${m}m"
+                        else -> "${m}m"
+                    }
+                    Message.error(player, "You left a nation recently and cannot join another nation's town for $left")
+                }
+                return false
+            }
+        }
         if (nation != null && player != null) {
             if (!RallyCap.canJoinNationTown(nation, player)) {
                 Message.error(player, RallyCap.denyMessage(nation))

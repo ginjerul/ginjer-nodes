@@ -32,6 +32,23 @@ nametagPipelineTicks: 16 # how many ticks to divide nametag updates
 # force copy to dynmap
 dynmapCopyTowns: false
 
+# GinjerMap web map (ginjermap/ plugin in this repo).
+# Exports small JSON layers that the map polls. Only changed layers are written,
+# and all serialization/IO runs off the main thread.
+mapExport:
+  enabled: true
+  # export even when the GinjerMap plugin isn't installed (e.g. serving the files yourself)
+  always: false
+  path: "plugins/GinjerMap/web/data/nodes"
+  # towns/nations/claims refresh rate (ticks)
+  statePeriodTicks: 100
+  # war flags, occupation, warzones, raids refresh rate (ticks)
+  livePeriodTicks: 40
+  # include supply-line connectivity (computed one town per tick)
+  supplyLines: true
+  # show each resource's settings (income, mining drops, capture multipliers) when hovering it on the map
+  resourceDetails: true
+
 # ===================================
 # nametag configs
 # ===================================
@@ -247,6 +264,61 @@ allowBreakingAlliesFlags: false
 flagBeaconSize: 6          # in range [2, 16]
 flagBeaconMinSkyLevel: 100 # minimum height level in sky
 flagBeaconSkyLevel: 50     # height level above blocks
+# Sky beacons are off by default: creating them is expensive when many flags are up.
+flagBeaconEnabled: false
+# Update lighting when placing beacon blocks (expensive, keep false)
+flagBeaconUpdateLighting: false
+# Floating text above war flags
+flagHologramsEnabled: true
+
+# Only players within this many chunks of a flag get its attack boss bar. 0 = all online players.
+warBossBarMaxDistanceChunks: 6
+
+# Limits on attacks. 0 = no limit.
+maxConcurrentAttacks: 0
+maxAttacksPerTown: 0
+
+# Attack rules
+noFriendlyFire: false
+allowUnownedAttack: true
+allowBorderSkirmishFromWilderness: true
+allowAllInteractsInFlaggedChunks: true
+
+# Flag block that stays in place while a flag is up
+staticFlagblock: true
+staticFlagblockMaterial: DEEPSLATE
+
+# Capture time scales with defenders online in the chunk
+playersInChunkMultiplier: false
+playersInChunkMultiplierPerPlayer: 0.05
+playersInChunkMultiplierMin: 0.5
+
+# Retries and duration (ticks) of the fix for players glitching into blocks
+antiBlockGlitchAttempts: 4
+antiBlockGlitchDurationTicks: 60
+
+# Only whitelisted players may take part in wars. Others are sent this command.
+warPlayerWhiteList: false
+whitelistDenyCommand: "kick %player% Not on the war whitelist"
+
+# How long a player must wait after leaving (or being kicked from) a town in a nation
+# before joining a town in a different nation. Examples: 30m, 2h, 2d, 1d12h.
+# -1 = no cooldown. Admin commands ignore it.
+nationJoinCooldown: "-1"
+
+# Skulls in the GUI: 0 = always, 1 = not during war, 2 = never
+skullsGUIToggle: 1
+
+# Raids. Times in minutes. Rewards are MATERIAL: amount.
+raid:
+  enabled: true
+  prepMinutes: 15
+  liveMinutes: 30
+  cancelDefenderWinWindowMinutes: 5
+  cooldownMinutes: 120
+  minDefenderOnline: 1
+  attackerReward: {}
+  defenderReward: {}
 
 # allow war permissions during skirmish mode
 allowDestructionDuringSkirmish: false
@@ -364,8 +436,16 @@ supplyDrops:
   discord: true
 
 # ===========================================
-# Discord: raids and warzones
+# Discord: war, flag war, raids and warzones
 # ===========================================
+# Discord webhook URLs (leave empty to turn that feed off).
+# discordWebhookWar: general war announcements (war start/end, surrenders, supply drops...)
+# discordWebhookFlagWar: flag attacks (flags placed, captured, defended)
+discordWebhookWar: ""
+discordWebhookFlagWar: ""
+discordRelayWar: true
+discordRelayFlagWar: true
+
 # separate webhooks for raid / warzone announcements
 # (leave empty to use discordWebhookWar)
 discordWebhookRaids: ""

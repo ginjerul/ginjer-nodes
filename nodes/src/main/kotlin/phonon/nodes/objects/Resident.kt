@@ -28,6 +28,10 @@ public class Resident(val uuid: UUID, val name: String) {
 
     var townCreateCooldown: Long = 0L
 
+    // nation this resident last left/was kicked from (via a town) and when (epoch ms), for Config.nationJoinCooldown
+    var leftNation: String? = null
+    var leftNationAt: Long = 0L
+
     var trusted: Boolean = false
 
     var isProtectingChests: Boolean = false
@@ -104,6 +108,8 @@ public class Resident(val uuid: UUID, val name: String) {
         public val suffix = r.suffix
         public val trusted = r.trusted
         public val townCreateCooldown = r.townCreateCooldown
+        public val leftNation = r.leftNation
+        public val leftNationAt = r.leftNationAt
 
         public override var jsonString: String? = null
 
@@ -117,7 +123,9 @@ public class Resident(val uuid: UUID, val name: String) {
                     "\"prefix\":\"${this.prefix}\"," +
                     "\"suffix\":\"${this.suffix}\"," +
                     "\"trust\":${this.trusted}," +
-                    "\"townCool\":${this.townCreateCooldown}" +
+                    "\"townCool\":${this.townCreateCooldown}," +
+                    "\"leftNation\":${ if (this.leftNation !== null) "\"${this.leftNation}\"" else null }," +
+                    "\"leftNationAt\":${this.leftNationAt}" +
                     "}"
                 )
             return jsonString

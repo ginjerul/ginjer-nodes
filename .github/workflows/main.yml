@@ -1,6 +1,6 @@
 on:
   push:
-    branches: [ master ]
+    branches: [ master, nodesmap, ginjermap ]
   pull_request:
   workflow_dispatch:
 
@@ -17,9 +17,70 @@ jobs:
         with:
           distribution: temurin
           java-version: 21
-      - run: |
+      - name: Build Nodes
+        id: nodes
+        continue-on-error: true
+        run: |
           cd nodes
-          ./gradlew clean build
+          ./gradlew clean build --console=plain 2>&1 | tee ../nodes-build.log
+          exit ${PIPESTATUS[0]}
+
+      - name: Build GinjerMap
+        id: ginjermap
+        continue-on-error: true
+        run: |
+          cd ginjermap
+          chmod +x gradlew
+          ./gradlew clean build --console=plain 2>&1 | tee ../ginjermap-build.log
+          exit ${PIPESTATUS[0]}
+
+      # surface compiler/lint errors as annotations so they show on the run summary
+      - name: Report build errors
+        if: steps.nodes.outcome == 'failure' || steps.ginjermap.outcome == 'failure'
+        env:
+          NODES: ${{ steps.nodes.outcome }}
+          GINJERMAP: ${{ steps.ginjermap.outcome }}
+        run: |
+          report() {
+            msg=$(grep -E "^e: |What went wrong|Lint error|\.kt:[0-9]+:[0-9]+ [A-Z]|Could not resolve|> Task .*FAILED" "$2" | grep -v "^w: " | head -120 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=$1 build failed::$msg"
+          }
+          if [ "$NODES" = "failure" ]; then report nodes nodes-build.log; fi
+          if [ "$GINJERMAP" = "failure" ]; then report ginjermap ginjermap-build.log; fi
+          exit 1
+
+      # Branch builds: plain .jar downloads (no zip) on a pre-release that's
+      # replaced on every build. Links stay the same:
+      #   https://github.com/<owner>/<repo>/releases/download/dev-<branch>/nodes.jar
+      #   https://github.com/<owner>/<repo>/releases/download/dev-<branch>/ginjermap.jar
+      - name: Publish dev build
+        if: github.ref != 'refs/heads/master' && github.event_name != 'pull_request' && steps.nodes.outcome == 'success' && steps.ginjermap.outcome == 'success'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          TAG="dev-${BRANCH//\//-}"
+          mkdir -p dist
+          echo "nodes/build/libs:"; ls -la nodes/build/libs
+          # same jar the versioned releases ship (plain nodes-<version>.jar)
+          NODES_JAR=$(ls nodes/build/libs/nodes-*.jar | grep -Ev -- '-(dev|reobf|sources|all)\.jar$' | head -n 1)
+          [ -n "$NODES_JAR" ] || NODES_JAR=$(ls nodes/build/libs/nodes-*.jar | head -n 1)
+          GINJERMAP_JAR=$(ls ginjermap/build/libs/ginjermap-*.jar | head -n 1)
+          cp "$NODES_JAR" dist/nodes.jar
+          cp "$GINJERMAP_JAR" dist/ginjermap.jar
+          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "$TAG" dist/nodes.jar dist/ginjermap.jar \
+            --prerelease --target "$GITHUB_SHA" \
+            --title "Dev build: $BRANCH" \
+            --notes "Latest build of the \`$BRANCH\` branch, commit ${GITHUB_SHA::7}. Replaced on every push. Built from $(basename "$NODES_JAR") and $(basename "$GINJERMAP_JAR")."
+          echo "Download: https://github.com/${{ github.repository }}/releases/tag/$TAG"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jars
+          path: |
+            nodes/build/libs/*.jar
+            ginjermap/build/libs/*.jar
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-node@v5
@@ -34,7 +95,7 @@ jobs:
          npm run build
          zip -r dynmap.zip build/*
          
-      - if: github.event_name == 'push'
+      - if: github.event_name == 'push' && github.ref == 'refs/heads/master'
         id: get_version
         run: |
           VERSION=""
@@ -48,7 +109,7 @@ jobs:
           echo "Detected version: $VERSION"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
-      - if: github.event_name == 'push'
+      - if: github.event_name == 'push' && github.ref == 'refs/heads/master'
         id: check_release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -60,14 +121,15 @@ jobs:
             echo "exists=false" >> $GITHUB_OUTPUT
           fi
 
-      - if: github.event_name == 'push' && steps.check_release.outputs.exists == 'false'
+      - if: github.event_name == 'push' && github.ref == 'refs/heads/master' && steps.check_release.outputs.exists == 'false'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.get_version.outputs.version }}
         run: |
           NODES_JAR=nodes/build/libs/nodes-$VERSION.jar
           DYNMAP_ZIP=dynmap/dynmap.zip
-          ALL="$NODES_JAR $DYNMAP_ZIP"
+          GINJERMAP_JAR=$(ls ginjermap/build/libs/ginjermap-*.jar | head -n 1)
+          ALL="$NODES_JAR $DYNMAP_ZIP $GINJERMAP_JAR"
           if [ -z "$ALL" ]; then
             echo "No build files found"
             exit 1

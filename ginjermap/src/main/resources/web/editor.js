@@ -1,0 +1,2876 @@
+/*
+ * GinjerMap world editor
+ *
+ * Edits plugins/nodes/world.json (territories + resource nodes) on top of the
+ * live terrain tiles. All editing happens in the browser; "Check" and "Apply"
+ * send the whole world to the server, where Nodes validates it, refuses
+ * anything that would break claims, backs up the old file and hot-reloads.
+ */
+(() => {
+  "use strict";
+
+  // ---------------------------------------------------------------- utils
+  const $ = (s, el = document) => el.querySelector(s);
+  const $$ = (s, el = document) => Array.from(el.querySelectorAll(s));
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const SPAN = 0x400000; // same packing as NodesGeom.key
+  const K = (x, z) => x * SPAN + z;
+  const KX = (k) => Math.round(k / SPAN);
+  const KZ = (k) => k - KX(k) * SPAN;
+  const ll = (x, z) => L.latLng(z, x);
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem("ginjermap.ed." + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+    set(k, v) { try { localStorage.setItem("ginjermap.ed." + k, JSON.stringify(v)); } catch { /* ignore */ } },
+  };
+  // the 6 territory colors Nodes uses (index stored in world.json)
+  const PALETTE = ["#d1694f", "#5b8ad6", "#d6b14a", "#58b386", "#a36bd1", "#4fb0c6"];
+
+  function mulberry32(a) {
+    return function () {
+      a |= 0; a = (a + 0x6d2b79f5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  // ---------------------------------------------------------------- state
+  const E = {
+    token: null, user: null, nodesOnline: false, townsOnline: false,
+    info: null,
+    top: {},                 // other top-level keys of world.json, kept as-is
+    resources: {},           // resource node name -> definition object
+    terr: new Map(),         // id -> territory
+    owner: new Map(),        // chunk key -> territory id
+    nextId: 0,
+    sel: new Set(),
+    claimed: new Map(),      // territory id -> {town, color, nation, ncolor, kind, occ?}
+    occChunks: new Map(),    // chunk key -> town occupying it (war flags)
+    cost: { constant: 10, scale: 0.25 },
+    icons: {},
+    undo: [], redo: [],
+    savedVersion: 0, version: 0,
+    tool: "select",
+    brush: store.get("brush", 2),
+    opt: Object.assign({ land: true, wild: true, lock: true, labels: true, icons: true, owners: true, grid: false, colorBy: "nation" }, store.get("opt", {})),
+    classic: false,          // brush turned on with Space: left-drag pans, right-drag paints
+  };
+
+  // ---------------------------------------------------------------- map
+  const CRS = L.extend({}, L.CRS.Simple, { transformation: new L.Transformation(1, 0, 1, 0) });
+  const map = L.map("map", { crs: CRS, zoomControl: false, attributionControl: false, minZoom: -5, maxZoom: 3, boxZoom: false, doubleClickZoom: false, fadeAnimation: false, keyboard: false });
+  L.control.zoom({ position: "bottomright" }).addTo(map);
+  map.setView([0, 0], -2);
+  for (const [n, z] of [["terr", 410], ["claim", 415], ["sel", 420], ["over", 600], ["ui", 650]]) map.createPane(n).style.zIndex = z;
+  const R = { terr: L.canvas({ pane: "terr", padding: 0.3 }), claim: L.svg({ pane: "claim", padding: 0.3 }), sel: L.svg({ pane: "sel", padding: 0.3 }), ui: L.svg({ pane: "ui" }) };
+  const G = { terr: L.layerGroup().addTo(map), claim: L.layerGroup().addTo(map), sel: L.layerGroup().addTo(map), labels: L.layerGroup().addTo(map), icons: L.layerGroup().addTo(map), grid: L.layerGroup().addTo(map), ui: L.layerGroup().addTo(map) };
+  const polys = new Map(); // id -> polygon
+  let tileLayer = null;
+
+  // ---------------------------------------------------------------- api
+  async function api(path, opts = {}) {
+    const r = await fetch(path, { ...opts, headers: { ...(opts.headers || {}), Authorization: "Bearer " + E.token } });
+    let body = null;
+    try { body = await r.json(); } catch { body = null; }
+    if (!r.ok) {
+      const msg = (body && body.error) || `${r.status} ${r.statusText}`;
+      const e = new Error(msg);
+      e.status = r.status;
+      throw e;
+    }
+    return body;
+  }
+
+  // ---------------------------------------------------------------- loading
+  const TOKEN_KEY = "ginjermap.token";
+  // localStorage so the login survives closing the browser (the server keeps it for 24h)
+  function saveToken(t) {
+    try { localStorage.setItem(TOKEN_KEY, t); } catch { /* ignore */ }
+  }
+  function forgetToken() {
+    try { localStorage.removeItem(TOKEN_KEY); } catch { /* ignore */ }
+    try { sessionStorage.removeItem(TOKEN_KEY); } catch { /* ignore */ }
+  }
+  function readToken() {
+    const m = location.hash.match(/token=([A-Za-z0-9_-]+)/);
+    if (m) {
+      saveToken(m[1]);
+      history.replaceState(null, "", location.pathname + location.search);
+      return m[1];
+    }
+    try { return localStorage.getItem(TOKEN_KEY) || sessionStorage.getItem(TOKEN_KEY); } catch { return null; }
+  }
+
+  async function init() {
+    buildUi();
+    E.token = readToken();
+    try { E.info = await (await fetch("data/map.json", { cache: "no-cache" })).json(); } catch { E.info = { world: "world", tileSize: 512, zoomOutLevels: 5, spawn: { x: 0, z: 0 } }; }
+    setupTiles();
+    try { E.icons = await (await fetch("icons/resource_icons.json")).json(); } catch { /* optional */ }
+    try {
+      const w = await (await fetch("data/nodes/world.json", { cache: "no-cache" })).json();
+      if (w.costConfig) E.cost = w.costConfig;
+    } catch { /* optional */ }
+    await loadClaims();
+    await loadOccupiedChunks();
+
+    if (!E.token) {
+      modal(`<h2>Sign in to edit</h2><p>Run <kbd>/ginjermap editor</kbd> in game (or in the console) and open the link it gives you. Links expire after a while for safety.</p>
+        <p>You can still import a <b>world.json</b> file and edit it offline, then download the result.</p>
+        <div class="foot"><button class="btn" data-close>Edit a file offline</button></div>`);
+      setSaveState();
+      return;
+    }
+    try {
+      const s = await api("api/editor/session");
+      E.user = s.user;
+      E.nodesOnline = !!s.nodes;
+      E.townsOnline = !!s.towns;
+      E.shardsAllowed = !!s.shards;
+      for (const el of $$("[data-tool=\"shards\"], [data-tab=\"shards\"]")) el.hidden = !E.shardsAllowed;
+    } catch (e) {
+      modal(`<h2>Session expired</h2><p>${esc(e.message)}</p><div class="foot"><button class="btn" data-close>Edit a file offline</button></div>`);
+      E.token = null;
+      forgetToken();
+      setSaveState();
+      return;
+    }
+    if (E.townsOnline) await loadClaims();
+    if (E.nodesOnline) await loadFromServer(true);
+    else toast("Nodes isn't running on the server, so you can only edit and download files.", true);
+    loadShards();
+    setSaveState();
+  }
+
+  async function loadFromServer(fit) {
+    const w = await api("api/editor/world");
+    loadWorld(w);
+    if (fit) fitWorld();
+    toast(`Loaded ${E.terr.size} territories from the server`);
+  }
+
+  /** a town occupying a territory (captured in war); the owner, if any, stays the owner */
+  function addOccupier(id, o) {
+    const c = E.claimed.get(id);
+    if (c) c.occ = o;
+    else E.claimed.set(id, { ...o, kind: "occupied", occ: o });
+  }
+
+  /** occupied chunks from flags (live layer): chunk key -> occupying town */
+  async function loadOccupiedChunks() {
+    const m = new Map();
+    try {
+      const live = await (await fetch("data/nodes/live.json", { cache: "no-cache" })).json();
+      for (const [x, z, town] of live.occupied || []) m.set(K(x, z), town);
+    } catch { /* no live data */ }
+    E.occChunks = m;
+  }
+
+  async function loadClaims() {
+    if (E.townsOnline) {
+      try {
+        const d = await api("api/editor/towns");
+        T.data = d;
+        setClaimsFromTowns(d);
+        renderDatalists();
+        renderTowns();
+        return;
+      } catch { /* fall back to the public map data */ }
+    }
+    E.claimed.clear();
+    try {
+      const st = await (await fetch("data/nodes/state.json", { cache: "no-cache" })).json();
+      const nationColor = new Map((st.nations || []).map((n) => [n.name, n.color]));
+      for (const t of st.towns || []) {
+        const nation = t.nation || null;
+        const ncolor = (nation && nationColor.get(nation)) || t.color;
+        for (const id of t.territories || []) E.claimed.set(id, { town: t.name, color: t.color, nation, ncolor, kind: "owned", occ: E.claimed.get(id)?.occ });
+        for (const id of t.captured || []) addOccupier(id, { town: t.name, color: t.color, nation, ncolor });
+      }
+    } catch { /* no live data */ }
+  }
+
+  function setupTiles() {
+    const levels = E.info.zoomOutLevels ?? 5;
+    map.setMinZoom(-levels);
+    tileLayer = L.tileLayer("", {
+      tileSize: E.info.tileSize || 512, minZoom: -levels, maxZoom: 3, minNativeZoom: -levels, maxNativeZoom: 0, noWrap: true, keepBuffer: 2,
+      errorTileUrl: "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==",
+    });
+    tileLayer.getTileUrl = (c) => `tiles/${encodeURIComponent(E.info.world)}/${-c.z}/${c.x}_${c.y}.png`;
+    tileLayer.addTo(map);
+    map.setView(ll(E.info.spawn?.x || 0, E.info.spawn?.z || 0), -2);
+  }
+
+  function fitWorld() {
+    if (!E.terr.size) return;
+    const b = L.latLngBounds([]);
+    for (const t of E.terr.values()) if (t.core) b.extend(ll(t.core[0] * 16 + 8, t.core[1] * 16 + 8));
+    if (b.isValid()) map.fitBounds(b.pad(0.1), { animate: false });
+  }
+
+  const COMPUTED = new Set(["name", "color", "coreChunk", "chunks", "nodes", "neighbors", "isEdge", "size"]);
+
+  function loadWorld(w) {
+    E.terr.clear(); E.owner.clear(); E.sel.clear(); E.undo = []; E.redo = [];
+    E.top = {};
+    for (const [k, v] of Object.entries(w)) if (k !== "nodes" && k !== "territories") E.top[k] = v;
+    E.resources = w.nodes || {};
+    let maxId = -1;
+    for (const [ids, t] of Object.entries(w.territories || {})) {
+      const id = +ids;
+      if (!Number.isFinite(id)) continue;
+      maxId = Math.max(maxId, id);
+      const chunks = new Set();
+      const c = t.chunks || [];
+      for (let i = 0; i + 1 < c.length; i += 2) {
+        const k = K(c[i], c[i + 1]);
+        if (E.owner.has(k)) continue; // first territory wins on duplicates
+        chunks.add(k);
+        E.owner.set(k, id);
+      }
+      const extra = {};
+      for (const [kk, vv] of Object.entries(t)) if (!COMPUTED.has(kk)) extra[kk] = vv;
+      E.terr.set(id, { id, name: t.name || "", color: Number.isInteger(t.color) ? t.color : -1, core: Array.isArray(t.coreChunk) ? [t.coreChunk[0], t.coreChunk[1]] : null, chunks, nodes: [...(t.nodes || [])], extra });
+    }
+    E.nextId = maxId + 1;
+    for (const t of E.terr.values()) { fixCore(t); }
+    recolorAll(true);
+    E.version = E.savedVersion = 0;
+    rebuildAll();
+  }
+
+  // ---------------------------------------------------------------- geometry helpers
+  function neighborsOf(t) {
+    const out = new Set();
+    let edge = false;
+    for (const k of t.chunks) {
+      const x = KX(k), z = KZ(k);
+      for (const n of [K(x + 1, z), K(x - 1, z), K(x, z + 1), K(x, z - 1)]) {
+        const o = E.owner.get(n);
+        if (o === undefined) edge = true;
+        else if (o !== t.id) out.add(o);
+      }
+    }
+    return { neighbors: out, edge };
+  }
+
+  /**
+   * Keep a territory's core valid. Cores you placed yourself (Core tool, or
+   * loaded from the server) stay put while they're inside the territory;
+   * cores of territories you're painting follow the middle as the shape grows.
+   */
+  function fixCore(t) {
+    if (!t.chunks.size) { t.core = null; return; }
+    if (!t.coreAuto && t.core && t.chunks.has(K(t.core[0], t.core[1]))) return;
+    t.core = coreFor(t);
+  }
+  function coreFor(t) {
+    const cells = [];
+    for (const k of t.chunks) cells.push([KX(k), KZ(k)]);
+    return NodesGeom.centerCell(cells);
+  }
+
+  function components(chunks) {
+    const left = new Set(chunks);
+    const out = [];
+    while (left.size) {
+      const start = left.values().next().value;
+      left.delete(start);
+      const comp = [start];
+      for (let i = 0; i < comp.length; i++) {
+        const x = KX(comp[i]), z = KZ(comp[i]);
+        for (const n of [K(x + 1, z), K(x - 1, z), K(x, z + 1), K(x, z - 1)]) {
+          if (left.has(n)) { left.delete(n); comp.push(n); }
+        }
+      }
+      out.push(comp);
+    }
+    return out;
+  }
+
+  function terrCost(t) {
+    let c = E.cost.constant, s = E.cost.scale;
+    for (const n of t.nodes) {
+      const r = E.resources[n];
+      if (r && r.cost) { c += r.cost.constant || 0; s *= r.cost.scale ?? 1; }
+    }
+    return c + Math.round(s * t.chunks.size);
+  }
+
+  /** combined flag capture time multiplier from a territory's resources (Nodes multiplies them) */
+  function attackMult(t) {
+    let m = 1;
+    for (const n of t.nodes) {
+      const v = E.resources[n]?.attacker_time_multiplier;
+      if (typeof v === "number" && isFinite(v)) m *= v;
+    }
+    return m;
+  }
+
+  /** greedy 6-coloring so neighbors differ (like the old editor's generateColors) */
+  function recolorAll(onlyMissing) {
+    const ids = [...E.terr.keys()];
+    const nb = new Map(ids.map((id) => [id, neighborsOf(E.terr.get(id)).neighbors]));
+    ids.sort((a, b) => nb.get(b).size - nb.get(a).size);
+    for (const id of ids) {
+      const t = E.terr.get(id);
+      if (onlyMissing && t.color >= 0) continue;
+      if (!onlyMissing || t.color < 0) t.color = -1;
+    }
+    for (const id of ids) {
+      const t = E.terr.get(id);
+      if (t.color >= 0) continue;
+      const used = new Set([...nb.get(id)].map((n) => E.terr.get(n)?.color));
+      let c = 0;
+      while (c < 6 && used.has(c)) c++;
+      t.color = c < 6 ? c : id % 6;
+    }
+  }
+
+  function recolorOne(t) {
+    const { neighbors } = neighborsOf(t);
+    const used = new Set([...neighbors].map((n) => E.terr.get(n)?.color));
+    if (t.color >= 0 && !used.has(t.color)) return;
+    let c = 0;
+    while (c < 6 && used.has(c)) c++;
+    t.color = c < 6 ? c : t.id % 6;
+  }
+
+  // ---------------------------------------------------------------- land mask (from rendered tiles)
+  const land = new Map(); // "rx,rz" -> {state, data}
+  function regionOf(cx, cz) { return [Math.floor(cx / 32), Math.floor(cz / 32)]; }
+  function loadRegion(rx, rz) {
+    const key = rx + "," + rz;
+    if (land.has(key)) return land.get(key);
+    const r = { state: "loading", data: null };
+    land.set(key, r);
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const c = document.createElement("canvas");
+        c.width = c.height = 512;
+        const g = c.getContext("2d", { willReadFrequently: true });
+        g.drawImage(img, 0, 0);
+        r.data = g.getImageData(0, 0, 512, 512).data;
+        r.state = "ok";
+      } catch { r.state = "missing"; }
+    };
+    img.onerror = () => { r.state = "missing"; };
+    img.src = `tiles/${encodeURIComponent(E.info.world)}/0/${rx}_${rz}.png?e=1`;
+    return r;
+  }
+  /** true = land, false = water/ungenerated, null = not loaded yet */
+  function isLand(k) {
+    const cx = KX(k), cz = KZ(k);
+    const [rx, rz] = regionOf(cx, cz);
+    const r = loadRegion(rx, rz);
+    if (r.state === "missing") return false;
+    if (r.state !== "ok") return null;
+    const px = (cx - rx * 32) * 16 + 8, pz = (cz - rz * 32) * 16 + 8;
+    const i = (pz * 512 + px) * 4;
+    const d = r.data;
+    if (d[i + 3] < 128) return false;
+    const red = d[i], g = d[i + 1], b = d[i + 2];
+    if (b > red + 35 && b > g + 18) return false; // water / ice
+    return true;
+  }
+  function preloadLand() {
+    if (!E.info || !E.opt.land || map.getZoom() < -3) return;
+    const b = map.getBounds();
+    const x0 = Math.floor(b.getWest() / 512), x1 = Math.floor(b.getEast() / 512);
+    const z0 = Math.floor(b.getNorth() / 512), z1 = Math.floor(b.getSouth() / 512);
+    if ((x1 - x0 + 1) * (z1 - z0 + 1) > 120) return;
+    for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) loadRegion(x, z);
+  }
+
+  // ---------------------------------------------------------------- history
+  let op = null;
+  const touched = new Set();
+
+  function snap(id) {
+    const t = E.terr.get(id);
+    if (!t) return null;
+    return { id, name: t.name, color: t.color, core: t.core ? [...t.core] : null, coreAuto: !!t.coreAuto, chunks: new Set(t.chunks), nodes: [...t.nodes], extra: JSON.parse(JSON.stringify(t.extra)) };
+  }
+  function begin(label) {
+    op = { label, before: new Map(), res: null };
+    touched.clear();
+  }
+  function touch(id) {
+    if (op && !op.before.has(id)) op.before.set(id, snap(id));
+    touched.add(id);
+  }
+  function touchRes() {
+    if (op && op.res == null) op.res = JSON.stringify(E.resources);
+  }
+  function end() {
+    if (!op) return;
+    const o = op;
+    op = null;
+    // clean up: empty territories disappear, cores stay valid, colors stay distinct
+    for (const id of touched) {
+      const t = E.terr.get(id);
+      if (!t) continue;
+      if (!t.chunks.size) {
+        E.terr.delete(id);
+        E.sel.delete(id);
+        continue;
+      }
+      fixCore(t);
+      recolorOne(t);
+    }
+    const after = new Map();
+    let changed = o.res != null && o.res !== JSON.stringify(E.resources);
+    for (const [id, b] of o.before) {
+      const a = snap(id);
+      after.set(id, a);
+      if (!changed && !sameSnap(a, b)) changed = true;
+    }
+    if (changed) {
+      E.undo.push({ label: o.label, before: o.before, after, resBefore: o.res, resAfter: o.res != null ? JSON.stringify(E.resources) : null });
+      if (E.undo.length > 200) E.undo.shift();
+      E.redo = [];
+      E.version++;
+    }
+    redraw([...o.before.keys()]);
+    touched.clear();
+    refreshUi();
+  }
+  function sameSnap(a, b) {
+    if (!a || !b) return a === b;
+    if (a.name !== b.name || a.chunks.size !== b.chunks.size || a.nodes.join() !== b.nodes.join()) return false;
+    if (String(a.core) !== String(b.core) || !!a.coreAuto !== !!b.coreAuto) return false;
+    for (const k of a.chunks) if (!b.chunks.has(k)) return false;
+    return true;
+  }
+  function restore(states) {
+    // remove first, then assign, so chunks moving between territories end up right
+    for (const id of states.keys()) {
+      const t = E.terr.get(id);
+      if (!t) continue;
+      for (const k of t.chunks) if (E.owner.get(k) === id) E.owner.delete(k);
+      E.terr.delete(id);
+    }
+    for (const [id, s] of states) {
+      if (!s) { E.sel.delete(id); continue; }
+      const t = { id, name: s.name, color: s.color, core: s.core ? [...s.core] : null, coreAuto: !!s.coreAuto, chunks: new Set(s.chunks), nodes: [...s.nodes], extra: JSON.parse(JSON.stringify(s.extra)) };
+      E.terr.set(id, t);
+      for (const k of t.chunks) E.owner.set(k, id);
+      E.nextId = Math.max(E.nextId, id + 1);
+    }
+  }
+  function undo() {
+    const h = E.undo.pop();
+    if (!h) return;
+    restore(h.before);
+    if (h.resBefore != null) E.resources = JSON.parse(h.resBefore);
+    E.redo.push(h);
+    E.version--;
+    redraw([...h.before.keys()]);
+    refreshUi();
+    toast("Undid: " + h.label);
+  }
+  function redo() {
+    const h = E.redo.pop();
+    if (!h) return;
+    restore(h.after);
+    if (h.resAfter != null) E.resources = JSON.parse(h.resAfter);
+    E.undo.push(h);
+    E.version++;
+    redraw([...h.after.keys()]);
+    refreshUi();
+    toast("Redid: " + h.label);
+  }
+
+  // ---------------------------------------------------------------- editing primitives
+  /** "Lock claimed" protects the land (chunks) of claimed territories; names, resources and cores stay editable */
+  function isLocked(id) { return E.opt.lock && E.claimed.has(id) && E.claimed.get(id).kind === "owned"; }
+
+  function newTerritory() {
+    const id = E.nextId++;
+    touch(id);
+    const t = { id, name: "", color: -1, core: null, coreAuto: true, chunks: new Set(), nodes: [], extra: {} };
+    E.terr.set(id, t);
+    return t;
+  }
+
+  /** move chunk k to territory id (null = wilderness). Returns true if it changed. */
+  function assign(k, id, { onlyWild = false, landOnly = false } = {}) {
+    const cur = E.owner.get(k);
+    if (cur === id) return false;
+    if (cur !== undefined) {
+      if (onlyWild || isLocked(cur)) return false;
+    }
+    if (id != null) {
+      if (isLocked(id)) return false;
+      if (landOnly && isLand(k) === false) return false;
+    }
+    if (cur !== undefined) {
+      touch(cur);
+      E.terr.get(cur).chunks.delete(k);
+    }
+    if (id != null) {
+      touch(id);
+      E.terr.get(id).chunks.add(k);
+      E.owner.set(k, id);
+    } else {
+      E.owner.delete(k);
+    }
+    return true;
+  }
+
+  function brushKeys(cx, cz, r) {
+    const out = [];
+    const rr = r * r + r;
+    for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) if (dx * dx + dz * dz <= rr) out.push(K(cx + dx, cz + dz));
+    return out;
+  }
+
+  // ---------------------------------------------------------------- drawing
+  const prettyName = (s) => String(s ?? "").replace(/_/g, " ");
+  const NO_OWNER = "#9aa0a8";
+
+  /** diagonal stripes pattern (occupied land), defined once in the claim svg */
+  const stripeIds = new Set();
+  function stripe(color) {
+    const id = "occ" + color.replace(/[^a-z0-9]/gi, "");
+    if (stripeIds.has(id)) return `url(#${id})`;
+    const root = R.claim._container;
+    if (!root) return color;
+    let defs = root.querySelector("defs");
+    if (!defs) { defs = document.createElementNS("http://www.w3.org/2000/svg", "defs"); root.prepend(defs); }
+    const p = document.createElementNS("http://www.w3.org/2000/svg", "pattern");
+    p.setAttribute("id", id);
+    p.setAttribute("patternUnits", "userSpaceOnUse");
+    p.setAttribute("width", "10"); p.setAttribute("height", "10");
+    p.setAttribute("patternTransform", "rotate(45)");
+    const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    rect.setAttribute("width", "4"); rect.setAttribute("height", "10");
+    rect.setAttribute("fill", color); rect.setAttribute("fill-opacity", "0.75"); rect.setAttribute("stroke", "none");
+    p.appendChild(rect);
+    defs.appendChild(p);
+    stripeIds.add(id);
+    return `url(#${id})`;
+  }
+
+  /** fill color: the owning nation's color (like the public map), or the 6 territory colors */
+  function terrColor(t) {
+    if (E.opt.colorBy === "territory") return PALETTE[((t.color % 6) + 6) % 6];
+    const c = E.claimed.get(t.id);
+    return c ? c.ncolor : NO_OWNER;
+  }
+
+  function terrStyle(t) {
+    const sel = E.sel.has(t.id);
+    const base = terrColor(t);
+    if (E.opt.colorBy !== "territory") {
+      const owned = E.claimed.has(t.id);
+      return { renderer: R.terr, fillColor: base, fillOpacity: sel ? 0.62 : owned ? 0.42 : 0.12, color: sel ? "#ffffff" : owned ? "rgba(10,12,16,0.45)" : "rgba(255,255,255,0.35)", weight: sel ? 2.5 : 1, interactive: false };
+    }
+    return { renderer: R.terr, fillColor: base, fillOpacity: sel ? 0.55 : 0.32, color: sel ? "#ffffff" : "rgba(10,12,16,0.55)", weight: sel ? 2.5 : 1, interactive: false };
+  }
+  function ringsOf(t) {
+    const cells = [];
+    for (const k of t.chunks) cells.push(KX(k), KZ(k));
+    return NodesGeom.outline(cells, 16).map((r) => r.map(([x, z]) => ll(x, z)));
+  }
+  function redraw(ids) {
+    for (const id of ids) {
+      const t = E.terr.get(id);
+      const p = polys.get(id);
+      if (!t) {
+        if (p) { G.terr.removeLayer(p); polys.delete(id); }
+        continue;
+      }
+      const rings = ringsOf(t);
+      if (p) { p.setLatLngs(rings); p.setStyle(terrStyle(t)); }
+      else { const np = L.polygon(rings, terrStyle(t)); polys.set(id, np); G.terr.addLayer(np); }
+    }
+    drawOverlays();
+  }
+  function rebuildAll() {
+    G.terr.clearLayers();
+    polys.clear();
+    redraw([...E.terr.keys()]);
+    refreshUi();
+  }
+  function restyle() {
+    for (const [id, p] of polys) { const t = E.terr.get(id); if (t) p.setStyle(terrStyle(t)); }
+  }
+
+  let overlayTimer = 0;
+  function drawOverlays() {
+    clearTimeout(overlayTimer);
+    overlayTimer = setTimeout(drawOverlaysNow, 30);
+  }
+  function drawOverlaysNow() {
+    if (!E.info) return;
+    G.labels.clearLayers(); G.icons.clearLayers(); G.claim.clearLayers(); G.sel.clearLayers();
+    const z = map.getZoom();
+    const b = map.getBounds().pad(0.2);
+    if (E.opt.owners) {
+      // one outline per town around its claimed territories
+      // outline each nation (or town without a nation) around all its land
+      const byNation = E.opt.colorBy !== "territory";
+      const groups = new Map();
+      for (const [id, c] of E.claimed) {
+        const t = E.terr.get(id);
+        if (!t || c.kind !== "owned") continue;
+        const key = byNation && c.nation ? "n:" + c.nation : "t:" + c.town;
+        if (!groups.has(key)) groups.set(key, { color: byNation ? c.ncolor : c.color, cells: [] });
+        const arr = groups.get(key).cells;
+        for (const k of t.chunks) arr.push(KX(k), KZ(k));
+      }
+      for (const [, g] of groups) {
+        const rings = NodesGeom.outline(g.cells, 16).map((r) => r.map(([x, zz]) => ll(x, zz)));
+        if (!rings.length) continue;
+        G.claim.addLayer(L.polygon(rings, byNation
+          ? { renderer: R.claim, fill: false, color: g.color, weight: 2.5, opacity: 0.95, interactive: false }
+          : { renderer: R.claim, fill: true, fillColor: g.color, fillOpacity: 0.18, color: g.color, weight: 3, dashArray: "8 5", interactive: false }));
+      }
+    }
+    // occupation (war): whole captured territories and single captured chunks, striped in the occupier's color
+    {
+      const byTown = new Map();
+      const add = (town, color, x, z) => {
+        if (!byTown.has(town)) byTown.set(town, { color, cells: [] });
+        byTown.get(town).cells.push(x, z);
+      };
+      const whole = new Set();
+      for (const [id, c] of E.claimed) {
+        if (!c.occ) continue;
+        const t = E.terr.get(id);
+        if (!t) continue;
+        whole.add(id);
+        for (const k of t.chunks) add(c.occ.town, c.occ.color, KX(k), KZ(k));
+      }
+      const tcol = new Map((T.data?.towns || []).map((t) => [t.name, t.color]));
+      for (const [k, town] of E.occChunks) {
+        if (whole.has(E.owner.get(k))) continue;
+        add(town, tcol.get(town) || "#e5484d", KX(k), KZ(k));
+      }
+      for (const [town, g] of byTown) {
+        const rings = NodesGeom.outline(g.cells, 16).map((r) => r.map(([x, zz]) => ll(x, zz)));
+        if (!rings.length) continue;
+        const poly = L.polygon(rings, { renderer: R.claim, fillColor: g.color, fillOpacity: 1, color: g.color, weight: 2, opacity: 0.95, interactive: false });
+        G.claim.addLayer(poly);
+        // the svg exists once something is drawn in it: then swap the fill for stripes
+        poly.getElement()?.setAttribute("fill", stripe(g.color));
+      }
+    }
+    const hl = T.sel && $("#tab-towns").classList.contains("active") ? townByName(T.sel) : null;
+    if (hl) {
+      for (const [list, dash] of [[hl.territories, null], [hl.captured, "4 6"]]) {
+        const cells = [];
+        for (const id of list) { const t = E.terr.get(id); if (t) for (const k of t.chunks) cells.push(KX(k), KZ(k)); }
+        const rings = NodesGeom.outline(cells, 16).map((r) => r.map(([x, zz]) => ll(x, zz)));
+        if (rings.length) G.sel.addLayer(L.polygon(rings, { renderer: R.sel, fill: false, color: "#ffffff", weight: 3, opacity: 0.95, dashArray: dash || "10 6", interactive: false }));
+      }
+    }
+    for (const t of E.terr.values()) {
+      if (!t.core) continue;
+      const p = ll(t.core[0] * 16 + 8, t.core[1] * 16 + 8);
+      if (!b.contains(p)) continue;
+      const claim = E.claimed.get(t.id);
+      if (E.opt.labels && z >= -2) {
+        const lock = claim && E.opt.lock ? `<span class="lock">🔒</span> ` : "";
+        G.labels.addLayer(L.marker(p, { pane: "over", interactive: false, keyboard: false, icon: L.divIcon({ className: "", iconSize: null, html: `<div class="ed-label">${lock}${esc(t.name || "")}<span class="id">#${t.id}${z >= 0 ? " · " + t.chunks.size : ""}</span></div>` }) }));
+      }
+      if (E.opt.icons && z >= -1 && t.nodes.length) {
+        const imgs = t.nodes.slice(0, 4).map((n) => iconUrl(n)).filter(Boolean).map((u) => `<img src="${esc(u)}" alt="">`).join("");
+        if (imgs) G.icons.addLayer(L.marker(p, { pane: "over", interactive: false, keyboard: false, icon: L.divIcon({ className: "", iconSize: null, html: `<div class="ed-icons">${imgs}</div>` }) }));
+      }
+      if (E.sel.has(t.id) && z >= -2) {
+        G.sel.addLayer(L.marker(p, { pane: "ui", interactive: false, keyboard: false, icon: L.divIcon({ className: "", iconSize: null, html: `<div class="ed-core" title="core"></div>` }) }));
+      }
+    }
+    drawGrid();
+  }
+  function drawGrid() {
+    G.grid.clearLayers();
+    if (!E.opt.grid || map.getZoom() < -1) return;
+    const b = map.getBounds();
+    const x0 = Math.floor(b.getWest() / 16) * 16, x1 = Math.ceil(b.getEast() / 16) * 16;
+    const z0 = Math.floor(b.getNorth() / 16) * 16, z1 = Math.ceil(b.getSouth() / 16) * 16;
+    const lines = [];
+    for (let x = x0; x <= x1; x += 16) lines.push([ll(x, z0), ll(x, z1)]);
+    for (let z = z0; z <= z1; z += 16) lines.push([ll(x0, z), ll(x1, z)]);
+    G.grid.addLayer(L.polyline(lines, { renderer: R.ui, color: "#000", opacity: 0.3, weight: 1, interactive: false }));
+  }
+  map.on("moveend zoomend", () => { drawOverlays(); preloadLand(); });
+
+  function iconUrl(nodeName) {
+    const r = E.resources[nodeName];
+    const icon = (r && r.icon) || nodeName;
+    return E.icons[icon] || E.icons[String(icon).toLowerCase()] || null;
+  }
+
+  // ---------------------------------------------------------------- tools
+  let stroke = null;   // active paint stroke
+  let spaceDown = false;
+  let spaceAt = 0;         // when Space went down (tap = toggle brush, hold = pan)
+  let spacePanned = false;
+  let shiftDown = false;
+  let pendingNew = false;  // "A": the next stroke starts a new territory
+  let prevTool = "select"; // tool to return to when the brush is toggled off
+  let resizeAcc = 0;       // Shift + mouse move brush resizing
+  const cursor = L.circle([0, 0], { renderer: R.ui, radius: 8, color: "#fff", weight: 1.5, fill: false, dashArray: "3 3", interactive: false });
+  const boxRect = L.rectangle([[0, 0], [0, 0]], { renderer: R.ui, color: "#f3d38d", weight: 1.5, fillOpacity: 0.12, interactive: false });
+
+  const PAINT_TOOLS = new Set(["paint", "new", "erase"]);
+
+  function setTool(t, classic = false) {
+    if (!PAINT_TOOLS.has(t)) prevTool = t;
+    E.classic = PAINT_TOOLS.has(t) && classic;
+    E.tool = t;
+    if (!PAINT_TOOLS.has(t)) setPendingNew(false);
+    if (t !== "auto") penReset();
+    if (t === "auto") map.doubleClickZoom.disable(); else map.doubleClickZoom.enable();
+    document.body.className = "editor tool-" + t;
+    $$("#tools [data-tool]").forEach((b) => b.classList.toggle("active", b.dataset.tool === t));
+    $("#brush").classList.toggle("off", !PAINT_TOOLS.has(t));
+    syncDragging();
+    if (PAINT_TOOLS.has(t)) G.ui.addLayer(cursor); else G.ui.removeLayer(cursor);
+    preloadLand();
+    updateModeHint();
+    shardsToolChanged();
+  }
+  /** Space tap: brush on/off, like the old Dynmap editor's paint mode */
+  function toggleBrush() {
+    if (PAINT_TOOLS.has(E.tool)) {
+      setTool("select");
+      toast("Brush off");
+    } else {
+      setTool("paint", true);
+      toast(E.sel.size === 1 ? "Brush on: right-drag paints, Ctrl+right-drag erases" : "Brush on. Right-click a territory to paint into it, or press A to start a new one");
+    }
+  }
+  function setPendingNew(on) {
+    pendingNew = on;
+    cursor.setStyle({ color: on ? "#7ee08a" : "#fff", dashArray: on ? "6 3" : "3 3" });
+    updateModeHint();
+  }
+  function updateModeHint() {
+    const el = $("#mode-hint");
+    if (!el) return;
+    if (E.tool === "shards") { el.textContent = shardHintText(); return; }
+    const brush = PAINT_TOOLS.has(E.tool);
+    const btn = E.classic ? "right-drag" : "drag";
+    if (E.tool === "auto") {
+      el.textContent = penStrokes.length ?
+        "Click inside a closed area to fill it · right-drag to draw more border · Backspace: undo line · Esc: clear" :
+        "Right-drag to draw a border line (it clips onto borders, Alt turns that off) · left-drag pans · click inside a closed area to fill it";
+      return;
+    }
+    const tips = {
+      select: "Select: click or right-click a territory · Shift+drag to box-select · Shift+click adds",
+      core: "Core: click a chunk to make it the territory's core",
+      fill: "Fill: click empty land to fill the connected area (needs Land only in settings)",
+      rect: "Box: drag a rectangle to fill it",
+    };
+    if (tips[E.tool]) { el.textContent = tips[E.tool]; return; }
+    el.textContent = !brush ? "" :
+      pendingNew ? `Next stroke starts a new territory · ${btn} to paint` :
+      E.tool === "erase" ? `Erasing · ${btn} · Space: brush off` :
+      E.tool === "new" ? `New territory per stroke · ${btn} · Space: brush off` :
+      `Brush · ${btn} paint · Ctrl+${btn} erase · Shift+move: size · A: new · Space: off`;
+  }
+  function syncDragging() {
+    const brushPaints = PAINT_TOOLS.has(E.tool) && !E.classic;
+    const paintMode = brushPaints || E.tool === "rect" || stroke || rectStart || (E.tool === "select" && shiftDown);
+    if (paintMode && !spaceDown) map.dragging.disable(); else map.dragging.enable();
+    document.body.classList.toggle("panning", spaceDown);
+  }
+  function setBrush(n) {
+    E.brush = Math.max(0, Math.min(12, n));
+    store.set("brush", E.brush);
+    $("#brush-size").value = E.brush;
+    $("#brush-out").textContent = `${E.brush * 2 + 1}×${E.brush * 2 + 1}`;
+    cursor.setRadius((E.brush + 0.5) * 16);
+  }
+
+  function chunkAt(latlng) { return [Math.floor(latlng.lng) >> 4, Math.floor(latlng.lat) >> 4]; }
+
+  map.on("mousemove", (e) => {
+    const x = Math.floor(e.latlng.lng), z = Math.floor(e.latlng.lat);
+    const [cx, cz] = [x >> 4, z >> 4];
+    $("#coords").textContent = `x ${x}  z ${z}  ·  chunk ${cx}, ${cz}`;
+    const id = E.owner.get(K(cx, cz));
+    const t = id !== undefined ? E.terr.get(id) : null;
+    const claim = t && E.claimed.get(t.id);
+    $("#hover-terr").textContent = t ? `#${t.id} ${t.name || ""}${claim ? " · " + claim.town : ""}` : "wilderness";
+    const oe = e.originalEvent;
+    if (PAINT_TOOLS.has(E.tool) && oe.shiftKey && !stroke && !oe.buttons) {
+      // Shift + mouse move: resize the brush (old editor behavior); cursor stays put
+      const d = Math.abs(oe.movementX) > Math.abs(oe.movementY) ? oe.movementX : -oe.movementY;
+      resizeAcc += d;
+      if (Math.abs(resizeAcc) >= 14) { setBrush(E.brush + Math.sign(resizeAcc)); resizeAcc = 0; }
+      return;
+    }
+    if (PAINT_TOOLS.has(E.tool)) cursor.setLatLng(ll(cx * 16 + 8, cz * 16 + 8));
+    if (stroke) strokeTo(cx, cz);
+    if (E.tool === "auto") penMove(e);
+    if (rectStart) {
+      boxRect.setBounds([ll(Math.min(rectStart[0], cx) * 16, Math.min(rectStart[1], cz) * 16), ll((Math.max(rectStart[0], cx) + 1) * 16, (Math.max(rectStart[1], cz) + 1) * 16)]);
+    }
+  });
+
+  let rectStart = null;
+  let rectMode = null; // "fill" | "select"
+
+  map.getContainer().addEventListener("contextmenu", (e) => e.preventDefault());
+  map.on("dragstart", () => { if (spaceDown) spacePanned = true; });
+
+  // ---- Auto tool (pen): draw border lines, then click inside a closed area to fill it
+  const penWalls = new Set();   // chunk keys of drawn border lines
+  let penStrokes = [];          // [{ keys: [], line: L.Polyline }] for undo
+  let penDown = null;           // { sx, sy, moved, last: [cx, cz], stroke }
+  const penStyle = { renderer: R.ui, color: "#f3d38d", weight: 3, opacity: 0.95, interactive: false };
+
+  // the pen clips onto nearby borders: free chunks touching a territory (or the coast with Land only) and the ends of lines you drew
+  const penMarker = L.circleMarker([0, 0], { renderer: R.ui, radius: 5, weight: 2, color: "#fff", fillColor: "#f3d38d", fillOpacity: 0.9, interactive: false });
+  function penEdge(k) {
+    if (E.owner.has(k)) return false;
+    const x = KX(k), z = KZ(k);
+    const nb = [K(x + 1, z), K(x - 1, z), K(x, z + 1), K(x, z - 1)];
+    if (nb.some((n) => E.owner.has(n))) return true;
+    if (E.opt.land && isLand(k) === true) return nb.some((n) => isLand(n) === false);
+    return false;
+  }
+  function penSnap(cx, cz, oe) {
+    if (oe && oe.altKey) return [cx, cz, false];
+    const r = Math.max(1, Math.min(6, Math.round(14 / (16 * Math.pow(2, map.getZoom())))));
+    const own = penDown && penDown.stroke ? penDown.stroke.keySet : null;
+    let best = null, bd = Infinity;
+    for (let dz = -r; dz <= r; dz++) {
+      for (let dx = -r; dx <= r; dx++) {
+        const k = K(cx + dx, cz + dz);
+        if (own && own.has(k)) continue;
+        if (!(penWalls.has(k) || penEdge(k))) continue;
+        const d = dx * dx + dz * dz;
+        if (d < bd) { bd = d; best = [cx + dx, cz + dz, true]; }
+      }
+    }
+    return best || [cx, cz, false];
+  }
+  /** chunks from a to b: follows the border staircase when both ends are on a border, otherwise a straight line */
+  function penPath(a, b) {
+    const straight = line(a[0], a[1], b[0], b[1]).slice(1);
+    const dist = Math.max(Math.abs(a[0] - b[0]), Math.abs(a[1] - b[1]));
+    if (dist < 2 || !penEdge(K(a[0], a[1])) || !penEdge(K(b[0], b[1]))) return straight;
+    const R = dist + 6;
+    const goal = K(b[0], b[1]);
+    const prev = new Map([[K(a[0], a[1]), null]]);
+    const q = [K(a[0], a[1])];
+    for (let i = 0; i < q.length && i < 6000; i++) {
+      const k = q[i];
+      if (k === goal) break;
+      const x = KX(k), z = KZ(k);
+      for (let dz = -1; dz <= 1; dz++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          if (!dx && !dz) continue;
+          const nx = x + dx, nz = z + dz, nk = K(nx, nz);
+          if (prev.has(nk) || Math.abs(nx - a[0]) > R || Math.abs(nz - a[1]) > R || !penEdge(nk)) continue;
+          prev.set(nk, k);
+          q.push(nk);
+        }
+      }
+    }
+    if (!prev.has(goal)) return straight;
+    const out = [];
+    for (let k = goal; k !== null && k !== K(a[0], a[1]); k = prev.get(k)) out.push([KX(k), KZ(k)]);
+    out.reverse();
+    return out.length <= dist * 3 + 8 ? out : straight;
+  }
+  function penShowMarker(cx, cz, snapped) {
+    penMarker.setLatLng(ll(cx * 16 + 8, cz * 16 + 8));
+    penMarker.setStyle({ fillColor: snapped ? "#7ee08a" : "#f3d38d" });
+    G.ui.addLayer(penMarker);
+  }
+  function penReset() {
+    G.ui.removeLayer(penMarker);
+    for (const st of penStrokes) G.ui.removeLayer(st.line);
+    penStrokes = [];
+    penWalls.clear();
+    penDown = null;
+    updateModeHint();
+  }
+  function penUndo() {
+    const st = penStrokes.pop();
+    if (!st) return;
+    G.ui.removeLayer(st.line);
+    penWalls.clear();
+    for (const o of penStrokes) for (const k of o.keys) penWalls.add(k);
+    updateModeHint();
+  }
+  map.on("mousedown", (e) => {
+    if (E.tool !== "auto" || spaceDown || e.originalEvent.button !== 2) return;
+    const [rx, rz] = chunkAt(e.latlng);
+    const [cx, cz] = penSnap(rx, rz, e.originalEvent);
+    penDown = { sx: e.originalEvent.clientX, sy: e.originalEvent.clientY, moved: false, last: [cx, cz], start: [cx, cz], stroke: null };
+  });
+  function penMove(e) {
+    const oe = e.originalEvent || e;
+    const ev = e.latlng || map.mouseEventToLatLng(e);
+    const [rx, rz] = chunkAt(ev);
+    const [sx, sz, snapped] = penSnap(rx, rz, oe);
+    penShowMarker(sx, sz, snapped);
+    if (!penDown) return;
+    if (!penDown.moved) {
+      if (Math.hypot(oe.clientX - penDown.sx, oe.clientY - penDown.sy) < 6) return;
+      penDown.moved = true;
+      penDown.stroke = { keySet: new Set([K(penDown.start[0], penDown.start[1])]), keys: [K(penDown.start[0], penDown.start[1])], pts: [ll(penDown.start[0] * 16 + 8, penDown.start[1] * 16 + 8)], line: L.polyline([], penStyle) };
+      G.ui.addLayer(penDown.stroke.line);
+      penWalls.add(penDown.stroke.keys[0]);
+    }
+    const cx = sx, cz = sz;
+    if (cx === penDown.last[0] && cz === penDown.last[1]) return;
+    if (penDown.stroke.keySet.has(K(cx, cz))) return; // don't double back over the line just drawn
+    for (const [x, z] of penPath(penDown.last, [cx, cz])) {
+      const k = K(x, z);
+      penDown.stroke.keys.push(k);
+      penDown.stroke.keySet.add(k);
+      penWalls.add(k);
+      penDown.stroke.pts.push(ll(x * 16 + 8, z * 16 + 8));
+    }
+    penDown.stroke.line.setLatLngs(penDown.stroke.pts);
+    penDown.last = [cx, cz];
+  }
+  document.addEventListener("mouseup", (e) => {
+    if (E.tool !== "auto" || !penDown) return;
+    const d = penDown;
+    penDown = null;
+    if (e.target.closest && e.target.closest("#sidebar,#modal-wrap")) return;
+    if (d.moved) {
+      penDown = d;
+      penMove(e); // include the point where the button was released
+      penDown = null;
+      penStrokes.push(d.stroke);
+      updateModeHint();
+      return;
+    }
+    penFill(d.start[0], d.start[1]);
+  });
+  // left click (not a drag, which pans) also fills
+  map.on("click", (e) => {
+    if (E.tool !== "auto" || spaceDown) return;
+    const [cx, cz] = chunkAt(e.latlng);
+    penFill(cx, cz);
+  });
+
+  /** flood fill of free land around (cx, cz), stopped by drawn borders, territories and (with Land only) water */
+  async function penFill(cx, cz) {
+    const start = K(cx, cz);
+    if (E.owner.has(start)) return toast("That chunk is already in a territory. Click on free land inside your border.", true);
+    if (penWalls.has(start)) return toast("That's on a border line. Click inside the area instead.", true);
+    const LIMIT = 250000;
+    if (E.opt.land) {
+      await waitForLand(cx, cz, cx, cz);
+      if (isLand(start) !== true) return toast("That's water. Click on land, or turn off Land only in Options.", true);
+    }
+    toast("Filling…");
+    const seen = new Set([start]);
+    const queue = [start];
+    for (let qi = 0; qi < queue.length; qi++) {
+      const k = queue[qi];
+      const x = KX(k), z = KZ(k);
+      for (const nk of [K(x + 1, z), K(x - 1, z), K(x, z + 1), K(x, z - 1)]) {
+        if (seen.has(nk) || E.owner.has(nk) || penWalls.has(nk)) continue;
+        if (E.opt.land) {
+          let v = isLand(nk);
+          if (v === null) { await waitForLand(KX(nk), KZ(nk), KX(nk), KZ(nk)); v = isLand(nk); }
+          if (v !== true) continue;
+        }
+        seen.add(nk);
+        queue.push(nk);
+      }
+      if (queue.length > LIMIT) return toast("That area isn't closed: it keeps going. Draw the missing part of the border" + (E.opt.land ? "." : ", or turn on Land only in Options so water closes it."), true);
+    }
+    autoDialog(queue);
+  }
+
+  /** stroke mode for a mouse press while the brush is on */
+  function brushMode(oe) {
+    if (oe.ctrlKey || oe.metaKey || E.tool === "erase") return E.sel.size === 1 && E.tool !== "erase" ? "eraseSel" : "erase";
+    if (E.tool === "new" || pendingNew) return "new";
+    return "paint";
+  }
+
+  map.on("mousedown", (e) => {
+    const oe = e.originalEvent;
+    if (spaceDown) return;
+    const [cx, cz] = chunkAt(e.latlng);
+    if (oe.button === 2) return rightDown(cx, cz, oe);
+    if (oe.button !== 0) return;
+    if (PAINT_TOOLS.has(E.tool)) {
+      if (!E.classic) startStroke(cx, cz, brushMode(oe));
+      return;
+    }
+    if (E.tool === "select" && e.originalEvent.shiftKey) {
+      rectStart = [cx, cz]; rectMode = "select";
+      boxRect.setBounds([ll(cx * 16, cz * 16), ll(cx * 16 + 16, cz * 16 + 16)]);
+      G.ui.addLayer(boxRect);
+      return;
+    }
+    if (E.tool === "rect") {
+      rectStart = [cx, cz]; rectMode = "fill";
+      boxRect.setBounds([ll(cx * 16, cz * 16), ll(cx * 16 + 16, cz * 16 + 16)]);
+      G.ui.addLayer(boxRect);
+      return;
+    }
+  });
+
+  /**
+   * Right mouse button, as in the old Dynmap editor:
+   *   brush on:  drag paints into the selected territory, Ctrl+drag erases
+   *   brush off: click selects, Shift+click adds/removes, click empty land deselects,
+   *              Ctrl+click adds/removes the resource picked in the Resources tab
+   */
+  function rightDown(cx, cz, oe) {
+    if (E.tool === "auto") return; // the pen handles its own right button
+    if (PAINT_TOOLS.has(E.tool)) return startStroke(cx, cz, brushMode(oe));
+    const id = E.owner.get(K(cx, cz));
+    if (oe.ctrlKey || oe.metaKey) return toggleResourceAt(id);
+    if (id === undefined) { if (!oe.shiftKey) select([]); return; }
+    if (oe.shiftKey) toggleSel(id); else select([id]);
+  }
+
+  function toggleResourceAt(id) {
+    if (!resSel || !E.resources[resSel]) return toast("Pick a resource in the Resources tab first, then Ctrl+right-click territories", true);
+    if (id === undefined) return;
+    const t = E.terr.get(id);
+    const has = t.nodes.includes(resSel);
+    begin(has ? "Remove resource" : "Add resource");
+    touch(id);
+    if (has) t.nodes = t.nodes.filter((n) => n !== resSel); else t.nodes.push(resSel);
+    end();
+    toast(`${has ? "Removed" : "Added"} ${resSel} ${has ? "from" : "to"} #${id}${t.name ? " " + t.name : ""}`);
+  }
+  document.addEventListener("mouseup", (e) => {
+    if (stroke) endStroke();
+    if (rectStart) {
+      const ll2 = map.mouseEventToLatLng(e);
+      const [cx, cz] = chunkAt(ll2);
+      finishRect(rectStart, [cx, cz], rectMode);
+      rectStart = null;
+      G.ui.removeLayer(boxRect);
+      syncDragging();
+    }
+  });
+
+  map.on("click", (e) => {
+    const [cx, cz] = chunkAt(e.latlng);
+    const k = K(cx, cz);
+    const id = E.owner.get(k);
+    if (E.tool === "select") {
+      if (e.originalEvent.shiftKey) return; // handled by box select
+      if (id === undefined) { if (!e.originalEvent.ctrlKey && !e.originalEvent.metaKey) select([]); return; }
+      if (e.originalEvent.ctrlKey || e.originalEvent.metaKey) toggleSel(id);
+      else select([id]);
+    } else if (E.tool === "core") {
+      if (id === undefined) return toast("That chunk isn't in a territory");
+      begin("Set core");
+      touch(id);
+      E.terr.get(id).core = [cx, cz];
+      E.terr.get(id).coreAuto = false;
+      end();
+      select([id]);
+    } else if (E.tool === "fill") {
+      fillFrom(cx, cz);
+    } else if (PAINT_TOOLS.has(E.tool) && E.classic) {
+      // brush on, left mouse pans: a plain click still picks the territory to paint into
+      if (id === undefined) return;
+      if (e.originalEvent.shiftKey) toggleSel(id); else select([id]);
+    }
+  });
+
+  function startStroke(cx, cz, mode) {
+    let target = null;
+    if (mode === "paint" || mode === "eraseSel") {
+      if (E.sel.size !== 1) {
+        return toast(mode === "paint" ? "Select one territory to paint into (right-click it), or press A to start a new one" : "Select one territory first", true);
+      }
+      target = [...E.sel][0];
+      if (isLocked(target)) return toast("That territory is claimed and locked (see Options)", true);
+    }
+    begin(mode.startsWith("erase") ? "Erase" : mode === "new" ? "New territory" : "Paint");
+    if (mode === "new") {
+      const t = newTerritory();
+      target = t.id;
+      E.sel.clear();
+      E.sel.add(target);
+      setPendingNew(false);
+    }
+    stroke = { mode, target, last: null, frame: 0, dirty: new Set() };
+    syncDragging();
+    strokeTo(cx, cz);
+  }
+  function strokeTo(cx, cz) {
+    const s = stroke;
+    const pts = s.last ? line(s.last[0], s.last[1], cx, cz) : [[cx, cz]];
+    s.last = [cx, cz];
+    const erase = s.mode === "erase" || s.mode === "eraseSel";
+    const opts = { onlyWild: !erase && E.opt.wild, landOnly: !erase && E.opt.land };
+    for (const [x, z] of pts) {
+      for (const k of brushKeys(x, z, E.brush)) {
+        const before = E.owner.get(k);
+        if (s.mode === "eraseSel" && before !== s.target) continue;
+        if (assign(k, erase ? null : s.target, opts)) {
+          s.dirty.add(erase ? before : s.target);
+          if (before !== undefined) s.dirty.add(before);
+        }
+      }
+    }
+    if (!s.frame) s.frame = requestAnimationFrame(() => { s.frame = 0; const d = [...s.dirty]; s.dirty.clear(); redraw(d); });
+  }
+  function endStroke() {
+    const s = stroke;
+    stroke = null;
+    if (s.frame) cancelAnimationFrame(s.frame);
+    end();
+    syncDragging();
+    if (s.mode === "new" && E.terr.has(s.target)) select([s.target]);
+  }
+  function line(x0, z0, x1, z1) {
+    const out = [];
+    const dx = Math.abs(x1 - x0), dz = Math.abs(z1 - z0);
+    const sx = x0 < x1 ? 1 : -1, sz = z0 < z1 ? 1 : -1;
+    let err = dx - dz, x = x0, z = z0;
+    for (let i = 0; i < 4096; i++) {
+      out.push([x, z]);
+      if (x === x1 && z === z1) break;
+      const e2 = 2 * err;
+      if (e2 > -dz) { err -= dz; x += sx; }
+      if (e2 < dx) { err += dx; z += sz; }
+    }
+    return out;
+  }
+
+  function finishRect(a, b, mode) {
+    const x0 = Math.min(a[0], b[0]), x1 = Math.max(a[0], b[0]);
+    const z0 = Math.min(a[1], b[1]), z1 = Math.max(a[1], b[1]);
+    const area = (x1 - x0 + 1) * (z1 - z0 + 1);
+    if (mode === "select") {
+      const ids = new Set();
+      if (area <= 400000) {
+        for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) { const id = E.owner.get(K(x, z)); if (id !== undefined) ids.add(id); }
+      } else {
+        for (const t of E.terr.values()) if (t.core && t.core[0] >= x0 && t.core[0] <= x1 && t.core[1] >= z0 && t.core[1] <= z1) ids.add(t.id);
+      }
+      select([...new Set([...E.sel, ...ids])]);
+      return;
+    }
+    if (area > 250000) return toast("That box is too big (max 250,000 chunks)", true);
+    let target = E.sel.size === 1 ? [...E.sel][0] : null;
+    if (target != null && isLocked(target)) return toast("That territory is claimed and locked (see Options)", true);
+    begin("Box fill");
+    if (target == null) { target = newTerritory().id; }
+    let n = 0;
+    for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) if (assign(K(x, z), target, { onlyWild: E.opt.wild, landOnly: E.opt.land })) n++;
+    end();
+    if (E.terr.has(target)) select([target]);
+    toast(n ? `Filled ${n} chunks` : "Nothing to fill there (water, or already claimed by other territories)");
+  }
+
+  function fillFrom(cx, cz) {
+    const start = K(cx, cz);
+    if (E.owner.has(start)) return toast("Fill starts on empty land. Click outside any territory.", true);
+    if (!E.opt.land) return toast("Turn on “Land only” in Options to use Fill", true);
+    if (isLand(start) !== true) return toast(isLand(start) === null ? "Terrain is still loading, try again in a moment" : "That's water. Fill only spreads over land.", true);
+    const limit = 60000;
+    const seen = new Set([start]);
+    const q = [start];
+    let unknown = 0;
+    for (let i = 0; i < q.length; i++) {
+      if (q.length > limit) return toast("That area is too large (over 60,000 chunks). Use Box or New instead.", true);
+      const x = KX(q[i]), z = KZ(q[i]);
+      for (const n of [K(x + 1, z), K(x - 1, z), K(x, z + 1), K(x, z - 1)]) {
+        if (seen.has(n) || E.owner.has(n)) continue;
+        seen.add(n);
+        const l = isLand(n);
+        if (l === null) { unknown++; continue; }
+        if (!l) continue;
+        q.push(n);
+      }
+    }
+    let target = E.sel.size === 1 && !isLocked([...E.sel][0]) ? [...E.sel][0] : null;
+    begin("Fill");
+    if (target == null) target = newTerritory().id;
+    for (const k of q) assign(k, target, { onlyWild: true });
+    end();
+    select([target]);
+    toast(`Filled ${q.length} chunks${unknown ? " (zoom out and fill again if part of the area hadn't loaded)" : ""}`);
+  }
+
+  // ---------------------------------------------------------------- selection + bulk actions
+  function select(ids) {
+    E.sel = new Set(ids.filter((id) => E.terr.has(id)));
+    restyle();
+    drawOverlays();
+    refreshUi();
+    if (T.sel && $("#tab-towns").classList.contains("active")) renderTownEditor();
+  }
+  function toggleSel(id) {
+    if (E.sel.has(id)) E.sel.delete(id); else E.sel.add(id);
+    select([...E.sel]);
+  }
+
+  function lockedInSelection() { return [...E.sel].filter(isLocked); }
+
+  function mergeSelected() {
+    const ids = [...E.sel];
+    if (ids.length < 2) return;
+    if (lockedInSelection().length) return toast("Claimed territories are locked. Turn off the lock in Options to merge them.", true);
+    const into = ids.reduce((a, b) => (E.terr.get(b).chunks.size > E.terr.get(a).chunks.size ? b : a));
+    begin("Merge");
+    const t = E.terr.get(into);
+    touch(into);
+    for (const id of ids) {
+      if (id === into) continue;
+      const o = E.terr.get(id);
+      touch(id);
+      for (const k of [...o.chunks]) { o.chunks.delete(k); t.chunks.add(k); E.owner.set(k, into); }
+      for (const n of o.nodes) if (!t.nodes.includes(n)) t.nodes.push(n);
+      if (!t.name && o.name) t.name = o.name;
+    }
+    t.coreAuto = true;
+    end();
+    select([into]);
+    toast(`Merged ${ids.length} territories into #${into}`);
+  }
+
+  function deleteSelected() {
+    const ids = [...E.sel];
+    if (!ids.length) return;
+    const locked = lockedInSelection();
+    if (locked.length) return toast(`#${locked.join(", #")} ${locked.length > 1 ? "are" : "is"} claimed by a town and can't be deleted`, true);
+    begin(ids.length > 1 ? `Delete ${ids.length} territories` : "Delete territory");
+    for (const id of ids) {
+      const t = E.terr.get(id);
+      touch(id);
+      for (const k of t.chunks) E.owner.delete(k);
+      t.chunks.clear();
+    }
+    end();
+    select([]);
+  }
+
+  function splitDisconnected() {
+    const ids = [...E.sel];
+    begin("Split pieces");
+    let made = 0;
+    const newSel = [];
+    for (const id of ids) {
+      if (isLocked(id)) continue;
+      const t = E.terr.get(id);
+      const comps = components(t.chunks).sort((a, b) => b.length - a.length);
+      newSel.push(id);
+      for (const comp of comps.slice(1)) {
+        const nt = newTerritory();
+        for (const k of comp) assign(k, nt.id);
+        newSel.push(nt.id);
+        made++;
+      }
+    }
+    end();
+    select(newSel);
+    toast(made ? `Split off ${made} separate pieces into new territories` : "Those territories are already in one piece");
+  }
+
+  /**
+   * Split the selected territories into random territories of about `avg`
+   * chunks: k-means (Lloyd) on chunk centers, then every territory is made
+   * one connected piece and tiny leftovers are merged into a neighbor.
+   */
+  /** Splits a set of chunk keys into compact pieces of about `avg` chunks (k-means style). Returns an array of Sets. */
+  function partition(cells, { avg, seed, iterations, mergeBelow }) {
+    if (cells.length < 2) return [new Set(cells)];
+    const n = Math.max(1, Math.round(cells.length / avg));
+    const rnd = mulberry32(seed);
+    const xs = new Float64Array(cells.length), zs = new Float64Array(cells.length);
+    cells.forEach((k, i) => { xs[i] = KX(k); zs[i] = KZ(k); });
+    // pick spread-out starting centers (k-means++ lite)
+    let cxs = [], czs = [];
+    const first = Math.floor(rnd() * cells.length);
+    cxs.push(xs[first]); czs.push(zs[first]);
+    const dist = new Float64Array(cells.length).fill(Infinity);
+    while (cxs.length < n) {
+      const li = cxs.length - 1;
+      let total = 0;
+      for (let i = 0; i < cells.length; i++) {
+        const d = (xs[i] - cxs[li]) ** 2 + (zs[i] - czs[li]) ** 2;
+        if (d < dist[i]) dist[i] = d;
+        total += dist[i];
+      }
+      let r = rnd() * total, pick = 0;
+      for (let i = 0; i < cells.length; i++) { r -= dist[i]; if (r <= 0) { pick = i; break; } }
+      cxs.push(xs[pick]); czs.push(zs[pick]);
+    }
+    // bucket grid to keep assignment fast for big areas
+    const assignTo = new Int32Array(cells.length);
+    const runAssign = () => {
+      const cell = Math.max(4, Math.sqrt(avg) * 2);
+      const grid = new Map();
+      for (let j = 0; j < n; j++) {
+        const g = Math.floor(cxs[j] / cell) + "," + Math.floor(czs[j] / cell);
+        if (!grid.has(g)) grid.set(g, []);
+        grid.get(g).push(j);
+      }
+      for (let i = 0; i < cells.length; i++) {
+        const gx = Math.floor(xs[i] / cell), gz = Math.floor(zs[i] / cell);
+        let best = -1, bd = Infinity;
+        for (let ring = 0; ring < 50 && (best < 0 || ring < 3); ring++) {
+          for (let dz = -ring; dz <= ring; dz++) for (let dx = -ring; dx <= ring; dx++) {
+            if (Math.max(Math.abs(dx), Math.abs(dz)) !== ring) continue;
+            const arr = grid.get((gx + dx) + "," + (gz + dz));
+            if (!arr) continue;
+            for (const j of arr) { const d = (xs[i] - cxs[j]) ** 2 + (zs[i] - czs[j]) ** 2; if (d < bd) { bd = d; best = j; } }
+          }
+        }
+        if (best < 0) for (let j = 0; j < n; j++) { const d = (xs[i] - cxs[j]) ** 2 + (zs[i] - czs[j]) ** 2; if (d < bd) { bd = d; best = j; } }
+        assignTo[i] = best;
+      }
+    };
+    for (let it = 0; it <= iterations; it++) {
+      runAssign();
+      if (it === iterations) break;
+      const sx = new Float64Array(n), sz = new Float64Array(n), c = new Int32Array(n);
+      for (let i = 0; i < cells.length; i++) { const j = assignTo[i]; sx[j] += xs[i]; sz[j] += zs[i]; c[j]++; }
+      for (let j = 0; j < n; j++) if (c[j]) { cxs[j] = sx[j] / c[j]; czs[j] = sz[j] / c[j]; }
+    }
+    // groups -> connected pieces; stray pieces join the neighbor they touch most
+    const groupOf = new Map();
+    cells.forEach((k, i) => groupOf.set(k, assignTo[i]));
+    const groups = new Map();
+    for (const [k, g] of groupOf) { if (!groups.has(g)) groups.set(g, new Set()); groups.get(g).add(k); }
+    const reassignPieces = () => {
+      let moved = false;
+      for (const [g, set] of [...groups]) {
+        const comps = components(set).sort((a, b) => b.length - a.length);
+        for (const comp of comps.slice(1)) {
+          const votes = new Map();
+          for (const k of comp) {
+            const x = KX(k), z = KZ(k);
+            for (const nk of [K(x + 1, z), K(x - 1, z), K(x, z + 1), K(x, z - 1)]) {
+              const ng = groupOf.get(nk);
+              if (ng !== undefined && ng !== g) votes.set(ng, (votes.get(ng) || 0) + 1);
+            }
+          }
+          if (!votes.size) continue;
+          const to = [...votes].sort((a, b) => b[1] - a[1])[0][0];
+          for (const k of comp) { set.delete(k); groups.get(to).add(k); groupOf.set(k, to); }
+          moved = true;
+        }
+      }
+      return moved;
+    };
+    for (let i = 0; i < 4 && reassignPieces(); i++) { /* repeat until stable */ }
+    if (mergeBelow > 0) {
+      for (const [g, set] of [...groups].sort((a, b) => a[1].size - b[1].size)) {
+        if (!groups.has(g) || set.size >= mergeBelow || groups.size <= 1) continue;
+        const votes = new Map();
+        for (const k of set) {
+          const x = KX(k), z = KZ(k);
+          for (const nk of [K(x + 1, z), K(x - 1, z), K(x, z + 1), K(x, z - 1)]) {
+            const ng = groupOf.get(nk);
+            if (ng !== undefined && ng !== g) votes.set(ng, (votes.get(ng) || 0) + 1);
+          }
+        }
+        if (!votes.size) continue;
+        const to = [...votes].sort((a, b) => groups.get(a[0]).size - groups.get(b[0]).size)[0][0];
+        for (const k of set) { groups.get(to).add(k); groupOf.set(k, to); }
+        groups.delete(g);
+      }
+    }
+    return [...groups.values()].filter((g) => g.size);
+  }
+
+  function generate({ avg, seed, iterations, mergeBelow }) {
+    const ids = [...E.sel];
+    if (!ids.length) return;
+    if (lockedInSelection().length) return toast("Claimed territories are locked and can't be regenerated", true);
+    const cells = [];
+    for (const id of ids) for (const k of E.terr.get(id).chunks) cells.push(k);
+    if (cells.length < 2) return;
+    const groups = partition(cells, { avg, seed, iterations, mergeBelow });
+    begin("Generate territories");
+    for (const id of ids) {
+      const t = E.terr.get(id);
+      touch(id);
+      for (const k of t.chunks) E.owner.delete(k);
+      t.chunks.clear();
+    }
+    const created = [];
+    for (const set of groups) {
+      if (!set.size) continue;
+      const t = newTerritory();
+      for (const k of set) assign(k, t.id);
+      created.push(t.id);
+    }
+    end();
+    select(created);
+    toast(`Made ${created.length} territories (about ${Math.round(cells.length / Math.max(1, created.length))} chunks each)`);
+  }
+
+  /** Picks `count` items spread out (best-candidate sampling); `taken` are positions that already count as occupied. */
+  function spreadPick(cands, count, rnd, taken) {
+    const pos = (t) => t.core || [KX([...t.chunks][0]), KZ([...t.chunks][0])];
+    const pts = taken.slice();
+    const left = cands.slice();
+    const out = [];
+    while (out.length < count && left.length) {
+      let best = -1, bd = -1;
+      const tries = Math.min(left.length, 12);
+      for (let n = 0; n < tries; n++) {
+        const i = Math.floor(rnd() * left.length);
+        const p = pos(left[i]);
+        let d = Infinity;
+        for (const q of pts) { const dd = (p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2; if (dd < d) d = dd; }
+        if (d > bd) { bd = d; best = i; }
+      }
+      const t = left.splice(best, 1)[0];
+      out.push(t);
+      pts.push(pos(t));
+    }
+    return out;
+  }
+
+  /** rows: [{ resource, amount, percent }]; options: { spread, maxPer, clear, seed } */
+  function distributeResources(rows, { spread, maxPer, clear, seed, scopeAll }) {
+    const scope = (!scopeAll && E.sel.size ? [...E.sel] : [...E.terr.keys()]).map((id) => E.terr.get(id)).filter((t) => t && !isLocked(t.id));
+    if (!scope.length) return toast("No territories to put resources on (claimed ones are locked, see Options)", true);
+    const rnd = mulberry32(seed);
+    begin("Distribute resources");
+    if (clear) for (const t of scope) { touch(t.id); t.nodes = []; }
+    const summary = [];
+    for (const row of rows) {
+      const want = row.percent ? Math.round(scope.length * row.amount / 100) : Math.round(row.amount);
+      const cands = scope.filter((t) => !t.nodes.includes(row.resource) && t.nodes.length < maxPer);
+      // territories anywhere that already have it count as occupied spots, so new ones keep their distance
+      const taken = [];
+      for (const t of E.terr.values()) if (t.nodes.includes(row.resource) && t.core) taken.push(t.core);
+      let picked;
+      if (spread) {
+        picked = spreadPick(cands, want, rnd, taken);
+      } else {
+        const a = cands.slice();
+        for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+        picked = a.slice(0, want);
+      }
+      for (const t of picked) { touch(t.id); t.nodes.push(row.resource); }
+      summary.push(`${row.resource} ×${picked.length}`);
+    }
+    end();
+    toast(`Distributed: ${summary.join(", ")}${summary.length ? "" : "nothing"}`);
+  }
+
+  function distribute(resource, count) {
+    distributeResources([{ resource, amount: count, percent: false }], { spread: false, maxPer: 99, clear: false, seed: (Date.now() & 0xffff) + E.sel.size, scopeAll: false });
+  }
+
+  async function waitForLand(x0, z0, x1, z1) {
+    const [rx0, rz0] = regionOf(x0, z0), [rx1, rz1] = regionOf(x1, z1);
+    const regs = [];
+    for (let z = rz0; z <= rz1; z++) for (let x = rx0; x <= rx1; x++) regs.push(loadRegion(x, z));
+    const t0 = Date.now();
+    while (regs.some((r) => r.state === "loading") && Date.now() - t0 < 30000) await new Promise((r) => setTimeout(r, 100));
+  }
+
+  function autoDialog(cells) {
+    const p = store.get("auto", { avg: 120, seed: 1, iterations: 4, mergeBelow: 30 });
+    modal(`<h2>Auto-generate territories</h2>
+      <p>Fills this area (${cells.length.toLocaleString()} chunks of free land) with new territories. Nothing else is touched. You can undo this.</p>
+      <div class="grid2">
+        <label class="field"><span>Chunks per territory</span><input id="a-avg" type="number" min="4" value="${p.avg}"></label>
+        <label class="field"><span>Random seed</span><input id="a-seed" type="number" value="${p.seed}"></label>
+        <label class="field"><span>Smoothing passes</span><input id="a-it" type="number" min="0" max="20" value="${p.iterations}"></label>
+        <label class="field"><span>Merge pieces smaller than</span><input id="a-merge" type="number" min="0" value="${p.mergeBelow}"></label>
+      </div>
+      <p class="hint" id="a-est"></p>
+      <div class="foot"><button class="btn" data-close>Cancel</button><button class="btn primary" id="a-go">Generate</button></div>`);
+    const upd = () => { $("#a-est").textContent = `About ${Math.max(1, Math.round(cells.length / Math.max(4, +$("#a-avg").value || 120)))} territories`; };
+    $("#a-avg").oninput = upd;
+    upd();
+    $("#a-go").onclick = () => {
+      const params = {
+        avg: Math.max(4, +$("#a-avg").value || 120), seed: +$("#a-seed").value || 1,
+        iterations: Math.max(0, Math.min(20, +$("#a-it").value || 0)), mergeBelow: Math.max(0, +$("#a-merge").value || 0),
+      };
+      store.set("auto", params);
+      closeModal();
+      autoGenerate(cells, params);
+    };
+  }
+
+  function autoGenerate(cells, { avg, seed, iterations, mergeBelow }) {
+    cells = cells.filter((k) => !E.owner.has(k));
+    if (!cells.length) return toast("No free land left in that area", true);
+    begin("Auto-generate territories");
+    const created = [];
+    const parts = cells.length < avg * 1.5 ? [new Set(cells)] : partition(cells, { avg, seed, iterations, mergeBelow });
+    for (const set of parts) {
+      if (!set.size) continue;
+      const t = newTerritory();
+      for (const k of set) assign(k, t.id);
+      created.push(t.id);
+    }
+    end();
+    penReset();
+    select(created);
+    toast(`Made ${created.length} territories (about ${Math.round(cells.length / Math.max(1, created.length))} chunks each)`);
+  }
+
+  // ---------------------------------------------------------------- serialize
+  function serialize() {
+    const territories = {};
+    const ids = [...E.terr.keys()].sort((a, b) => a - b);
+    for (const id of ids) {
+      const t = E.terr.get(id);
+      if (!t.chunks.size) continue;
+      fixCore(t);
+      const { neighbors, edge } = neighborsOf(t);
+      const chunks = [...t.chunks].sort((a, b) => KZ(a) - KZ(b) || KX(a) - KX(b));
+      const flat = new Array(chunks.length * 2);
+      chunks.forEach((k, i) => { flat[i * 2] = KX(k); flat[i * 2 + 1] = KZ(k); });
+      territories[id] = { ...t.extra, name: t.name, color: ((t.color % 6) + 6) % 6, coreChunk: t.core, chunks: flat, size: chunks.length, neighbors: [...neighbors].sort((a, b) => a - b), isEdge: edge, nodes: t.nodes };
+    }
+    return { meta: { type: "world" }, ...E.top, nodes: E.resources, territories };
+  }
+
+  /** browser-side problems worth showing before the server check */
+  function localIssues() {
+    const out = [];
+    for (const t of E.terr.values()) {
+      for (const n of t.nodes) if (!E.resources[n]) out.push(`#${t.id} uses resource "${n}" which doesn't exist`);
+    }
+    return out;
+  }
+
+  async function check(andApply) {
+    if (!E.token || !E.nodesOnline) return toast("Not connected to the server. Use Download instead.", true);
+    const body = JSON.stringify(serialize());
+    const local = localIssues();
+    let res;
+    try {
+      busy(true);
+      res = await api("api/editor/check", { method: "POST", body, headers: { "Content-Type": "application/json" } });
+    } catch (e) {
+      busy(false);
+      return toast(e.message, true);
+    }
+    busy(false);
+    const stats = res.added != null ? `<div class="stats"><div><b>${res.added}</b><span>new</span></div><div><b>${res.changed}</b><span>changed</span></div><div><b>${res.removed}</b><span>removed</span></div></div>` : "";
+    const errs = res.errors.length ? `<div class="note err"><b>Can't apply yet</b><ul>${res.errors.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>` : "";
+    const warns = res.warnings.length ? `<div class="note warn"><b>Claimed land changes</b><ul>${res.warnings.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>Town claim costs are recalculated automatically.</div>` : "";
+    const lw = local.length ? `<div class="note warn"><b>Worth a look</b><ul>${local.slice(0, 12).map((x) => `<li>${esc(x)}</li>`).join("")}${local.length > 12 ? `<li>…and ${local.length - 12} more</li>` : ""}</ul></div>` : "";
+    const okLine = !res.errors.length && !res.warnings.length ? `<div class="note ok">Everything checks out.</div>` : "";
+    const canApply = res.ok && !res.errors.length;
+    modal(`<h2>${andApply ? "Apply to server" : "Check"}</h2>
+      <p>${andApply ? "This replaces the server's world.json and reloads territories immediately. The current file is backed up first." : "Nothing has been changed on the server."}</p>
+      ${stats}${errs}${warns}${lw}${okLine}
+      ${canApply && res.warnings.length ? `<label class="tgl"><input type="checkbox" id="ack">I understand claimed territories will change</label>` : ""}
+      <div class="foot"><button class="btn" data-close>Close</button>${canApply ? `<button class="btn primary" id="do-apply">${andApply ? "Apply now" : "Apply to server…"}</button>` : ""}</div>`);
+    const btn = $("#do-apply");
+    if (btn) {
+      const ack = $("#ack");
+      if (ack) { btn.disabled = true; ack.onchange = () => (btn.disabled = !ack.checked); }
+      btn.onclick = () => apply(body, !!ack);
+    }
+  }
+
+  async function apply(body, force) {
+    let res;
+    try {
+      busy(true);
+      res = await api("api/editor/apply" + (force ? "?force=1" : ""), { method: "POST", body, headers: { "Content-Type": "application/json" } });
+    } catch (e) {
+      busy(false);
+      return toast(e.message, true);
+    }
+    busy(false);
+    if (res.applied) {
+      E.savedVersion = E.version;
+      closeModal();
+      setSaveState();
+      toast(`Applied on the server. Backup saved as ${res.backup || "a backup file"}.`);
+      await loadClaims();
+      drawOverlays();
+    } else {
+      modal(`<h2>Not applied</h2><div class="note err"><ul>${res.errors.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div><div class="foot"><button class="btn" data-close>Close</button></div>`);
+    }
+  }
+
+  function download() {
+    const blob = new Blob([JSON.stringify(serialize())], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "world.json";
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  }
+
+  // ---------------------------------------------------------------- UI: lists + inspector
+  function setSaveState() {
+    const el = $("#save-state");
+    const dirty = E.version !== E.savedVersion;
+    el.className = "pill " + (dirty ? "dirty" : "ok");
+    el.textContent = !E.token ? "Offline" : dirty ? "Unsaved changes" : E.nodesOnline ? "In sync with server" : "No changes";
+    $("#btn-apply").disabled = !E.token || !E.nodesOnline;
+    $("#btn-check").disabled = !E.token || !E.nodesOnline;
+    $("#undo").disabled = !E.undo.length;
+    $("#redo").disabled = !E.redo.length;
+    $("#undo").title = E.undo.length ? `Undo ${E.undo[E.undo.length - 1].label} (Ctrl+Z)` : "Undo (Ctrl+Z)";
+  }
+
+  let listTimer = 0;
+  function refreshUi() {
+    setSaveState();
+    renderInspector();
+    clearTimeout(listTimer);
+    listTimer = setTimeout(() => { renderTerrList(); renderResList(); }, 60);
+    let chunks = 0;
+    for (const t of E.terr.values()) chunks += t.chunks.size;
+    $("#counts").textContent = `${E.terr.size} territories · ${chunks.toLocaleString()} chunks`;
+  }
+
+  function renderTerrList() {
+    const q = $("#terr-filter").value.trim().toLowerCase();
+    const sort = $("#terr-sort").value;
+    let list = [...E.terr.values()];
+    if (q) list = list.filter((t) => String(t.id) === q || t.name.toLowerCase().includes(q) || t.nodes.some((n) => n.toLowerCase().includes(q)) || (E.claimed.get(t.id)?.town || "").toLowerCase().includes(q));
+    const issues = (t) => t.nodes.filter((n) => !E.resources[n]).length;
+    const sorters = { id: (a, b) => a.id - b.id, size: (a, b) => b.chunks.size - a.chunks.size, name: (a, b) => (a.name || "~").localeCompare(b.name || "~"), issues: (a, b) => issues(b) - issues(a) || a.id - b.id };
+    list.sort(sorters[sort] || sorters.id);
+    const shown = list.slice(0, 400);
+    $("#terr-summary").textContent = q ? `${list.length} match${list.length === 1 ? "" : "es"}` : "";
+    $("#terr-list").innerHTML = shown.map((t) => {
+      const c = E.claimed.get(t.id);
+      const icons = t.nodes.slice(0, 5).map((n) => { const u = iconUrl(n); return u ? `<img src="${esc(u)}" alt="" data-tipres="${esc(n)}">` : `<span data-tipres="${esc(n)}">${esc(n)}</span>`; }).join("");
+      return `<div class="trow ${E.sel.has(t.id) ? "sel" : ""}" data-id="${t.id}"><span class="sw" style="background:${terrColor(t)}"></span><div><div class="nm">${c ? `<span class="lock" title="claimed by ${esc(prettyName(c.town))}">🔒</span> ` : ""}${t.name ? `${esc(t.name)} <span style="color:var(--faint);font-weight:400">#${t.id}</span>` : `Territory #${t.id}`}</div><div class="sub">${c && c.kind === "owned" ? esc(prettyName(c.nation || c.town)) + (icons || c.occ ? " · " : "") : ""}${c && c.occ ? `<span class="occ">⚔ ${esc(prettyName(c.occ.town))}</span>` + (icons ? " · " : "") : ""}${icons}</div></div><span class="stat">${t.chunks.size}</span></div>`;
+    }).join("") + (list.length > shown.length ? `<div class="hint">…${list.length - shown.length} more, search to narrow down</div>` : "") + (!list.length ? `<div class="empty">${E.terr.size ? "Nothing matches" : "No territories yet. Use New (N) to paint one."}</div>` : "");
+  }
+
+  function resCount(name) { let n = 0; for (const t of E.terr.values()) if (t.nodes.includes(name)) n++; return n; }
+
+  let resSel = null;
+  function renderResList() {
+    const q = $("#res-filter").value.trim().toLowerCase();
+    const names = Object.keys(E.resources).filter((n) => !q || n.toLowerCase().includes(q)).sort((a, b) => a.localeCompare(b));
+    $("#res-list").innerHTML = names.map((n) => {
+      const u = iconUrl(n);
+      const am = E.resources[n]?.attacker_time_multiplier;
+      const tag = typeof am === "number" && am !== 1 ? ` <span class="badge" style="padding:1px 6px;font-size:11px">capture ×${am}</span>` : "";
+      return `<div class="trow ${n === resSel ? "sel" : ""}" data-res="${esc(n)}" data-tipres="${esc(n)}">${u ? `<img src="${esc(u)}" alt="" style="width:16px;height:16px;image-rendering:pixelated">` : `<span class="sw" style="background:#555"></span>`}<div class="nm">${esc(n)}${tag}</div><span class="stat">${resCount(n)}</span></div>`;
+    }).join("") || `<div class="empty">No resource nodes yet</div>`;
+    renderResEditor();
+  }
+
+  function renderResEditor() {
+    const el = $("#res-editor");
+    const r = resSel && E.resources[resSel];
+    if (!r) { el.innerHTML = ""; return; }
+    const iconNames = Object.keys(E.icons).sort();
+    const u = iconUrl(resSel);
+    const json = JSON.stringify(r, null, 2);
+    el.innerHTML = `
+      <div class="field"><span>Name</span><input id="re-name" value="${esc(resSel)}"></div>
+      <div class="field"><span>Icon</span><div class="inline">${u ? `<img src="${esc(u)}" alt="">` : ""}<input id="re-icon" list="icon-list" value="${esc(r.icon ?? "")}" placeholder="icon name"></div>
+        <datalist id="icon-list">${iconNames.map((n) => `<option value="${esc(n)}">`).join("")}</datalist></div>
+      <div class="grid2" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0 8px">
+        <div class="field"><span>Cost +</span><input id="re-cc" type="number" step="1" value="${r.cost?.constant ?? 0}"></div>
+        <div class="field"><span>Cost ×</span><input id="re-cs" type="number" step="0.05" value="${r.cost?.scale ?? 1}"></div>
+        <div class="field"><span>Priority</span><input id="re-pr" type="number" step="1" value="${r.priority ?? 0}"></div>
+      </div>
+      <div class="grid2" style="display:grid;grid-template-columns:1fr 1fr;gap:0 8px">
+        <div class="field" title="Flag attacks on territories with this node take this many times as long (2 = twice as long)"><span>Attack time ×</span><input id="re-atk" type="number" step="0.05" min="0" placeholder="1" value="${r.attacker_time_multiplier ?? ""}"></div>
+        <div class="field" title="Owners/allies retaking their own land take this many times as long"><span>Defend time ×</span><input id="re-def" type="number" step="0.05" min="0" placeholder="1" value="${r.defender_time_multiplier ?? ""}"></div>
+      </div>
+      <div class="field"><span>All settings (JSON: income, ore, crops, animals…)</span><textarea id="re-json" spellcheck="false">${esc(json)}</textarea></div>
+      <div id="re-err"></div>
+      <div class="actions"><button class="btn small primary" id="re-save">Save resource</button><button class="btn small" id="re-select">Select territories with it</button><button class="btn small danger" id="re-del">Delete</button></div>`;
+    const syncJson = () => {
+      try {
+        const o = JSON.parse($("#re-json").value);
+        o.icon = $("#re-icon").value || null;
+        o.cost = { ...(o.cost || {}), constant: +$("#re-cc").value || 0, scale: $("#re-cs").value === "" ? 1 : +$("#re-cs").value };
+        o.priority = +$("#re-pr").value || 0;
+        for (const [id, key] of [["#re-atk", "attacker_time_multiplier"], ["#re-def", "defender_time_multiplier"]]) {
+          const v = $(id).value.trim();
+          if (v === "" || +v === 1) delete o[key]; else o[key] = +v;
+        }
+        $("#re-json").value = JSON.stringify(o, null, 2);
+      } catch { /* user is mid-edit in the JSON box */ }
+    };
+    for (const id of ["#re-icon", "#re-cc", "#re-cs", "#re-pr", "#re-atk", "#re-def"]) $(id).addEventListener("change", syncJson);
+    $("#re-save").onclick = () => {
+      let obj;
+      try { obj = JSON.parse($("#re-json").value); } catch (e) { $("#re-err").innerHTML = `<div class="note err">That JSON isn't valid: ${esc(e.message)}</div>`; return; }
+      if (!obj || typeof obj !== "object" || Array.isArray(obj)) { $("#re-err").innerHTML = `<div class="note err">Settings must be a JSON object</div>`; return; }
+      const newName = $("#re-name").value.trim();
+      if (!newName) return;
+      if (newName !== resSel && E.resources[newName]) { $("#re-err").innerHTML = `<div class="note err">A resource named "${esc(newName)}" already exists</div>`; return; }
+      begin(newName !== resSel ? "Rename resource" : "Edit resource");
+      touchRes();
+      if (newName !== resSel) {
+        const out = {};
+        for (const [k, v] of Object.entries(E.resources)) out[k === resSel ? newName : k] = k === resSel ? obj : v;
+        E.resources = out;
+        for (const t of E.terr.values()) {
+          const i = t.nodes.indexOf(resSel);
+          if (i >= 0) { touch(t.id); t.nodes[i] = newName; }
+        }
+        resSel = newName;
+      } else {
+        E.resources[resSel] = obj;
+      }
+      end();
+      toast("Resource saved");
+    };
+    $("#re-select").onclick = () => select([...E.terr.values()].filter((t) => t.nodes.includes(resSel)).map((t) => t.id));
+    $("#re-del").onclick = () => {
+      const n = resCount(resSel);
+      if (n && !confirm(`"${resSel}" is used by ${n} territories. Delete it and remove it from all of them?`)) return;
+      begin("Delete resource");
+      touchRes();
+      for (const t of E.terr.values()) { const i = t.nodes.indexOf(resSel); if (i >= 0) { touch(t.id); t.nodes.splice(i, 1); } }
+      delete E.resources[resSel];
+      resSel = null;
+      end();
+    };
+  }
+
+  function occCount(t) { let n = 0; for (const k of t.chunks) if (E.occChunks.has(k)) n++; return n; }
+  function occTowns(t) {
+    const m = new Map();
+    for (const k of t.chunks) { const o = E.occChunks.get(k); if (o) m.set(o, (m.get(o) || 0) + 1); }
+    return [...m].map(([n, c]) => `${prettyName(n)} (${c})`).join(", ");
+  }
+
+  function renderInspector() {
+    const el = $("#inspector");
+    const ids = [...E.sel].filter((id) => E.terr.has(id));
+    if (!ids.length) { el.hidden = true; return; }
+    el.hidden = false;
+    const resOptions = Object.keys(E.resources).sort().map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join("");
+    if (ids.length === 1) {
+      const t = E.terr.get(ids[0]);
+      const c = E.claimed.get(t.id);
+      const locked = isLocked(t.id);
+      const { neighbors, edge } = neighborsOf(t);
+      el.innerHTML = `
+        <div class="info-kicker">Territory #${t.id}</div>
+        <div class="field"><span>Name</span><input id="in-name" value="${esc(t.name)}" placeholder="No name (optional)"></div>
+        ${c && c.occ ? `<div class="note err">⚔ Occupied by <b>${esc(prettyName(c.occ.town))}</b>${c.occ.nation ? ` (${esc(prettyName(c.occ.nation))})` : ""}${c.kind === "owned" ? `, taken from ${esc(prettyName(c.town))}` : ""}.</div>` : ""}
+        ${occCount(t) && !(c && c.occ) ? `<div class="note warn">⚔ ${occCount(t)} of its ${t.chunks.size} chunks are occupied by flags: ${esc(occTowns(t))}</div>` : ""}
+        ${c && c.kind === "owned" ? `<div class="note">Claimed by <b>${E.townsOnline ? `<a href="#" id="in-town">${esc(prettyName(c.town))}</a>` : esc(prettyName(c.town))}</b>${c.nation ? ` (${esc(prettyName(c.nation))})` : ""}.${locked ? " Its land is locked (Options → Lock claimed land); name and resources can still be edited." : ""} Changes need confirming on apply.</div>` : ""}
+        <dl class="kv">
+          <dt>Chunks</dt><dd>${t.chunks.size}</dd>
+          <dt>Claim cost</dt><dd>${terrCost(t)}</dd>
+          ${attackMult(t) !== 1 ? `<dt>Capture time</dt><dd>×${+attackMult(t).toFixed(2)}</dd>` : ""}
+          <dt>Core chunk</dt><dd>${t.core ? t.core.join(", ") : "—"} <a href="#" id="in-core" title="Pick a new core on the map">change</a> · <a href="#" id="in-center" title="Move the core to the middle of the territory">center</a></dd>
+          <dt>Neighbors</dt><dd>${neighbors.size}${edge ? " · borders wilderness" : ""}</dd>
+        </dl>
+        <div class="section-h">Resources</div>
+        <div class="chips">${t.nodes.map((n) => { const u = iconUrl(n); return `<span class="chip plain" data-tipres="${esc(n)}">${u ? `<img src="${esc(u)}" alt="">` : ""}${esc(n)}${E.resources[n] ? "" : " ⚠"}<span class="x" data-rm="${esc(n)}" title="Remove">×</span></span>`; }).join("") || `<span class="hint" style="margin:0">None</span>`}</div>
+        <div class="field" style="margin-top:8px"><select id="in-add"><option value="">Add a resource…</option>${resOptions}</select></div>
+        <div class="actions">${locked ? "" : `<button class="btn small danger" id="in-del">Delete</button>`}<button class="btn small" id="in-zoom">Zoom to</button></div>`;
+      const name = $("#in-name");
+      name.onchange = () => { begin("Rename"); touch(t.id); t.name = name.value.trim(); end(); };
+      $("#in-core").onclick = (e) => { e.preventDefault(); setTool("core"); toast("Click a chunk inside the territory to make it the core"); };
+      $("#in-center").onclick = (e) => {
+        e.preventDefault();
+        const c = coreFor(t);
+        if (t.core && c && t.core[0] === c[0] && t.core[1] === c[1]) return toast("The core is already in the middle");
+        begin("Center core"); touch(t.id); t.core = c; t.coreAuto = false; end();
+        toast(`Core moved to ${c.join(", ")}`);
+      };
+      $("#in-zoom").onclick = () => zoomTo([t.id]);
+      if ($("#in-town")) $("#in-town").onclick = (e) => { e.preventDefault(); pickTown(c.town, false); };
+      if (!locked) $("#in-del").onclick = deleteSelected;
+      $("#in-add").onchange = (e) => {
+        const v = e.target.value;
+        if (!v || t.nodes.includes(v)) return;
+        begin("Add resource"); touch(t.id); t.nodes.push(v); end();
+      };
+      $$("[data-rm]", el).forEach((x) => (x.onclick = () => { begin("Remove resource"); touch(t.id); t.nodes = t.nodes.filter((n) => n !== x.dataset.rm); end(); }));
+      return;
+    }
+    let chunks = 0;
+    for (const id of ids) chunks += E.terr.get(id).chunks.size;
+    const locked = ids.filter(isLocked);
+    el.innerHTML = `
+      <div class="info-kicker">Selection</div>
+      <h2 class="info-title">${ids.length} territories</h2>
+      <div class="info-sub">${chunks.toLocaleString()} chunks${locked.length ? ` · ${locked.length} locked` : ""}</div>
+      <div class="actions">
+        <button class="btn small" id="ms-merge">Merge into one</button>
+        <button class="btn small" id="ms-gen">Regenerate…</button>
+        <button class="btn small" id="ms-dist">Add resource…</button>
+        <button class="btn small" id="ms-split">Split pieces</button>
+        <button class="btn small" id="ms-center" title="Move each selected territory's core to its middle">Center cores</button>
+        <button class="btn small" id="ms-zoom">Zoom to</button>
+        <button class="btn small danger" id="ms-del">Delete all</button>
+      </div>
+      <p class="hint">Ctrl/⌘-click toggles a territory. Shift+drag adds a box of territories.</p>`;
+    $("#ms-merge").onclick = mergeSelected;
+    $("#ms-del").onclick = deleteSelected;
+    $("#ms-split").onclick = splitDisconnected;
+    $("#ms-center").onclick = () => {
+      begin("Center cores");
+      let n = 0;
+      for (const id of ids) {
+        const t = E.terr.get(id);
+        const c = coreFor(t);
+        if (!c || (t.core && t.core[0] === c[0] && t.core[1] === c[1])) continue;
+        touch(id); t.core = c; t.coreAuto = false; n++;
+      }
+      end();
+      toast(n ? `Moved ${n} core${n === 1 ? "" : "s"} to the middle` : "All cores are already in the middle");
+    };
+    $("#ms-zoom").onclick = () => zoomTo(ids);
+    $("#ms-gen").onclick = () => generateDialog();
+    $("#ms-dist").onclick = () => distributeDialog();
+  }
+
+  function zoomTo(ids) {
+    const b = L.latLngBounds([]);
+    for (const id of ids) { const t = E.terr.get(id); if (!t) continue; for (const k of t.chunks) { b.extend(ll(KX(k) * 16, KZ(k) * 16)); } }
+    if (b.isValid()) map.fitBounds(b.pad(0.2), { maxZoom: 0 });
+  }
+
+  function generateDialog() {
+    const chunks = [...E.sel].reduce((a, id) => a + E.terr.get(id).chunks.size, 0);
+    const p = store.get("gen", { avg: 120, seed: 1, iterations: 4, mergeBelow: 30 });
+    modal(`<h2>Regenerate territories</h2>
+      <p>Replaces the ${E.sel.size} selected territories (${chunks.toLocaleString()} chunks) with new random ones. Resources on them are cleared. You can undo this.</p>
+      <div class="grid2">
+        <label class="field"><span>Average size (chunks)</span><input id="g-avg" type="number" min="4" value="${p.avg}"></label>
+        <label class="field"><span>Random seed</span><input id="g-seed" type="number" value="${p.seed}"></label>
+        <label class="field"><span>Smoothing passes</span><input id="g-it" type="number" min="0" max="20" value="${p.iterations}"></label>
+        <label class="field"><span>Merge pieces smaller than</span><input id="g-merge" type="number" min="0" value="${p.mergeBelow}"></label>
+      </div>
+      <p class="hint" id="g-est"></p>
+      <div class="foot"><button class="btn" data-close>Cancel</button><button class="btn primary" id="g-go">Generate</button></div>`);
+    const est = () => { $("#g-est").textContent = `About ${Math.max(1, Math.round(chunks / Math.max(4, +$("#g-avg").value || 120)))} territories`; };
+    $("#g-avg").oninput = est;
+    est();
+    $("#g-go").onclick = () => {
+      const params = { avg: Math.max(4, +$("#g-avg").value || 120), seed: +$("#g-seed").value || 1, iterations: Math.max(0, Math.min(20, +$("#g-it").value || 0)), mergeBelow: Math.max(0, +$("#g-merge").value || 0) };
+      store.set("gen", params);
+      closeModal();
+      setTimeout(() => generate(params), 20);
+    };
+  }
+
+  async function packDialog() {
+    let pack;
+    try { pack = await (await fetch("presets/resources-default.json", { cache: "no-cache" })).json(); } catch { return toast("Couldn't load the default pack", true); }
+    const line = (name, n) => {
+      const u = E.icons[n.icon] || null;
+      const bits = [];
+      const inc = Object.entries(n.income || {});
+      if (inc.length) bits.push(inc.length > 2 ? `income: ${inc.length} items` : "income: " + inc.map(([k, v]) => `${v} ${k.replace(/_/g, " ")}`).join(", "));
+      const ore = Object.entries(n.ore || {});
+      if (ore.length) bits.push(ore.length > 2 ? `mining: ${ore.length} ores` : "mining: " + ore.map(([k, v]) => `${Math.round((Array.isArray(v) ? v[0] : v) * 1000) / 10}% ${k.replace(/_/g, " ")}`).join(", "));
+      const rates = (o) => Object.entries(o || {}).map(([k, v]) => `${k.replace(/_/g, " ")} ${Math.round(v * 100)}%`).join(", ");
+      if (Object.keys(n.crops || {}).length) bits.push("crops: " + rates(n.crops));
+      if (Object.keys(n.animals || {}).length) bits.push("breeding: " + rates(n.animals));
+      if (n.attacker_time_multiplier) bits.push(`capture ×${n.attacker_time_multiplier}`);
+      if (n.cost?.constant) bits.push(`+${n.cost.constant} claims`);
+      const exists = E.resources[name] ? ` <span class="badge gold" style="padding:1px 6px;font-size:11px">exists</span>` : "";
+      return `<div class="trow" style="cursor:default">${u ? `<img src="${esc(u)}" alt="" style="width:16px;height:16px;image-rendering:pixelated">` : `<span class="sw"></span>`}<div><div class="nm">${esc(name)}${exists}</div><div class="sub">${esc(bits.join(" · "))}</div></div><span></span></div>`;
+    };
+    modal(`<h2>${esc(pack.name)}</h2>
+      <p>Adds ready-made resource nodes. Income is per hour per territory; mining is the chance per stone block mined in the territory. You can edit them afterwards, and undo this.</p>
+      ${pack.groups.map((g) => `<label class="tgl" style="margin-top:8px"><input type="checkbox" class="pk-g" data-g="${esc(g.id)}" checked><b>${esc(g.title)}</b></label>
+        <div class="hint" style="margin:0 0 4px 23px">${esc(g.about)}</div>
+        <div class="list" style="margin-left:15px">${Object.entries(g.nodes).map(([n, d]) => line(n, d)).join("")}</div>`).join("")}
+      <h3 style="margin:14px 0 6px;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--faint)">Options</h3>
+      <label class="tgl"><input type="checkbox" id="pk-replace">Replace nodes that already exist with the same name</label>
+      <label class="tgl"><input type="checkbox" id="pk-basic">Give every territory the <b>basic</b> node</label>
+      <div class="foot"><button class="btn" data-close>Cancel</button><button class="btn primary" id="pk-go">Add nodes</button></div>`);
+    $("#pk-go").onclick = () => {
+      const groups = new Set($$(".pk-g").filter((c) => c.checked).map((c) => c.dataset.g));
+      const replace = $("#pk-replace").checked;
+      const giveBasic = $("#pk-basic").checked;
+      closeModal();
+      begin("Add default resources");
+      touchRes();
+      let added = 0, replaced = 0, skipped = 0;
+      for (const g of pack.groups) {
+        if (!groups.has(g.id)) continue;
+        for (const [name, def] of Object.entries(g.nodes)) {
+          if (E.resources[name] && !replace) { skipped++; continue; }
+          if (E.resources[name]) replaced++; else added++;
+          E.resources[name] = JSON.parse(JSON.stringify(def));
+        }
+      }
+      let given = 0;
+      if (giveBasic && E.resources.basic) {
+        for (const t of E.terr.values()) {
+          if (t.nodes.includes("basic")) continue;
+          touch(t.id);
+          t.nodes.unshift("basic");
+          given++;
+        }
+      }
+      end();
+      resSel = null;
+      renderResList();
+      toast(`Added ${added} node${added === 1 ? "" : "s"}${replaced ? `, replaced ${replaced}` : ""}${skipped ? `, skipped ${skipped} that already existed` : ""}${given ? `, gave basic to ${given} territories` : ""}`);
+    };
+  }
+
+  function distributeDialog() {
+    const names = Object.keys(E.resources).sort();
+    if (!names.length) return toast("Create a resource first (Resources tab)", true);
+    const p = store.get("dist", { spread: true, maxPer: 3, clear: false, seed: 1, scopeAll: false });
+    const rowHtml = (r) => `<div class="drow">
+      <select class="d-res">${names.map((n) => `<option${n === r.resource ? " selected" : ""}>${esc(n)}</option>`).join("")}</select>
+      <input class="d-amt" type="number" min="0" step="any" value="${r.amount}">
+      <select class="d-unit"><option value="n"${r.percent ? "" : " selected"}>territories</option><option value="p"${r.percent ? " selected" : ""}>% of territories</option></select>
+      <button class="icon-btn d-del" title="Remove row" aria-label="Remove row">×</button></div>`;
+    modal(`<h2>Distribute resources</h2>
+      <p>Add a box for each resource you want to place. Claimed territories are skipped. You can undo this.</p>
+      <label class="field"><span>Where</span><select id="d-scope"><option value="sel"${E.sel.size && !p.scopeAll ? " selected" : ""}${E.sel.size ? "" : " disabled"}>Selected territories (${E.sel.size})</option><option value="all"${E.sel.size && !p.scopeAll ? "" : " selected"}>All territories (${E.terr.size})</option></select></label>
+      <div id="d-rows">${(p.rows && p.rows.length ? p.rows : [{ resource: names[0], amount: 10, percent: true }]).filter((r) => names.includes(r.resource)).map(rowHtml).join("")}</div>
+      <button class="btn small" id="d-add">+ Add resource</button>
+      <div class="grid2" style="margin-top:10px">
+        <label class="field"><span>Max resources per territory</span><input id="d-max" type="number" min="1" value="${p.maxPer}"></label>
+        <label class="field"><span>Random seed</span><input id="d-seed" type="number" value="${p.seed}"></label>
+        <label class="field"><span>Placement</span><select id="d-spread"><option value="1"${p.spread ? " selected" : ""}>Spread evenly</option><option value="0"${p.spread ? "" : " selected"}>Fully random</option></select></label>
+        <label class="field"><span>Existing resources</span><select id="d-clear"><option value="0"${p.clear ? "" : " selected"}>Keep them</option><option value="1"${p.clear ? " selected" : ""}>Clear first</option></select></label>
+      </div>
+      <div class="foot"><button class="btn" data-close>Cancel</button><button class="btn primary" id="d-go">Distribute</button></div>`);
+    const wire = () => $$("#d-rows .d-del").forEach((b) => (b.onclick = () => { if ($$("#d-rows .drow").length > 1) b.parentElement.remove(); }));
+    wire();
+    $("#d-add").onclick = () => {
+      const used = $$("#d-rows .d-res").map((x) => x.value);
+      $("#d-rows").insertAdjacentHTML("beforeend", rowHtml({ resource: names.find((n) => !used.includes(n)) || names[0], amount: 10, percent: true }));
+      wire();
+    };
+    $("#d-go").onclick = () => {
+      const rows = $$("#d-rows .drow").map((r) => ({ resource: $(".d-res", r).value, amount: Math.max(0, +$(".d-amt", r).value || 0), percent: $(".d-unit", r).value === "p" }));
+      const opts = { spread: $("#d-spread").value === "1", maxPer: Math.max(1, +$("#d-max").value || 1), clear: $("#d-clear").value === "1", seed: +$("#d-seed").value || 1, scopeAll: $("#d-scope").value === "all" };
+      store.set("dist", { ...opts, rows });
+      closeModal();
+      distributeResources(rows, opts);
+    };
+  }
+
+  // ---------------------------------------------------------------- toast / modal / busy
+  let toastTimer = 0;
+  function toast(msg, err = false) {
+    const t = $("#toast");
+    t.textContent = msg;
+    t.className = err ? "err" : "";
+    t.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => (t.hidden = true), err ? 5000 : 3000);
+  }
+  function modal(html) {
+    $("#modal").innerHTML = html;
+    $("#modal-wrap").hidden = false;
+    $$("[data-close]", $("#modal")).forEach((b) => (b.onclick = closeModal));
+  }
+  function closeModal() { $("#modal-wrap").hidden = true; }
+  function busy(on) { document.body.style.cursor = on ? "progress" : ""; $("#btn-apply").disabled = on || !E.nodesOnline; $("#btn-check").disabled = on || !E.nodesOnline; }
+
+  // ---------------------------------------------------------------- towns + nations (live, like the old Dynmap editor's Towns tab)
+  const T = { data: null, sel: null, busy: false };
+
+  function setClaimsFromTowns(d) {
+    E.claimed.clear();
+    const ncol = new Map((d.nations || []).map((n) => [n.name, n.color]));
+    for (const t of d.towns || []) {
+      const nation = t.nation || null;
+      const ncolor = (nation && ncol.get(nation)) || t.color;
+      for (const id of t.territories || []) E.claimed.set(id, { town: t.name, color: t.color, nation, ncolor, kind: "owned", occ: E.claimed.get(id)?.occ });
+      for (const id of t.captured || []) addOccupier(id, { town: t.name, color: t.color, nation, ncolor });
+    }
+  }
+
+  function setTowns(d) {
+    T.data = d;
+    if (T.sel && !d.towns.some((t) => t.name === T.sel)) T.sel = null;
+    setClaimsFromTowns(d);
+    renderDatalists();
+    restyle();
+    drawOverlays();
+    refreshUi();
+    renderTowns();
+  }
+
+  async function loadTowns() {
+    if (!E.townsOnline) { renderTowns(); return; }
+    try { setTowns(await api("api/editor/towns")); } catch (e) { toast("Couldn't load towns: " + e.message, true); }
+  }
+
+  async function townAct(body, okToast = true) {
+    if (T.busy) return null;
+    T.busy = true;
+    document.body.style.cursor = "progress";
+    try {
+      const r = await api("api/editor/town", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      if (r.data) setTowns(r.data);
+      if (!r.ok) { toast(r.message, true); return null; }
+      if (okToast) toast(r.message.charAt(0).toUpperCase() + r.message.slice(1));
+      return r;
+    } catch (e) {
+      toast(e.message, true);
+      return null;
+    } finally {
+      T.busy = false;
+      document.body.style.cursor = "";
+    }
+  }
+
+  const townByName = (n) => T.data?.towns.find((t) => t.name === n) || null;
+  const nationByName = (n) => T.data?.nations.find((x) => x.name === n) || null;
+  const selIds = () => [...E.sel].filter((id) => E.terr.has(id));
+  function needSel(what) {
+    const ids = selIds();
+    if (!ids.length) { toast(`Select territories on the map first, then ${what}`, true); return null; }
+    return ids;
+  }
+
+  function pickTown(name, fly) {
+    T.sel = name;
+    openTab("towns");
+    renderTowns();
+    drawOverlays();
+    const t = townByName(name);
+    if (fly && t) zoomTo([...t.territories, ...t.captured]);
+  }
+
+  function openTab(name) {
+    if (name === "shards" && E.tool !== "shards") { setTool("shards"); return; }
+    $$("#tabs button").forEach((x) => x.classList.toggle("active", x.dataset.tab === name));
+    $$(".tab").forEach((t) => t.classList.toggle("active", t.id === "tab-" + name));
+    drawOverlays();
+  }
+
+  function renderTowns() {
+    const list = $("#town-list");
+    if (!list) return;
+    const ed = $("#town-editor");
+    if (!E.token || !E.townsOnline) {
+      list.innerHTML = `<div class="note">${!E.token ? "Sign in with <kbd>/ginjermap editor</kbd> to edit towns and nations. Changes apply live on the server." : "This Nodes version can't edit towns from the map. Update <b>nodes.jar</b>."}</div>`;
+      ed.innerHTML = "";
+      $("#town-new").disabled = true;
+      return;
+    }
+    $("#town-new").disabled = false;
+    const d = T.data || { towns: [], nations: [], players: [] };
+    const q = $("#town-filter").value.trim().toLowerCase();
+    const sort = $("#town-sort").value;
+    let towns = d.towns.filter((t) => !q || t.name.toLowerCase().includes(q) || (t.nation || "").toLowerCase().includes(q) || t.residents.some((r) => r.toLowerCase().includes(q)));
+    const sorters = {
+      name: (a, b) => a.name.localeCompare(b.name),
+      nation: (a, b) => (a.nation || "~").localeCompare(b.nation || "~") || (b.capital - a.capital) || a.name.localeCompare(b.name),
+      land: (a, b) => b.territories.length - a.territories.length,
+      players: (a, b) => b.residents.length - a.residents.length,
+    };
+    towns.sort(sorters[sort] || sorters.name);
+    $("#town-summary").textContent = `${d.towns.length} towns · ${d.nations.length} nations` + (q ? ` · ${towns.length} shown` : "");
+    list.innerHTML = towns.map((t) => {
+      const n = t.nation ? nationByName(t.nation) : null;
+      return `<div class="trow ${t.name === T.sel ? "sel" : ""}" data-town="${esc(t.name)}">
+        <span class="sw" style="background:${esc(n ? n.color : t.color)}"></span>
+        <div><div class="nm">${t.capital ? `<span class="lock" title="Nation capital">★</span> ` : ""}${esc(prettyName(t.name))}</div><div class="sub">${n ? esc(prettyName(n.name)) : "No nation"}${t.leader ? " · " + esc(t.leader) : ""}</div></div>
+        <span class="stat">${t.territories.length}t · ${t.residents.length}p</span></div>`;
+    }).join("") || `<div class="empty">${d.towns.length ? "Nothing matches" : "No towns yet. Select territories on the map and press New."}</div>`;
+    renderTownEditor();
+  }
+
+  function renderTownEditor() {
+    const ed = $("#town-editor");
+    const t = townByName(T.sel);
+    if (!t) { ed.innerHTML = `<p class="hint">Pick a town to edit it. To make one, select territories on the map and press <b>New</b>.</p>`; return; }
+    const d = T.data;
+    const n = t.nation ? nationByName(t.nation) : null;
+    const home = E.terr.get(t.home);
+    const rankOf = (r) => (r === t.leader ? "leader" : t.officers.includes(r) ? "officer" : "member");
+    const order = { leader: 0, officer: 1, member: 2 };
+    const res = [...t.residents].sort((a, b) => order[rankOf(a)] - order[rankOf(b)] || a.localeCompare(b));
+    const sel = selIds();
+    ed.innerHTML = `
+      <div class="te-head"><span class="sw" style="background:${esc(t.color)}"></span><b>${esc(prettyName(t.name))}</b><button class="btn small" id="te-show" title="Select this town's land on the map">Show on map</button></div>
+      <div class="grid2">
+        <label class="field"><span>Town name</span><input id="te-name" value="${esc(t.name)}" spellcheck="false"></label>
+        <label class="field"><span>Color</span><input id="te-color" type="color" value="${esc(t.color)}"></label>
+      </div>
+      <div class="grid2">
+        <label class="field"><span>Nation</span><input id="te-nation" list="nation-names" value="${esc(t.nation || "")}" placeholder="None" spellcheck="false"></label>
+        <label class="field"><span>Color</span><input id="te-ncolor" type="color" value="${esc(n ? n.color : "#888888")}" ${n ? "" : "disabled"}></label>
+      </div>
+      <p class="hint tight">Type a nation to join it, a new name to create one, or clear it to leave.</p>
+      ${n ? `<div class="te-nation">${t.capital ? `<span class="badge gold">★ Capital of ${esc(prettyName(n.name))}</span>` : `<button class="btn small" id="te-capital">Make capital</button>`}<button class="btn small" id="te-nrename">Rename nation</button><button class="btn small danger" id="te-ndel">Delete nation</button></div>` : ""}
+
+      <div class="section-h">Land <span class="faint">${t.territories.length} territories${t.captured.length ? ` · ${t.captured.length} occupied` : ""} · claims ${t.claimsUsed}/${t.claimsMax}</span></div>
+      <div class="kvline">Home: <b>#${t.home}</b> ${home && home.name ? esc(home.name) : ""} <button class="btn small" id="te-home" ${sel.length === 1 ? "" : "disabled"} title="Select one of the town's territories on the map">Set to selected</button></div>
+      <div class="te-actions">
+        <button class="btn small" id="te-add" title="Give the selected unclaimed territories to this town">Add selected${sel.length ? ` (${sel.length})` : ""}</button>
+        <button class="btn small" id="te-cap" title="This town occupies the selected territories, like after a war">Capture selected</button>
+        <button class="btn small" id="te-rem" title="Make the selected territories unclaimed again">Remove selected</button>
+        <button class="btn small" id="te-free" title="End occupation of the selected territories">Free captured</button>
+      </div>
+      ${d.warBusy ? `<div class="note warn">A flag attack or raid is running, so land can't change until it ends.</div>` : ""}
+
+      <div class="section-h">Players <span class="faint">${t.residents.length}</span></div>
+      <div class="res-list">${res.map((r) => `<div class="rrow" data-player="${esc(r)}"><span class="nm">${rankOf(r) === "leader" ? "👑 " : rankOf(r) === "officer" ? "★ " : ""}${esc(r)}</span>
+        <select data-rank title="Rank"><option value="leader" ${rankOf(r) === "leader" ? "selected" : ""}>Leader</option><option value="officer" ${rankOf(r) === "officer" ? "selected" : ""}>Officer</option><option value="member" ${rankOf(r) === "member" ? "selected" : ""}>Member</option></select>
+        <button class="icon-x" data-kick title="Remove from town">×</button></div>`).join("") || `<div class="hint tight">No players</div>`}</div>
+      <div class="inline-add"><input id="te-player" list="player-names" placeholder="Add a player" spellcheck="false"><button class="btn small" id="te-padd">Add</button></div>
+      <label class="tgl"><input type="checkbox" id="te-open" ${t.open ? "checked" : ""}>Open to join</label>
+
+      <div class="actions"><button class="btn small danger" id="te-del">Delete town</button></div>`;
+
+    $("#te-show").onclick = () => { select([...t.territories]); zoomTo([...t.territories, ...t.captured]); };
+    $("#te-name").onchange = (e) => townAct({ op: "town.rename", town: t.name, name: e.target.value }).then((r) => { if (r) { T.sel = e.target.value.trim(); renderTowns(); } else e.target.value = t.name; });
+    $("#te-color").onchange = (e) => townAct({ op: "town.color", town: t.name, color: e.target.value });
+    $("#te-nation").onchange = (e) => {
+      const v = e.target.value.trim();
+      if (v === (t.nation || "")) return;
+      if (!v && !confirm(`Take ${prettyName(t.name)} out of ${prettyName(t.nation)}?${n && n.towns.length === 1 ? " It's the only town, so the nation will be deleted." : ""}`)) { e.target.value = t.nation || ""; return; }
+      if (v && !nationByName(v) && !confirm(`Create a new nation "${v}" with ${prettyName(t.name)} as its capital?`)) { e.target.value = t.nation || ""; return; }
+      townAct({ op: "town.setNation", town: t.name, nation: v });
+    };
+    if (n) {
+      $("#te-ncolor").onchange = (e) => townAct({ op: "nation.color", nation: n.name, color: e.target.value });
+      if ($("#te-capital")) $("#te-capital").onclick = () => townAct({ op: "nation.capital", nation: n.name, town: t.name });
+      $("#te-nrename").onclick = () => {
+        const v = prompt(`New name for ${n.name}`, n.name);
+        if (v && v.trim() !== n.name) townAct({ op: "nation.rename", nation: n.name, name: v.trim() });
+      };
+      $("#te-ndel").onclick = () => {
+        if (confirm(`Delete the nation ${prettyName(n.name)}? Its ${n.towns.length} town${n.towns.length === 1 ? "" : "s"} stay, without a nation.`)) townAct({ op: "nation.delete", nation: n.name });
+      };
+    }
+    $("#te-home").onclick = () => { const ids = needSel("set the home"); if (ids) townAct({ op: "town.home", town: t.name, territories: [ids[0]] }); };
+    $("#te-add").onclick = () => { const ids = needSel("add them"); if (ids) townAct({ op: "town.addTerritories", town: t.name, territories: ids }); };
+    $("#te-cap").onclick = () => { const ids = needSel("capture them"); if (ids) townAct({ op: "town.capture", town: t.name, territories: ids }); };
+    $("#te-rem").onclick = () => { const ids = needSel("remove them"); if (ids) townAct({ op: "town.removeTerritories", territories: ids }); };
+    $("#te-free").onclick = () => { const ids = needSel("free them"); if (ids) townAct({ op: "town.release", territories: ids }); };
+    const addPlayer = () => {
+      const v = $("#te-player").value.trim();
+      if (!v) return;
+      const other = d.towns.find((x) => x.name !== t.name && x.residents.some((r) => r.toLowerCase() === v.toLowerCase()));
+      if (other && !confirm(`${v} is in ${prettyName(other.name)}. Move them to ${prettyName(t.name)}?`)) return;
+      townAct({ op: "town.addPlayer", town: t.name, player: v });
+    };
+    $("#te-padd").onclick = addPlayer;
+    $("#te-player").onkeydown = (e) => { if (e.key === "Enter") addPlayer(); };
+    $$("#town-editor .rrow").forEach((row) => {
+      const p = row.dataset.player;
+      $("[data-rank]", row).onchange = (e) => townAct({ op: "town.rank", town: t.name, player: p, rank: e.target.value });
+      $("[data-kick]", row).onclick = () => { if (confirm(`Remove ${p} from ${prettyName(t.name)}?`)) townAct({ op: "town.removePlayer", town: t.name, player: p }); };
+    });
+    $("#te-open").onchange = (e) => townAct({ op: "town.open", town: t.name, open: e.target.checked });
+    $("#te-del").onclick = () => {
+      if (confirm(`Delete the town ${prettyName(t.name)}? Its land becomes unclaimed and its ${t.residents.length} player${t.residents.length === 1 ? "" : "s"} become townless. This can't be undone.`)) townAct({ op: "town.delete", town: t.name });
+    };
+  }
+
+  function newTownDialog() {
+    const ids = selIds();
+    const free = ids.filter((id) => !E.claimed.has(id) || E.claimed.get(id).kind !== "owned");
+    if (!free.length) {
+      toast(ids.length ? "Those territories already belong to towns. Select unclaimed land for the new town." : "Select the territories for the new town on the map first (its first one becomes the home)", true);
+      return;
+    }
+    const home = E.terr.get(free[0]);
+    modal(`<h2>New town</h2>
+      <p>The town gets the ${free.length} unclaimed selected ${free.length === 1 ? "territory" : "territories"}. Its home is <b>#${home.id}${home.name ? " " + esc(home.name) : ""}</b>.${ids.length > free.length ? ` ${ids.length - free.length} already-claimed ones are skipped.` : ""}</p>
+      <label class="field"><span>Name (no spaces)</span><input id="nt-name" spellcheck="false" autocomplete="off"></label>
+      <label class="field"><span>Leader (optional)</span><input id="nt-leader" list="player-names" placeholder="Player name" spellcheck="false"></label>
+      <label class="field"><span>Nation (optional)</span><input id="nt-nation" list="nation-names" placeholder="Existing or new nation" spellcheck="false"></label>
+      <div class="foot"><button class="btn" data-close>Cancel</button><button class="btn primary" id="nt-go">Create town</button></div>`);
+    const nm = $("#nt-name");
+    nm.focus();
+    const go = async () => {
+      const name = nm.value.trim().replace(/\s+/g, "_");
+      if (!name) { nm.focus(); return; }
+      const leader = $("#nt-leader").value.trim();
+      const nation = $("#nt-nation").value.trim();
+      const r = await townAct({ op: "town.create", name, territories: free, player: leader || undefined });
+      if (!r) return;
+      closeModal();
+      T.sel = name;
+      if (nation) await townAct({ op: "town.setNation", town: name, nation });
+      pickTown(name, false);
+    };
+    $("#nt-go").onclick = go;
+    nm.onkeydown = (e) => { if (e.key === "Enter") go(); };
+  }
+
+  function renderDatalists() {
+    const d = T.data;
+    if (!d) return;
+    $("#nation-names").innerHTML = d.nations.map((n) => `<option value="${esc(n.name)}">`).join("");
+    $("#player-names").innerHTML = d.players.map((p) => `<option value="${esc(p)}">`).join("");
+  }
+
+  // ---------------------------------------------------------------- follow live changes (war captures, town edits in game)
+  let stateVer = null, liveVer = null;
+  async function pollState() {
+    let v;
+    try { v = await (await fetch("data/nodes/version.json", { cache: "no-cache" })).json(); } catch { return; }
+    if (v && v.live && v.live !== liveVer) {
+      const first = liveVer === null;
+      liveVer = v.live;
+      if (!first) {
+        const before = JSON.stringify([...E.occChunks]);
+        await loadOccupiedChunks();
+        if (JSON.stringify([...E.occChunks]) !== before) { drawOverlays(); if (!isTyping()) renderInspector(); }
+      }
+    }
+    if (!v || !v.state || v.state === stateVer) return;
+    if (stateVer === null) { stateVer = v.state; return; }
+    // don't redraw panels under the user's fingers; try again next poll
+    if (T.busy || isTyping() || !$("#modal-wrap").hidden) return;
+    stateVer = v.state;
+    const before = JSON.stringify([...E.claimed]);
+    await loadClaims();
+    if (JSON.stringify([...E.claimed]) === before) return;
+    restyle();
+    drawOverlays();
+    refreshUi();
+  }
+
+  // ---------------------------------------------------------------- resource hover (like the old Dynmap editor)
+  function resTipHtml(n) {
+    const r = E.resources[n];
+    if (!r) return `<b>${esc(n)}</b><div class="tip-warn">Not defined: add it in the Resources tab or remove it</div>`;
+    const u = iconUrl(n);
+    return `<div class="tip-h">${u ? `<img src="${esc(u)}" alt="">` : ""}<b>${esc(n)}</b><span>${resCount(n)} territories</span></div><pre>${esc(JSON.stringify(r, null, 2))}</pre>`;
+  }
+  function setupResTips() {
+    const tip = document.createElement("div");
+    tip.id = "res-tip";
+    tip.hidden = true;
+    document.body.appendChild(tip);
+    let cur = null;
+    const place = (e) => {
+      const pad = 14, w = tip.offsetWidth, h = tip.offsetHeight;
+      let x = e.clientX + pad, y = e.clientY + pad;
+      if (x + w > innerWidth - 8) x = Math.max(8, e.clientX - w - pad);
+      if (y + h > innerHeight - 8) y = Math.max(8, innerHeight - h - 8);
+      tip.style.left = x + "px"; tip.style.top = y + "px";
+    };
+    document.addEventListener("mouseover", (e) => {
+      const el = e.target.closest("[data-tipres]");
+      if (el === cur) return;
+      cur = el;
+      if (!el) { tip.hidden = true; return; }
+      tip.innerHTML = resTipHtml(el.dataset.tipres);
+      tip.hidden = false;
+      place(e);
+    });
+    document.addEventListener("mousemove", (e) => { if (cur) place(e); });
+    document.addEventListener("mousedown", () => { tip.hidden = true; cur = null; }, true);
+  }
+
+  // ---------------------------------------------------------------- server shards (Reef sharding regions)
+  // Regions are kept in exactly the config format Reef and GinjerMap read, so what you draw is what they load:
+  //   rectangle {server, min-x, min-z, max-x, max-z}, polygon {server, points, smooth?}, circle {server, center-x, center-z, radius}
+  const SH = {
+    regions: [], sel: -1, draft: [], hover: null, dirty: false, loaded: false, layers: [],
+    kind: store.get("shKind", "poly"), smooth: !!store.get("shSmooth", false), snap: store.get("shSnap", true), server: store.get("shServer", ""),
+  };
+  const SHARD_COLORS = ["#ff7a45", "#36cfc9", "#b37feb", "#ffd666", "#73d13d", "#ff85c0", "#69b1ff", "#ffa940"];
+  map.createPane("shards").style.zIndex = 640;
+  R.shards = L.svg({ pane: "shards", padding: 0.3 });
+  G.shards = L.layerGroup().addTo(map);
+  G.shardsUi = L.layerGroup().addTo(map);
+  G.shardsDraft = L.layerGroup().addTo(map);
+
+  const shardKind = (r) => (Array.isArray(r.points) ? "poly" : r["center-x"] !== undefined ? "circle" : "rect");
+
+  /** closed Catmull-Rom spline through the points (same maths as Reef and GinjerMap) */
+  function shardSmooth(p) {
+    const n = p.length, out = [];
+    for (let i = 0; i < n; i++) {
+      const p0 = p[(i + n - 1) % n], p1 = p[i], p2 = p[(i + 1) % n], p3 = p[(i + 2) % n];
+      const steps = Math.min(256, Math.max(4, Math.ceil(Math.hypot(p2[0] - p1[0], p2[1] - p1[1]) / 8)));
+      for (let s = 0; s < steps; s++) {
+        const t = s / steps, t2 = t * t, t3 = t2 * t;
+        const axis = (k) => 0.5 * (2 * p1[k] + (-p0[k] + p2[k]) * t + (2 * p0[k] - 5 * p1[k] + 4 * p2[k] - p3[k]) * t2 + (-p0[k] + 3 * p1[k] - 3 * p2[k] + p3[k]) * t3);
+        out.push([axis(0), axis(1)]);
+      }
+    }
+    return out;
+  }
+
+  /** the polygon a region really covers */
+  function shardOutline(r) {
+    const kind = shardKind(r);
+    if (kind === "poly") {
+      const pts = r.points.map((p) => [Number(p[0]), Number(p[1])]);
+      return r.smooth === true && pts.length >= 3 ? shardSmooth(pts) : pts;
+    }
+    if (kind === "circle") {
+      const cx = +r["center-x"], cz = +r["center-z"];
+      const rx = r["radius-x"] !== undefined ? +r["radius-x"] : +r.radius;
+      const rz = r["radius-z"] !== undefined ? +r["radius-z"] : +r.radius;
+      const n = Math.min(1024, Math.max(32, Math.ceil((2 * Math.PI * Math.max(rx, rz)) / 8)));
+      return Array.from({ length: n }, (_, i) => [cx + rx * Math.cos((2 * Math.PI * i) / n), cz + rz * Math.sin((2 * Math.PI * i) / n)]);
+    }
+    const a = +r["min-x"], b = +r["min-z"], c = +r["max-x"], d = +r["max-z"];
+    return [[a, b], [c, b], [c, d], [a, d]];
+  }
+
+  function shardColor(server) {
+    const names = [...new Set(SH.regions.map((r) => r.server))];
+    return SHARD_COLORS[Math.max(0, names.indexOf(server)) % SHARD_COLORS.length];
+  }
+
+  function shardPoint(latlng) {
+    const q = SH.snap ? 16 : 1;
+    return [Math.round(latlng.lng / q) * q, Math.round(latlng.lat / q) * q];
+  }
+
+  function shardDesc(r) {
+    const kind = shardKind(r);
+    if (kind === "poly") return `${r.points.length} points${r.smooth ? ", curved" : ""}`;
+    if (kind === "circle") return r["radius-x"] !== undefined ? `ellipse ${r["radius-x"]}×${r["radius-z"]}` : `circle, radius ${r.radius}`;
+    return `box ${Math.abs(r["max-x"] - r["min-x"])}×${Math.abs(r["max-z"] - r["min-z"])}`;
+  }
+
+  function shardsNormalize() {
+    for (const r of SH.regions) {
+      if (shardKind(r) !== "rect") continue;
+      const x0 = Math.min(r["min-x"], r["max-x"]), x1 = Math.max(r["min-x"], r["max-x"]);
+      const z0 = Math.min(r["min-z"], r["max-z"]), z1 = Math.max(r["min-z"], r["max-z"]);
+      r["min-x"] = x0; r["max-x"] = x1; r["min-z"] = z0; r["max-z"] = z1;
+    }
+  }
+
+  function shardChanged() {
+    SH.dirty = true;
+    renderShardList();
+    drawShards();
+    updateModeHint();
+  }
+
+  function drawShards() {
+    G.shards.clearLayers();
+    SH.layers = [];
+    SH.regions.forEach((r, i) => {
+      let pts;
+      try { pts = shardOutline(r); } catch { SH.layers.push(null); return; }
+      if (pts.length < 3 || pts.some(([x, z]) => !isFinite(x) || !isFinite(z))) { SH.layers.push(null); return; }
+      const color = shardColor(r.server), sel = i === SH.sel;
+      const poly = L.polygon(pts.map(([x, z]) => ll(x, z)), {
+        renderer: R.shards, color, weight: sel ? 4 : 2.5, opacity: 0.95, dashArray: sel ? null : "10 8",
+        fillColor: color, fillOpacity: sel ? 0.16 : 0.06, interactive: false,
+      });
+      poly.bindTooltip(`#${i + 1} ${r.server}`, { permanent: true, direction: "center", className: "shard-label", opacity: 0.9 });
+      G.shards.addLayer(poly);
+      SH.layers.push(poly);
+    });
+    drawShardUi();
+  }
+
+  /** handles for dragging the selected region's points */
+  function shardHandles(r) {
+    const kind = shardKind(r);
+    if (kind === "poly") {
+      return r.points.map((p, idx) => ({
+        x: p[0], z: p[1],
+        set: (x, z) => { r.points[idx] = [x, z]; },
+        remove: () => { if (r.points.length > 3) { r.points.splice(idx, 1); return true; } return false; },
+      }));
+    }
+    if (kind === "circle") {
+      const cx = +r["center-x"], cz = +r["center-z"];
+      const rx = r["radius-x"] !== undefined ? +r["radius-x"] : +r.radius;
+      const handles = [
+        { x: cx, z: cz, set: (x, z) => { r["center-x"] = x; r["center-z"] = z; } },
+        { x: cx + rx, z: cz, set: (x) => { const v = Math.max(1, Math.abs(x - +r["center-x"])); if (r["radius-x"] !== undefined) r["radius-x"] = v; else r.radius = v; } },
+      ];
+      if (r["radius-z"] !== undefined) handles.push({ x: cx, z: cz + +r["radius-z"], set: (x, z) => { r["radius-z"] = Math.max(1, Math.abs(z - +r["center-z"])); } });
+      return handles;
+    }
+    return [
+      { x: r["min-x"], z: r["min-z"], set: (x, z) => { r["min-x"] = x; r["min-z"] = z; } },
+      { x: r["max-x"], z: r["min-z"], set: (x, z) => { r["max-x"] = x; r["min-z"] = z; } },
+      { x: r["max-x"], z: r["max-z"], set: (x, z) => { r["max-x"] = x; r["max-z"] = z; } },
+      { x: r["min-x"], z: r["max-z"], set: (x, z) => { r["min-x"] = x; r["max-z"] = z; } },
+    ];
+  }
+
+  function drawShardUi() {
+    G.shardsUi.clearLayers();
+    G.shardsDraft.clearLayers();
+    if (E.tool !== "shards") return;
+    if (SH.draft.length) { drawShardDraft(); return; }
+    const r = SH.regions[SH.sel];
+    if (!r) return;
+    const icon = L.divIcon({ className: "shard-handle", iconSize: [14, 14] });
+    shardHandles(r).forEach((h) => {
+      const m = L.marker(ll(h.x, h.z), { icon, draggable: true, keyboard: false, zIndexOffset: 1000 });
+      m.on("drag", () => {
+        const [x, z] = shardPoint(m.getLatLng());
+        h.set(x, z);
+        const layer = SH.layers[SH.sel];
+        if (layer) layer.setLatLngs(shardOutline(r).map(([px, pz]) => ll(px, pz)));
+      });
+      m.on("dragend", () => { shardsNormalize(); shardChanged(); });
+      m.on("contextmenu", (e) => {
+        L.DomEvent.stop(e);
+        if (h.remove) {
+          if (h.remove()) shardChanged(); else toast("A polygon needs at least 3 points", true);
+        }
+      });
+      G.shardsUi.addLayer(m);
+    });
+  }
+
+  function drawShardDraft() {
+    G.shardsDraft.clearLayers();
+    const color = shardColor(shardServerName() || "?");
+    const style = { renderer: R.shards, color, weight: 2.5, dashArray: "4 6", interactive: false };
+    const pts = SH.draft.map(([x, z]) => ll(x, z));
+    const hov = SH.hover ? ll(SH.hover[0], SH.hover[1]) : null;
+    if (SH.kind === "poly") {
+      const all = hov ? [...pts, hov] : pts;
+      if (all.length > 1) G.shardsDraft.addLayer(L.polyline(all, style));
+      SH.draft.forEach(([x, z], i) => G.shardsDraft.addLayer(L.circleMarker(ll(x, z), { renderer: R.shards, radius: i === 0 ? 7 : 4, color, fillColor: "#fff", fillOpacity: 1, weight: 2, interactive: false })));
+    } else if (SH.kind === "rect" && hov) {
+      G.shardsDraft.addLayer(L.rectangle([pts[0], hov], { ...style, fill: true, fillColor: color, fillOpacity: 0.1 }));
+    } else if (SH.kind === "circle" && hov) {
+      const radius = Math.hypot(SH.hover[0] - SH.draft[0][0], SH.hover[1] - SH.draft[0][1]);
+      G.shardsDraft.addLayer(L.circle(pts[0], { ...style, radius, fill: true, fillColor: color, fillOpacity: 0.1 }));
+    }
+  }
+
+  function shardServerName() {
+    return ($("#shard-server")?.value || "").trim();
+  }
+
+  function shardAdd(region) {
+    SH.regions.push(region);
+    SH.sel = SH.regions.length - 1;
+    SH.draft = [];
+    SH.hover = null;
+    shardsNormalize();
+    shardChanged();
+    toast(`Added region #${SH.regions.length} for ${region.server}. Save to keep it.`);
+  }
+
+  function shardFinishPolygon() {
+    if (SH.draft.length < 3) return toast("A polygon needs at least 3 points", true);
+    const region = { server: shardServerName(), points: SH.draft.map(([x, z]) => [x, z]) };
+    if (SH.smooth) region.smooth = true;
+    shardAdd(region);
+  }
+
+  function shardCancelDraft() {
+    SH.draft = [];
+    SH.hover = null;
+    drawShardUi();
+    updateModeHint();
+  }
+
+  map.on("click", (e) => {
+    if (E.tool !== "shards") return;
+    if (!shardServerName()) { toast("Type the server name first (the one in velocity.toml)", true); $("#shard-server")?.focus(); return; }
+    const p = shardPoint(e.latlng);
+    if (SH.kind === "poly") {
+      if (SH.draft.length >= 3) {
+        const first = map.latLngToContainerPoint(ll(SH.draft[0][0], SH.draft[0][1]));
+        if (first.distanceTo(map.latLngToContainerPoint(e.latlng)) < 12) return shardFinishPolygon();
+      }
+      SH.draft.push(p);
+    } else if (SH.kind === "rect") {
+      if (!SH.draft.length) SH.draft.push(p);
+      else {
+        const a = SH.draft[0];
+        if (a[0] === p[0] || a[1] === p[1]) return toast("Click the opposite corner", true);
+        return shardAdd({ server: shardServerName(), "min-x": Math.min(a[0], p[0]), "min-z": Math.min(a[1], p[1]), "max-x": Math.max(a[0], p[0]), "max-z": Math.max(a[1], p[1]) });
+      }
+    } else if (!SH.draft.length) {
+      SH.draft.push(p);
+    } else {
+      const c = SH.draft[0];
+      const radius = Math.round(Math.hypot(p[0] - c[0], p[1] - c[1]));
+      if (radius < 1) return toast("Click further from the centre", true);
+      return shardAdd({ server: shardServerName(), "center-x": c[0], "center-z": c[1], radius });
+    }
+    drawShardUi();
+    updateModeHint();
+  });
+
+  map.on("mousemove", (e) => {
+    if (E.tool !== "shards" || !SH.draft.length) return;
+    SH.hover = shardPoint(e.latlng);
+    drawShardDraft();
+  });
+
+  map.on("contextmenu", () => {
+    if (E.tool !== "shards" || !SH.draft.length) return;
+    SH.draft.pop();
+    drawShardUi();
+    updateModeHint();
+  });
+
+  /** returns true if the key was used */
+  function shardKey(e) {
+    if (E.tool !== "shards" || !SH.draft.length) return false;
+    if (e.key === "Enter" && SH.kind === "poly") { shardFinishPolygon(); return true; }
+    if (e.key === "Backspace") { e.preventDefault(); SH.draft.pop(); drawShardUi(); updateModeHint(); return true; }
+    return false;
+  }
+
+  function shardHintText() {
+    if (!SH.regions.length && !SH.draft.length) return "Shards: pick a shape, type the server name, then click on the map";
+    if (SH.kind === "poly") return SH.draft.length ? `Polygon: ${SH.draft.length} point(s) · click the first point or press Enter to finish · Backspace/right-click: undo point · Esc: cancel` : "Polygon: click to place points · drag the dots of the selected region to reshape it · right-click a dot to remove it";
+    if (SH.kind === "rect") return SH.draft.length ? "Box: click the opposite corner · Esc: cancel" : "Box: click one corner, then the opposite corner";
+    return SH.draft.length ? "Circle: click to set the radius · Esc: cancel" : "Circle: click the centre, then a point on the edge";
+  }
+
+  function shardsToolChanged() {
+    if (E.tool !== "shards") SH.draft = [];
+    if (E.tool === "shards") { openTab("shards"); if (!SH.loaded) loadShards(); }
+    drawShards();
+    updateModeHint();
+  }
+
+  function renderShardList() {
+    const list = $("#shard-list");
+    if (!list) return;
+    const names = [...new Set(SH.regions.map((r) => r.server))];
+    $("#shard-server-names").innerHTML = names.map((n) => `<option value="${esc(n)}">`).join("");
+    $("#shard-summary").textContent = `${SH.regions.length} region${SH.regions.length === 1 ? "" : "s"}${SH.dirty ? " · unsaved changes" : ""}`;
+    list.innerHTML = SH.regions.map((r, i) => `
+      <div class="shard-row${i === SH.sel ? " sel" : ""}" data-i="${i}">
+        <i class="dot" style="background:${shardColor(r.server)}"></i>
+        <input class="shard-name" data-i="${i}" value="${esc(r.server)}" aria-label="Server name">
+        <span class="shard-desc">${esc(shardDesc(r))}</span>
+        ${shardKind(r) === "poly" ? `<label class="shard-curve" title="Round the corners into a curve through every point"><input type="checkbox" data-curve="${i}"${r.smooth ? " checked" : ""}>curve</label>` : ""}
+        <button class="icon-btn" data-up="${i}" title="Move up: regions higher in the list win where they overlap">↑</button>
+        <button class="icon-btn" data-down="${i}" title="Move down">↓</button>
+        <button class="icon-btn" data-del="${i}" title="Delete this region">✕</button>
+      </div>`).join("") || '<div class="hint">No regions yet.</div>';
+  }
+
+  function shardYaml() {
+    const q = (s) => (/^[A-Za-z0-9_.-]+$/.test(s) ? s : JSON.stringify(s));
+    const lines = SH.regions.map((r) => {
+      const kind = shardKind(r);
+      if (kind === "poly") return `  - {server: ${q(r.server)}, ${r.smooth ? "smooth: true, " : ""}points: [${r.points.map((p) => `[${p[0]}, ${p[1]}]`).join(", ")}]}`;
+      if (kind === "circle") {
+        const radii = r["radius-x"] !== undefined ? `radius-x: ${r["radius-x"]}, radius-z: ${r["radius-z"]}` : `radius: ${r.radius}`;
+        return `  - {server: ${q(r.server)}, center-x: ${r["center-x"]}, center-z: ${r["center-z"]}, ${radii}}`;
+      }
+      return `  - {server: ${q(r.server)}, min-x: ${r["min-x"]}, min-z: ${r["min-z"]}, max-x: ${r["max-x"]}, max-z: ${r["max-z"]}}`;
+    });
+    return "  regions:\n" + lines.join("\n");
+  }
+
+  function showShardYaml() {
+    if (!SH.regions.length) return toast("Draw a region first", true);
+    modal(`<h2>Regions for reef.yml</h2>
+      <p>Replace the <code>regions:</code> list under <code>sharding:</code> in <code>reef.yml</code> on every server with this. The list must be identical on all of them (only <code>this-server</code> differs), then run <code>/reef reload</code>. Regions higher up win where they overlap.</p>
+      <textarea id="shard-yaml-text" rows="12" readonly style="width:100%;font-family:ui-monospace,monospace;font-size:12px"></textarea>
+      <div class="foot"><button class="btn primary" id="shard-copy">Copy</button><button class="btn" data-close>Close</button></div>`);
+    const ta = $("#shard-yaml-text");
+    ta.value = shardYaml();
+    $("#shard-copy").onclick = async () => {
+      try { await navigator.clipboard.writeText(ta.value); toast("Copied"); } catch { ta.select(); document.execCommand("copy"); toast("Copied"); }
+    };
+  }
+
+  async function loadShards() {
+    if (!E.token || !E.shardsAllowed) return;
+    try {
+      const d = await api("api/editor/shards");
+      SH.regions = (d.regions || []).filter((r) => r && typeof r.server === "string");
+      SH.sel = -1;
+      SH.dirty = false;
+      SH.loaded = true;
+      renderShardList();
+      drawShards();
+    } catch (e) {
+      if (e.status !== 404) toast("Couldn't load server regions: " + e.message, true);
+    }
+  }
+
+  async function saveShards() {
+    if (!E.token) return toast("Open the editor with /ginjermap editor in game to save", true);
+    shardsNormalize();
+    if (SH.regions.some((r) => !String(r.server || "").trim())) return toast("Every region needs a server name", true);
+    try {
+      await api("api/editor/shards", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ regions: SH.regions }) });
+      SH.dirty = false;
+      renderShardList();
+      toast("Saved to GinjerMap. Use \"Copy for reef.yml\" to put the same regions on your servers.");
+    } catch (e) {
+      toast("Couldn't save: " + e.message, true);
+    }
+  }
+
+  function setupShards() {
+    $$("#shard-kind button").forEach((b) => {
+      b.classList.toggle("active", b.dataset.v === SH.kind);
+      b.onclick = () => {
+        SH.kind = b.dataset.v; store.set("shKind", SH.kind);
+        SH.draft = []; SH.hover = null;
+        $$("#shard-kind button").forEach((x) => x.classList.toggle("active", x === b));
+        $("#shard-curve-row").hidden = SH.kind !== "poly";
+        drawShardUi(); updateModeHint();
+      };
+    });
+    $("#shard-curve-row").hidden = SH.kind !== "poly";
+    const smooth = $("#shard-smooth");
+    smooth.checked = SH.smooth;
+    smooth.onchange = () => { SH.smooth = smooth.checked; store.set("shSmooth", SH.smooth); };
+    const snap = $("#shard-snap");
+    snap.checked = SH.snap;
+    snap.onchange = () => { SH.snap = snap.checked; store.set("shSnap", SH.snap); };
+    const name = $("#shard-server");
+    name.value = SH.server;
+    name.oninput = () => { SH.server = name.value; store.set("shServer", SH.server); };
+    $("#shard-save").onclick = saveShards;
+    $("#shard-yaml").onclick = showShardYaml;
+    $("#shard-reload").onclick = () => loadShards();
+
+    const list = $("#shard-list");
+    list.addEventListener("click", (e) => {
+      const t = e.target;
+      const ds = (k) => (t.closest(`[data-${k}]`) ? +t.closest(`[data-${k}]`).dataset[k] : null);
+      const del = ds("del"), up = ds("up"), down = ds("down");
+      if (del !== null) { SH.regions.splice(del, 1); SH.sel = -1; shardChanged(); return; }
+      if (up !== null && up > 0) { [SH.regions[up - 1], SH.regions[up]] = [SH.regions[up], SH.regions[up - 1]]; SH.sel = up - 1; shardChanged(); return; }
+      if (down !== null && down < SH.regions.length - 1) { [SH.regions[down + 1], SH.regions[down]] = [SH.regions[down], SH.regions[down + 1]]; SH.sel = down + 1; shardChanged(); return; }
+      if (t.closest("input")) return;
+      const row = t.closest(".shard-row");
+      if (row) {
+        SH.sel = +row.dataset.i;
+        renderShardList(); drawShards();
+        const layer = SH.layers[SH.sel];
+        if (layer) map.fitBounds(layer.getBounds().pad(0.2), { maxZoom: 0 });
+      }
+    });
+    list.addEventListener("change", (e) => {
+      const t = e.target;
+      if (t.classList.contains("shard-name")) {
+        const v = t.value.trim();
+        if (!v) { t.value = SH.regions[+t.dataset.i].server; return; }
+        SH.regions[+t.dataset.i].server = v;
+        shardChanged();
+      } else if (t.dataset.curve !== undefined) {
+        const r = SH.regions[+t.dataset.curve];
+        if (t.checked) r.smooth = true; else delete r.smooth;
+        shardChanged();
+      }
+    });
+    renderShardList();
+  }
+
+  // ---------------------------------------------------------------- wiring
+  function buildUi() {
+    setupResTips();
+    setupShards();
+    $$("#tools [data-tool]").forEach((b) => (b.onclick = () => setTool(b.dataset.tool)));
+    $("#brush-size").oninput = (e) => setBrush(+e.target.value);
+    $("#brush-size").onchange = (e) => e.target.blur();
+    setBrush(E.brush);
+    $("#undo").onclick = undo;
+    $("#redo").onclick = redo;
+    $("#btn-check").onclick = () => check(false);
+    $("#btn-apply").onclick = () => check(true);
+    const setOpts = (open) => { $("#opts-pop").hidden = !open; $("#opts-btn").setAttribute("aria-expanded", String(open)); };
+    $("#opts-btn").onclick = (e) => { e.stopPropagation(); setOpts($("#opts-pop").hidden); };
+    $("#opts-close").onclick = () => setOpts(false);
+    document.addEventListener("mousedown", (e) => { if (!$("#opts-pop").hidden && !e.target.closest("#opts-pop, #opts-btn")) setOpts(false); });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#opts-pop").hidden) setOpts(false); });
+    $("#btn-menu").onclick = (e) => { e.stopPropagation(); $("#menu").hidden = !$("#menu").hidden; };
+    document.addEventListener("click", () => ($("#menu").hidden = true));
+    $$("#menu [data-act]").forEach((b) => (b.onclick = async () => {
+      $("#menu").hidden = true;
+      const a = b.dataset.act;
+      if (a === "download") download();
+      if (a === "import") $("#import-file").click();
+      if (a === "reload") {
+        if (E.version !== E.savedVersion && !confirm("Throw away your unsaved changes and reload from the server?")) return;
+        try { await loadClaims(); await loadFromServer(false); setSaveState(); } catch (e) { toast(e.message, true); }
+      }
+      if (a === "help") helpDialog();
+    }));
+    $("#import-file").onchange = async (e) => {
+      const f = e.target.files[0];
+      e.target.value = "";
+      if (!f) return;
+      if (E.version !== E.savedVersion && !confirm("Replace your current edits with this file?")) return;
+      try {
+        const w = JSON.parse(await f.text());
+        if (!w.territories) throw new Error("this doesn't look like a Nodes world.json");
+        loadWorld(w);
+        E.savedVersion = -1;
+        fitWorld();
+        setSaveState();
+        toast(`Imported ${E.terr.size} territories. Apply to send them to the server.`);
+      } catch (err) { toast("Couldn't import: " + err.message, true); }
+    };
+    $$("#tabs button").forEach((b) => (b.onclick = () => openTab(b.dataset.tab)));
+    $("#town-filter").oninput = renderTowns;
+    $("#town-sort").onchange = renderTowns;
+    $("#town-new").onclick = newTownDialog;
+    $("#town-list").onclick = (e) => {
+      const row = e.target.closest("[data-town]");
+      if (row) pickTown(row.dataset.town, true);
+    };
+    $("#terr-filter").oninput = renderTerrList;
+    $("#terr-sort").onchange = renderTerrList;
+    $("#res-filter").oninput = renderResList;
+    $("#terr-list").onclick = (e) => {
+      const row = e.target.closest("[data-id]");
+      if (!row) return;
+      const id = +row.dataset.id;
+      if (e.ctrlKey || e.metaKey) toggleSel(id); else { select([id]); zoomTo([id]); }
+    };
+    $("#res-list").onclick = (e) => {
+      const row = e.target.closest("[data-res]");
+      if (!row) return;
+      resSel = row.dataset.res;
+      renderResList();
+    };
+    $("#res-pack").onclick = packDialog;
+    $("#terr-dist").onclick = distributeDialog;
+    $("#res-new").onclick = () => {
+      let n = "new_resource", i = 1;
+      while (E.resources[n]) n = `new_resource_${i++}`;
+      begin("New resource");
+      touchRes();
+      E.resources[n] = { icon: null, cost: { constant: 0, scale: 1.0 }, priority: 0, income: {}, ore: {}, crops: {}, animals: {} };
+      end();
+      resSel = n;
+      renderResList();
+    };
+    const opts = { "#opt-land": "land", "#opt-wild": "wild", "#opt-lock": "lock", "#opt-labels": "labels", "#opt-icons": "icons", "#opt-owners": "owners", "#opt-grid": "grid" };
+    for (const [sel, key] of Object.entries(opts)) {
+      const el = $(sel);
+      el.checked = !!E.opt[key];
+      el.onchange = () => {
+        E.opt[key] = el.checked;
+        store.set("opt", E.opt);
+        drawOverlays();
+        preloadLand();
+        syncDragging();
+        updateModeHint();
+        refreshUi();
+        el.blur(); // keep Space etc. working as editor shortcuts
+      };
+    }
+    const colorBy = () => $$("#color-by button").forEach((b) => b.classList.toggle("active", b.dataset.v === E.opt.colorBy));
+    $$("#color-by button").forEach((b) => (b.onclick = () => {
+      E.opt.colorBy = b.dataset.v;
+      store.set("opt", E.opt);
+      colorBy();
+      restyle();
+      drawOverlays();
+      renderTerrList();
+      b.blur();
+    }));
+    colorBy();
+    $("#modal-wrap").addEventListener("mousedown", (e) => { if (e.target.id === "modal-wrap") closeModal(); });
+
+    document.addEventListener("keydown", (e) => {
+      const typing = isTyping();
+      if (e.key === "Escape") {
+        closeModal();
+        if (!typing) { if (E.tool === "shards" && SH.draft.length) shardCancelDraft(); else if (E.tool === "auto" && penStrokes.length) penReset(); else if (E.tool !== "shards") select([]); }
+        return;
+      }
+      if (typing) return;
+      if (shardKey(e)) return;
+      if (E.tool === "auto" && penStrokes.length && e.key === "Backspace") { e.preventDefault(); penUndo(); return; }
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && e.key.toLowerCase() === "z") { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
+      if (mod && e.key.toLowerCase() === "y") { e.preventDefault(); redo(); return; }
+      if (mod && e.key.toLowerCase() === "s") { e.preventDefault(); check(true); return; }
+      if (mod && e.key.toLowerCase() === "a") { e.preventDefault(); select([...E.terr.keys()]); return; }
+      if (mod) return;
+      if (e.code === "Space") {
+        e.preventDefault();
+        if (!spaceDown && !e.repeat) { spaceDown = true; spaceAt = Date.now(); spacePanned = false; syncDragging(); }
+        return;
+      }
+      if (e.key === "Shift") { shiftDown = true; resizeAcc = 0; syncDragging(); return; }
+      if (e.key.toLowerCase() === "a" && PAINT_TOOLS.has(E.tool)) {
+        setPendingNew(!pendingNew);
+        if (pendingNew) toast("Next stroke starts a new territory");
+        return;
+      }
+      const tools = { v: "select", b: "paint", n: "new", e: "erase", r: "rect", f: "fill", c: "core", g: "auto" };
+      if (tools[e.key.toLowerCase()]) return setTool(tools[e.key.toLowerCase()]);
+      if (e.key === "[") return setBrush(E.brush - 1);
+      if (e.key === "]") return setBrush(E.brush + 1);
+      if (e.key === "Delete" || e.key === "Backspace") return deleteSelected();
+      if (e.key.toLowerCase() === "m") return mergeSelected();
+    });
+    document.addEventListener("keyup", (e) => {
+      if (e.code === "Space") {
+        const tap = spaceDown && !spacePanned && Date.now() - spaceAt < 350;
+        spaceDown = false;
+        syncDragging();
+        if (tap && !isTyping()) toggleBrush();
+      }
+      if (e.key === "Shift") { shiftDown = false; syncDragging(); }
+    });
+    window.addEventListener("blur", () => { spaceDown = false; shiftDown = false; syncDragging(); });
+    window.addEventListener("beforeunload", (e) => { if (E.version !== E.savedVersion) { e.preventDefault(); e.returnValue = ""; } });
+    setTool("select");
+  }
+
+  /** true while the user is typing in a text field (checkboxes and sliders don't count) */
+  function isTyping() {
+    const a = document.activeElement;
+    if (!a) return false;
+    if (a.tagName === "TEXTAREA" || a.tagName === "SELECT") return true;
+    if (a.tagName !== "INPUT") return false;
+    return !["checkbox", "radio", "range", "button"].includes(a.type);
+  }
+
+  function helpDialog() {
+    modal(`<h2>Controls</h2>
+    <div class="section-h">Like the old Dynmap editor</div>
+    <div class="keys">
+      <kbd>Space</kbd><span>Brush on / off (tap). In this mode left-drag pans and right-drag paints. Hold Space and drag to pan any time.</span>
+      <kbd>Right-click</kbd><span>Select a territory. Shift+right-click adds or removes. Right-click empty land to deselect.</span>
+      <kbd>Right-drag</kbd><span>With the brush on: paint chunks into the selected territory</span>
+      <kbd>Ctrl+right-drag</kbd><span>With the brush on: erase chunks from the selected territory</span>
+      <kbd>Shift+move</kbd><span>With the brush on: change brush size</span>
+      <kbd>A</kbd><span>With the brush on: the next stroke starts a new territory</span>
+      <kbd>Ctrl+right-click</kbd><span>Brush off: add/remove the resource picked in the Resources tab</span>
+      <kbd>Left-drag</kbd><span>Pans the map when the brush was turned on with Space. Brushes picked from the toolbar (or B/N/E) paint with left-drag too.</span>
+    </div>
+    <div class="section-h">Tools</div>
+    <div class="keys">
+      <kbd>V</kbd><span>Select. Click a territory, Ctrl/⌘-click to add, Shift+drag for a box.</span>
+      <kbd>B</kbd><span>Brush: paint into the selected territory</span>
+      <kbd>N</kbd><span>Brush: every stroke is a new territory</span>
+      <kbd>E</kbd><span>Brush: erase any chunks back to wilderness</span>
+      <kbd>R</kbd><span>Drag a box to fill</span>
+      <kbd>F</kbd><span>Fill a connected area of empty land (like an island)</span>
+      <kbd>C</kbd><span>Set a territory's core chunk</span>
+      <kbd>[ ]</kbd><span>Brush smaller / bigger</span>
+      <kbd>M</kbd><span>Merge selected</span>
+      <kbd>Del</kbd><span>Delete selected</span>
+      <kbd>Esc</kbd><span>Deselect</span>
+      <kbd>Ctrl+Z</kbd><span>Undo (Ctrl+Shift+Z to redo)</span>
+      <kbd>Ctrl+S</kbd><span>Check &amp; apply to server</span>
+    </div>
+    <p>Applying never deletes territories that towns own, and won't run during flag attacks or raids. The server backs up world.json every time.</p>
+    <div class="foot"><button class="btn" data-close>Got it</button></div>`);
+  }
+
+  // handy from the browser console, e.g. NodesEditor.serialize()
+  window.NodesEditor = { state: E, map, serialize, select, undo, redo, penWalls };
+
+  setInterval(pollState, 5000);
+  init().catch((e) => { console.error(e); toast("Editor failed to load: " + e.message, true); });
+})();
