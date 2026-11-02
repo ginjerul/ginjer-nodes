@@ -766,7 +766,6 @@ public object Config {
         Config.discordWebhookWarzones = config.getString("discordWebhookWarzones", Config.discordWebhookWarzones)?.trim() ?: ""
         Config.discordRelayRaids = config.getBoolean("discordRelayRaids", Config.discordRelayRaids)
         Config.discordRelayWarzones = config.getBoolean("discordRelayWarzones", Config.discordRelayWarzones)
-
     }
 }
 
