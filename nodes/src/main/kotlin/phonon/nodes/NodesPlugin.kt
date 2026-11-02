@@ -6,8 +6,12 @@ package phonon.nodes
 
 import org.bukkit.command.TabCompleter
 import org.bukkit.plugin.java.JavaPlugin
+import phonon.nodes.bounty.Bounties
 import phonon.nodes.commands.AllyChatCommand
 import phonon.nodes.commands.AllyCommand
+import phonon.nodes.commands.BountyCommand
+import phonon.nodes.commands.EconomyAdminCommand
+import phonon.nodes.commands.EconomyCommand
 import phonon.nodes.commands.GlobalChatCommand
 import phonon.nodes.commands.KillShopCommand
 import phonon.nodes.commands.MiningTowerCommand
@@ -32,11 +36,13 @@ import phonon.nodes.commands.UnallyCommand
 import phonon.nodes.commands.VassalCommand
 import phonon.nodes.commands.WarCommand
 import phonon.nodes.commands.WarzoneCommand
+import phonon.nodes.economy.Economy
 import phonon.nodes.fortify.FortTreasuryListener
 import phonon.nodes.fortify.Fortifications
 import phonon.nodes.killshop.KillShop
 import phonon.nodes.killshop.KillShopGuiListener
 import phonon.nodes.listeners.AntiBlockGlitchListener
+import phonon.nodes.listeners.BountyListener
 import phonon.nodes.listeners.DisabledWorldListener
 import phonon.nodes.listeners.MiningTowerListener
 import phonon.nodes.listeners.NodesBlockGrowListener
@@ -158,6 +164,7 @@ public class NodesPlugin : JavaPlugin() {
         pluginManager.registerEvents(KillShopGuiListener(), this)
         pluginManager.registerEvents(SupplyDropListener(), this)
         pluginManager.registerEvents(FortTreasuryListener(), this)
+        pluginManager.registerEvents(BountyListener(), this)
 
         this.getCommand("town")?.setExecutor(TownCommand())
         this.getCommand("nation")?.setExecutor(NationCommand())
@@ -207,6 +214,15 @@ public class NodesPlugin : JavaPlugin() {
         val surrenderCmd = SurrenderCommand()
         this.getCommand("surrender")?.setExecutor(surrenderCmd)
         this.getCommand("surrender")?.setTabCompleter(surrenderCmd)
+        val bountyCmd = BountyCommand()
+        this.getCommand("bounty")?.setExecutor(bountyCmd)
+        this.getCommand("bounty")?.setTabCompleter(bountyCmd)
+        val economyCmd = EconomyCommand()
+        this.getCommand("economy")?.setExecutor(economyCmd)
+        this.getCommand("economy")?.setTabCompleter(economyCmd)
+        val economyAdminCmd = EconomyAdminCommand()
+        this.getCommand("economyadmin")?.setExecutor(economyAdminCmd)
+        this.getCommand("economyadmin")?.setTabCompleter(economyAdminCmd)
         this.getCommand("t")?.setTabCompleter(this.getCommand("town")?.getExecutor() as TabCompleter)
         this.getCommand("n")?.setTabCompleter(this.getCommand("nation")?.getExecutor() as TabCompleter)
         this.getCommand("nd")?.setTabCompleter(this.getCommand("nodes")?.getExecutor() as TabCompleter)
@@ -239,6 +255,12 @@ public class NodesPlugin : JavaPlugin() {
         Vassals.load()
         Surrender.load()
         Fortifications.load()
+        Bounties.load()
+        Economy.load()
+
+        // queued bounty rewards retry every 10s, economy settles loans, upkeep and routes
+        server.scheduler.runTaskTimer(this, Runnable { Bounties.deliverPending(null) }, 200L, 200L)
+        server.scheduler.runTaskTimer(this, Runnable { Economy.tick() }, 200L, 200L)
 
         // web map export (after every system above has loaded its state)
         phonon.nodes.map.MapExporter.start(this)
@@ -275,6 +297,9 @@ public class NodesPlugin : JavaPlugin() {
         SupplyDrops.shutdown()
         Vassals.save()
         Surrender.save()
+        if (Nodes.initialized) {
+            Bounties.save()
+        }
         Fortifications.flushOpenTreasuries()
         Fortifications.save()
 

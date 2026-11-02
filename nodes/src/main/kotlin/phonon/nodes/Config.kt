@@ -11,6 +11,8 @@ import org.bukkit.Material
 import org.bukkit.configuration.ConfigurationSection
 import org.bukkit.configuration.file.FileConfiguration
 import org.bukkit.entity.EntityType
+import phonon.nodes.bounty.Bounties
+import phonon.nodes.economy.Economy
 import phonon.nodes.fortify.FortLevel
 import phonon.nodes.fortify.Fortifications
 import phonon.nodes.objects.OreDeposit
@@ -682,6 +684,9 @@ public object Config {
             Config.vassalRevoltCooldownMs = vassalSec.getLong("revoltCooldownHours", 72L).coerceAtLeast(0L) * 60L * 60L * 1000L
             Config.vassalOfferTimeoutMs = vassalSec.getLong("offerTimeoutSeconds", 120L).coerceAtLeast(10L) * 1000L
         }
+
+        Bounties.loadConfig(config)
+        Economy.loadConfig(config)
 
         val fortifySec = config.getConfigurationSection("fortify")
         if (fortifySec != null) {

@@ -494,3 +494,108 @@ fortify:
         DIAMOND_BLOCK: 4
       upkeep:
         DIAMOND: 2
+
+# ===========================================
+# Bounties
+# ===========================================
+# Players fund bounties on other players with real ores from their inventory.
+# Whoever kills the target claims them. No money is created or removed.
+# /bounty add <player> <ore> <amount> [reason]
+bounties:
+  enabled: true
+  # TOWN_INCOME: ores go to the killer's town income (/t income). Items with
+  #   custom names or enchantments can't be stored there and go to the killer.
+  # PLAYER: ores go straight to the killer's inventory.
+  rewardDestination: TOWN_INCOME
+  # when rewardDestination is TOWN_INCOME, a killer without a town receives the
+  # ores directly. If false, the bounty stays active for a killer with a town.
+  townlessPlayerFallback: true
+  maxStacksPerBounty: 36
+  maxContributionsPerTarget: 100
+  # only these materials can be used for rewards, including packages
+  allowedMaterials:
+    - DIAMOND
+    - EMERALD
+    - COAL
+    - RAW_IRON
+    - RAW_GOLD
+    - RAW_COPPER
+    - LAPIS_LAZULI
+    - REDSTONE
+    - QUARTZ
+    - DIAMOND_ORE
+    - DEEPSLATE_DIAMOND_ORE
+    - EMERALD_ORE
+    - DEEPSLATE_EMERALD_ORE
+    - IRON_ORE
+    - DEEPSLATE_IRON_ORE
+    - GOLD_ORE
+    - DEEPSLATE_GOLD_ORE
+    - COPPER_ORE
+    - DEEPSLATE_COPPER_ORE
+    - COAL_ORE
+    - DEEPSLATE_COAL_ORE
+    - LAPIS_ORE
+    - DEEPSLATE_LAPIS_ORE
+    - REDSTONE_ORE
+    - DEEPSLATE_REDSTONE_ORE
+    - NETHER_GOLD_ORE
+    - NETHER_QUARTZ_ORE
+    - ANCIENT_DEBRIS
+  # preset rewards (taken from the funder's inventory):
+  # /bounty addreward <player> <package>
+  packages:
+    diamonds:
+      - DIAMOND:16
+    emeralds:
+      - EMERALD:32
+    mixed-ores:
+      - RAW_IRON:64
+      - RAW_GOLD:16
+      - DIAMOND:8
+  # a contribution can only be claimed after it is this old
+  minimumAgeSeconds: 60
+  placementCooldownSeconds: 30
+  # a hunter can claim on the same target once per this time
+  claimCooldownSeconds: 3600
+  minimumAccountAgeSeconds: 3600
+  # claims and placement are blocked between these players
+  blockSameTown: true
+  blockSameNation: true
+  blockAllies: true
+  # shared IP blocking needs correct IP forwarding behind a proxy
+  blockSameIp: true
+  disabledWorlds: []
+  broadcastPlacement: true
+  broadcastClaims: true
+
+# ===========================================
+# Economy
+# ===========================================
+# Nation, personal and business accounts, recurring trade routes between
+# nations, loans from a funded reserve and infrastructure upkeep. This
+# currency is separate from Vault. Staff create money with /economyadmin issue.
+# Resources are virtual stock numbers per nation, not physical items.
+economy:
+  enabled: true
+  # materials nations can trade on routes
+  resources:
+    - COAL
+    - IRON_INGOT
+    - COPPER_INGOT
+    - GOLD_INGOT
+    - DIAMOND
+    - EMERALD
+    - REDSTONE
+    - LAPIS_LAZULI
+  loans:
+    maximum: '10000'
+    periodHours: 24
+    termPeriods: 30
+    interestBasisPoints: 100
+  # upkeep per registered unit per real 24 hours, captured at registration
+  infrastructure:
+    railway: '5.00'
+    port: '20.00'
+    road: '1.00'
+    power: '10.00'

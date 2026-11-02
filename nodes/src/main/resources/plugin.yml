@@ -119,6 +119,21 @@ commands:
     description: Join another nation with your town
     permission: nodes.command.surrender
     usage: /surrender <nation>
+  bounty:
+    description: Ore bounties on players
+    aliases: [bounties]
+    permission: nodes.command.bounty
+    usage: /bounty help
+  economy:
+    description: National economy and banking
+    aliases: [ne]
+    permission: nodes.command.economy
+    usage: /economy help
+  economyadmin:
+    description: Economy administration
+    aliases: [nea]
+    permission: nodes.economy.admin
+    usage: /economyadmin help
   supplydrop:
     description: Supply drops
     aliases: [sd]
@@ -233,4 +248,22 @@ permissions:
     default: true
   nodes.vassal.admin:
     description: Release any vassal
+    default: op
+  nodes.command.bounty:
+    description: Use /bounty
+    default: true
+  nodes.bounty.add:
+    description: Fund bounties
+    default: true
+  nodes.bounty.hunt:
+    description: Claim bounty rewards by killing the target
+    default: true
+  nodes.bounty.admin:
+    description: Refund bounties and manage queued bounty deliveries
+    default: op
+  nodes.command.economy:
+    description: Use /economy
+    default: true
+  nodes.economy.admin:
+    description: Issue currency and resources, approve loans, register infrastructure
     default: op
