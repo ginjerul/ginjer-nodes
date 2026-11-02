@@ -4,11 +4,6 @@
 
 Thank you for your interest in contributing to Minecraft Nodes! This guide will help you get started.
 
-## Links
-
-- [Website](https://dansplugins.com)
-- [Discord](https://discord.gg/xXtuAQ2)
-
 ## Requirements
 
 - A GitHub account
@@ -33,11 +28,7 @@ Thank you for your interest in contributing to Minecraft Nodes! This guide will 
 
 ### Issues
 
-Work items are tracked as [GitHub issues](https://github.com/dmccoystephenson/minecraft-nodes/issues).
-
-### Milestones
-
-Issues are grouped into [milestones](https://github.com/dmccoystephenson/minecraft-nodes/milestones) representing upcoming releases.
+Work items are tracked as [GitHub issues](https://github.com/ginjerul/ginjer-nodes/issues).
 
 ## Making Changes
 
@@ -71,4 +62,4 @@ For manual testing, build the plugin and drop it into a local Paper/Spigot serve
 
 ## Questions
 
-Ask in the [Discord server](https://discord.gg/xXtuAQ2).
+Add me on discord: mententen
