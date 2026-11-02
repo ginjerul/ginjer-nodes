@@ -1,7 +1,7 @@
 /**
- * Map exporter for NodesMap (the nodesmap/ plugin in this repo).
+ * Map exporter for GinjerMap (the ginjermap/ plugin in this repo).
  *
- * Writes four small JSON layers + a version file into NodesMap's web folder:
+ * Writes four small JSON layers + a version file into GinjerMap's web folder:
  *   world.json     territories, chunks, resource nodes        (checked every 60s)
  *   state.json     towns, nations, forts, supply lines        (every mapExport.statePeriodTicks)
  *   features.json  ports, mining towers, refineries, drops    (every 30s)
@@ -44,7 +44,7 @@ import java.util.zip.CRC32
 
 public object MapExporter {
     private var plugin: Plugin? = null
-    private var dir: Path = Paths.get("plugins/NodesMap/web/data/nodes")
+    private var dir: Path = Paths.get("plugins/GinjerMap/web/data/nodes")
     private var writer: ExecutorService? = null
     private val tasks = ArrayList<BukkitTask>()
 
@@ -61,8 +61,8 @@ public object MapExporter {
     public fun start(plugin: Plugin) {
         stop()
         if (!Config.mapExportEnabled) return
-        val nodesMapPresent = Bukkit.getPluginManager().getPlugin("NodesMap") != null
-        if (!nodesMapPresent && !Config.mapExportAlways) return
+        val ginjerMapPresent = Bukkit.getPluginManager().getPlugin("GinjerMap") != null
+        if (!ginjerMapPresent && !Config.mapExportAlways) return
 
         this.plugin = plugin
         this.dir = Paths.get(Config.mapExportPath).normalize()

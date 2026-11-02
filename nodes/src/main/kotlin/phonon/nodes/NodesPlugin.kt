@@ -80,6 +80,13 @@ public class NodesPlugin : JavaPlugin() {
     override fun onEnable() {
         val timeStart = System.currentTimeMillis()
 
+        // anonymous usage statistics (bStats); servers can turn this off in plugins/bStats/config.yml
+        try {
+            org.bstats.bukkit.Metrics(this, 35059)
+        } catch (e: Exception) {
+            this.getLogger().warning("Could not start bStats: ${e.message}")
+        }
+
         val logger = this.getLogger()
         val pluginManager = this.getServer().getPluginManager()
 
@@ -290,7 +297,7 @@ public class NodesPlugin : JavaPlugin() {
                 if (stream != null) {
                     java.nio.file.Files.createDirectories(world.parent)
                     stream.use { java.nio.file.Files.copy(it, world) }
-                    logger.info("No world.json found, created a default one at $world (empty map with a basic resource node). Draw territories with /nodesmap editor.")
+                    logger.info("No world.json found, created a default one at $world (empty map with a basic resource node). Draw territories with /ginjermap editor.")
                 }
             }
             val towns = Config.pathTowns

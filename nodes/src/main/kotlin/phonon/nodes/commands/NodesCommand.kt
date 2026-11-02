@@ -114,8 +114,8 @@ public class NodesCommand :
         Message.print(sender, "/nodes nation${ChatColor.WHITE}: Get nation info")
         Message.print(sender, "/nodes player${ChatColor.WHITE}: Get player info")
         Message.print(sender, "/nodes war${ChatColor.WHITE}: Current war status")
-        if (org.bukkit.Bukkit.getPluginManager().getPlugin("NodesMap") != null) {
-            Message.print(sender, "/nodesmap link${ChatColor.WHITE}: Get a link to the web map")
+        if (org.bukkit.Bukkit.getPluginManager().getPlugin("GinjerMap") != null) {
+            Message.print(sender, "/ginjermap link${ChatColor.WHITE}: Get a link to the web map")
         }
         return
     }

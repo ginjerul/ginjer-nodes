@@ -1,7 +1,7 @@
 /**
- * Town and nation editing for the NodesMap web editor (its Towns tab).
+ * Town and nation editing for the GinjerMap web editor (its Towns tab).
  *
- * NodesMap calls these static methods by reflection, like MapEditApi:
+ * GinjerMap calls these static methods by reflection, like MapEditApi:
  *
  *   townsJson()          every town and nation with what the editor shows
  *   act(json, actor)     run one change, e.g. {"op":"town.rename","town":"A","name":"B"}

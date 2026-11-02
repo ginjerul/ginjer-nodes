@@ -24,7 +24,7 @@ jobs:
         run: |
           cd nodes
           ./gradlew clean build
-          cd ../nodesmap
+          cd ../ginjermap
           chmod +x gradlew
           ./gradlew clean build
 
@@ -33,4 +33,4 @@ jobs:
         with:
           files: |
             nodes/build/libs/*.jar
-            nodesmap/build/libs/*.jar
+            ginjermap/build/libs/*.jar

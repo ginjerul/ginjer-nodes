@@ -1,7 +1,7 @@
 /**
- * World editing entry point for the NodesMap web editor.
+ * World editing entry point for the GinjerMap web editor.
  *
- * NodesMap calls these static methods by reflection (no compile dependency
+ * GinjerMap calls these static methods by reflection (no compile dependency
  * between the two plugins). Everything is plain strings in and out:
  *
  *   worldJson()                      current plugins/nodes/world.json

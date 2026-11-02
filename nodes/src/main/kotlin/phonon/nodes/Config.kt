@@ -55,10 +55,10 @@ public object Config {
 
     public var dynmapCopyTowns: Boolean = false
 
-    // NodesMap web map export (see nodesmap/ in the repo)
+    // GinjerMap web map export (see ginjermap/ in the repo)
     public var mapExportEnabled: Boolean = true
-    public var mapExportAlways: Boolean = false // export even if NodesMap isn't installed (external web server)
-    public var mapExportPath: String = "plugins/NodesMap/web/data/nodes"
+    public var mapExportAlways: Boolean = false // export even if GinjerMap isn't installed (external web server)
+    public var mapExportPath: String = "plugins/GinjerMap/web/data/nodes"
     public var mapExportStatePeriodTicks: Long = 100L
     public var mapExportLivePeriodTicks: Long = 40L
     public var mapExportSupplyLines: Boolean = true
@@ -497,6 +497,8 @@ public object Config {
             Config.mapExportEnabled = mapExportSec.getBoolean("enabled", Config.mapExportEnabled)
             Config.mapExportAlways = mapExportSec.getBoolean("always", Config.mapExportAlways)
             Config.mapExportPath = mapExportSec.getString("path", Config.mapExportPath) ?: Config.mapExportPath
+            // the map plugin used to be called NodesMap
+            if (Config.mapExportPath == "plugins/NodesMap/web/data/nodes") Config.mapExportPath = "plugins/GinjerMap/web/data/nodes"
             Config.mapExportStatePeriodTicks = mapExportSec.getLong("statePeriodTicks", Config.mapExportStatePeriodTicks).coerceIn(20L, 12000L)
             Config.mapExportLivePeriodTicks = mapExportSec.getLong("livePeriodTicks", Config.mapExportLivePeriodTicks).coerceIn(10L, 1200L)
             Config.mapExportSupplyLines = mapExportSec.getBoolean("supplyLines", Config.mapExportSupplyLines)
