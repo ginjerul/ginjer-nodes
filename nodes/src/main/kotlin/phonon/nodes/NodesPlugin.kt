@@ -83,8 +83,8 @@ public class NodesPlugin : JavaPlugin() {
         // anonymous usage statistics (bStats); servers can turn this off in plugins/bStats/config.yml
         try {
             org.bstats.bukkit.Metrics(this, 35059)
-        } catch (e: Exception) {
-            this.getLogger().warning("Could not start bStats: ${e.message}")
+        } catch (e: Throwable) {
+            this.getLogger().warning("Could not start bStats: $e")
         }
 
         val logger = this.getLogger()

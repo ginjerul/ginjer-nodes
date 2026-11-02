@@ -93,8 +93,8 @@ class GinjerMapPlugin : JavaPlugin() {
         // anonymous usage statistics (bStats); servers can turn this off in plugins/bStats/config.yml
         try {
             org.bstats.bukkit.Metrics(this, 35082)
-        } catch (e: Exception) {
-            logger.warning("Could not start bStats: ${e.message}")
+        } catch (e: Throwable) {
+            logger.warning("Could not start bStats: $e")
         }
         saveDefaultConfig()
         addMissingConfigKeys()

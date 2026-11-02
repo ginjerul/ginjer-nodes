@@ -30,19 +30,26 @@ tasks {
     }
 
     // bStats is bundled (and moved to our own package, as bStats requires); nothing else is shaded
+    // the jar to ship is the shadow jar: nodes-<version>.jar
     shadowJar {
         archiveBaseName.set(outputJarName)
+        archiveClassifier.set("")
         dependencies {
             include(dependency("org.bstats:.*"))
         }
         relocate("org.bstats", "phonon.nodes.libs.bstats")
     }
 
-    reobfJar {
-        inputJar.set(shadowJar.flatMap { it.archiveFile })
+    named("reobfJar") {
+        dependsOn(jar)
     }
 
     jar {
         archiveBaseName.set(outputJarName)
+        archiveClassifier.set("dev")
+    }
+
+    build {
+        dependsOn(shadowJar)
     }
 }
