@@ -10,6 +10,8 @@ import phonon.nodes.Message
 import phonon.nodes.Nodes
 import phonon.nodes.economy.Economy
 import phonon.nodes.economy.EconomyException
+import phonon.nodes.economy.EconomyExtras
+import phonon.nodes.economy.EconomyMenu
 
 private fun guarded(sender: CommandSender, block: () -> Unit) {
     try {
@@ -52,18 +54,23 @@ class EconomyCommand :
     }
 
     private fun printHelp(sender: CommandSender) {
-        Message.print(sender, "${ChatColor.BOLD}[Nodes] Economy commands (account: player, nation or business-<name>):")
+        Message.print(sender, "${ChatColor.BOLD}[Nodes] Economy commands (account: player, town, nation or business-<name>):")
         Message.print(sender, "/economy balance <account>${ChatColor.WHITE}: Balance and your wallet")
         Message.print(sender, "/economy deposit <account> <amount>${ChatColor.WHITE}: Wallet to account")
         Message.print(sender, "/economy withdraw <account> <amount>${ChatColor.WHITE}: Account to wallet")
         Message.print(sender, "/economy pay <account> <player> <amount>${ChatColor.WHITE}: Pay a player's bank")
         Message.print(sender, "/economy history <account>${ChatColor.WHITE}: Latest 20 records")
         Message.print(sender, "/economy business create <name>${ChatColor.WHITE}: Open a business account")
+        Message.print(sender, "/economy menu${ChatColor.WHITE}: Open the economy menu")
+        Message.print(sender, "/economy prices${ChatColor.WHITE}: What the server buys")
+        Message.print(sender, "/economy sell hand|all|town${ChatColor.WHITE}: Sell items to the server (town: stored income, to the treasury)")
+        Message.print(sender, "/economy market list|mine|sell|buy|cancel${ChatColor.WHITE}: Player market (sell uses the item in your hand)")
+        Message.print(sender, "/economy top [players|nations|towns]${ChatColor.WHITE}: Richest lists")
         Message.print(sender, "/economy stock${ChatColor.WHITE}: Your nation's trade resources")
         Message.print(sender, "/economy route list|offer|accept|cancel${ChatColor.WHITE}: Recurring trade routes")
         Message.print(sender, "/economy loan request|list|repay${ChatColor.WHITE}: Loans from the reserve")
         Message.print(sender, "/economy infra list|pay${ChatColor.WHITE}: Infrastructure upkeep")
-        Message.print(sender, "${ChatColor.GRAY}Nation accounts, routes, loans and infrastructure need the capital leader or an officer.")
+        Message.print(sender, "${ChatColor.GRAY}Nation accounts, routes, loans and infrastructure need the capital leader or an officer. Town accounts need the town leader or an officer.")
     }
 
     private fun run(p: Player, a: Array<out String>) {
@@ -106,6 +113,44 @@ class EconomyCommand :
                 lines.forEach { Message.print(p, it) }
             }
 
+            "menu" -> EconomyMenu.openMain(p)
+
+            "prices" -> {
+                val lines = EconomyExtras.prices()
+                if (lines.isEmpty()) {
+                    Message.print(p, "The server does not buy anything")
+                }
+                lines.forEach { Message.print(p, it) }
+            }
+
+            "sell" -> {
+                need(a, 2, "/economy sell hand|all|town")
+                Message.print(
+                    p,
+                    when (a[1].lowercase()) {
+                        "hand" -> EconomyExtras.sellHand(p)
+                        "all" -> EconomyExtras.sellAll(p)
+                        "town" -> EconomyExtras.sellTown(p)
+                        else -> throw EconomyException("Usage: /economy sell hand|all|town")
+                    },
+                )
+            }
+
+            "market" -> market(p, a)
+
+            "top" -> {
+                val lines = when (a.getOrNull(1)?.lowercase() ?: "players") {
+                    "players" -> EconomyExtras.topPlayers(10)
+                    "nations" -> EconomyExtras.topNations(10)
+                    "towns" -> EconomyExtras.topTowns(10)
+                    else -> throw EconomyException("Usage: /economy top [players|nations|towns]")
+                }
+                if (lines.isEmpty()) {
+                    Message.print(p, "Nothing to rank yet")
+                }
+                lines.forEach { Message.print(p, it) }
+            }
+
             "route" -> route(p, a)
 
             "loan" -> loan(p, a)
@@ -113,6 +158,31 @@ class EconomyCommand :
             "infra" -> infra(p, a)
 
             else -> printHelp(p)
+        }
+    }
+
+    private fun market(p: Player, a: Array<out String>) {
+        when (a.getOrNull(1)?.lowercase()) {
+            "list" -> EconomyExtras.marketLines(a.getOrNull(2)?.toIntOrNull() ?: 1).forEach { Message.print(p, it) }
+
+            "mine" -> EconomyExtras.marketLines(1, p.uniqueId).forEach { Message.print(p, it) }
+
+            "sell" -> {
+                need(a, 3, "/economy market sell <price> (hold the item stack)")
+                Message.print(p, EconomyExtras.marketSell(p, a[2]))
+            }
+
+            "buy" -> {
+                need(a, 3, "/economy market buy <id>")
+                Message.print(p, EconomyExtras.marketBuy(p, a[2]))
+            }
+
+            "cancel" -> {
+                need(a, 3, "/economy market cancel <id>")
+                Message.print(p, EconomyExtras.marketCancel(p, a[2], p.hasPermission("nodes.economy.admin")))
+            }
+
+            else -> throw EconomyException("Usage: /economy market list|mine|sell|buy|cancel")
         }
     }
 
@@ -190,9 +260,12 @@ class EconomyCommand :
     }
 
     override fun onTabComplete(sender: CommandSender, command: Command, alias: String, args: Array<out String>): List<String> {
-        val accounts = listOf("player", "nation")
+        val accounts = listOf("player", "town", "nation")
         val options: Collection<String> = when {
-            args.size == 1 -> listOf("help", "balance", "deposit", "withdraw", "pay", "history", "business", "stock", "route", "loan", "infra")
+            args.size == 1 -> listOf("help", "balance", "deposit", "withdraw", "pay", "history", "business", "menu", "prices", "sell", "market", "top", "stock", "route", "loan", "infra")
+            args.size == 2 && args[0].equals("sell", ignoreCase = true) -> listOf("hand", "all", "town")
+            args.size == 2 && args[0].equals("market", ignoreCase = true) -> listOf("list", "mine", "sell", "buy", "cancel")
+            args.size == 2 && args[0].equals("top", ignoreCase = true) -> listOf("players", "nations", "towns")
             args.size == 2 && args[0].lowercase() in setOf("balance", "deposit", "withdraw", "pay", "history") -> accounts
             args.size == 2 && args[0].equals("business", ignoreCase = true) -> listOf("create")
             args.size == 2 && args[0].equals("route", ignoreCase = true) -> listOf("list", "offer", "accept", "cancel")
@@ -227,6 +300,7 @@ class EconomyAdminCommand :
     private fun printHelp(sender: CommandSender) {
         Message.print(sender, "${ChatColor.BOLD}[Nodes] Economy admin commands:")
         Message.print(sender, "/economyadmin issue <player|reserve> <amount>${ChatColor.WHITE}: Create currency")
+        Message.print(sender, "/economyadmin vote <player> [service]${ChatColor.WHITE}: Pay the vote reward (for vote plugins that run commands)")
         Message.print(sender, "/economyadmin stock <nation> <material> <quantity>${ChatColor.WHITE}: Issue trade resources")
         Message.print(sender, "/economyadmin loan approve|reject <id>${ChatColor.WHITE}: Decide a loan request")
         Message.print(sender, "/economyadmin infra <nation> <railway|port|road|power> <units> <name>${ChatColor.WHITE}: Register infrastructure")
@@ -238,6 +312,13 @@ class EconomyAdminCommand :
             "issue" -> {
                 need(a, 3, "/economyadmin issue <player|reserve> <amount>")
                 Message.print(sender, Economy.issue(a[1], a[2], sender.name))
+            }
+
+            "vote" -> {
+                if (a.size < 2 || a.size > 3) {
+                    throw EconomyException("Usage: /economyadmin vote <player> [service]")
+                }
+                Message.print(sender, EconomyExtras.vote(a[1], a.getOrNull(2) ?: "console"))
             }
 
             "stock" -> {
@@ -270,7 +351,8 @@ class EconomyAdminCommand :
 
     override fun onTabComplete(sender: CommandSender, command: Command, alias: String, args: Array<out String>): List<String> {
         val options: Collection<String> = when {
-            args.size == 1 -> listOf("issue", "stock", "loan", "infra", "retire")
+            args.size == 1 -> listOf("issue", "vote", "stock", "loan", "infra", "retire")
+            args.size == 2 && args[0].equals("vote", ignoreCase = true) -> Nodes.residents.values.map { it.name }
             args.size == 2 && args[0].equals("issue", ignoreCase = true) -> Nodes.residents.values.map { it.name } + "reserve"
             args.size == 2 && args[0].lowercase() in setOf("stock", "infra") -> Nodes.nations.values.map { it.name }
             args.size == 2 && args[0].equals("loan", ignoreCase = true) -> listOf("approve", "reject")

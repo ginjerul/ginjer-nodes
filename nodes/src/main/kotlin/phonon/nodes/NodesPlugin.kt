@@ -37,6 +37,8 @@ import phonon.nodes.commands.VassalCommand
 import phonon.nodes.commands.WarCommand
 import phonon.nodes.commands.WarzoneCommand
 import phonon.nodes.economy.Economy
+import phonon.nodes.economy.EconomyMenuListener
+import phonon.nodes.economy.VoteHook
 import phonon.nodes.fortify.FortTreasuryListener
 import phonon.nodes.fortify.Fortifications
 import phonon.nodes.killshop.KillShop
@@ -165,6 +167,7 @@ public class NodesPlugin : JavaPlugin() {
         pluginManager.registerEvents(SupplyDropListener(), this)
         pluginManager.registerEvents(FortTreasuryListener(), this)
         pluginManager.registerEvents(BountyListener(), this)
+        pluginManager.registerEvents(EconomyMenuListener(), this)
 
         this.getCommand("town")?.setExecutor(TownCommand())
         this.getCommand("nation")?.setExecutor(NationCommand())
@@ -257,6 +260,7 @@ public class NodesPlugin : JavaPlugin() {
         Fortifications.load()
         Bounties.load()
         Economy.load()
+        VoteHook.register(this)
 
         // queued bounty rewards retry every 10s, economy settles loans, upkeep and routes
         server.scheduler.runTaskTimer(this, Runnable { Bounties.deliverPending(null) }, 200L, 200L)

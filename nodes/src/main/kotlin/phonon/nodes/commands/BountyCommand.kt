@@ -14,6 +14,8 @@ import phonon.nodes.Message
 import phonon.nodes.Nodes
 import phonon.nodes.bounty.Bounties
 import phonon.nodes.bounty.BountyItems
+import phonon.nodes.economy.Economy
+import phonon.nodes.economy.EconomyExtras
 import java.util.UUID
 
 private const val PERM_ADD = "nodes.bounty.add"
@@ -35,6 +37,7 @@ class BountyCommand :
             "info" -> cmdInfo(sender, args)
             "add" -> cmdAdd(sender, args)
             "additem" -> cmdAddItem(sender, args)
+            "addmoney" -> cmdAddMoney(sender, args)
             "addreward" -> cmdAddReward(sender, args)
             "materials" -> cmdMaterials(sender)
             "rewards" -> cmdRewards(sender)
@@ -57,6 +60,9 @@ class BountyCommand :
         Message.print(sender, "/bounty info <player> [page]${ChatColor.WHITE}: Rewards, funders and reasons")
         Message.print(sender, "/bounty add <player> <ore> <amount> [reason]${ChatColor.WHITE}: Fund a bounty from your inventory")
         Message.print(sender, "/bounty additem <player> [reason]${ChatColor.WHITE}: Fund with the stack in your hand")
+        if (Economy.enabled) {
+            Message.print(sender, "/bounty addmoney <player> <amount> [reason]${ChatColor.WHITE}: Fund with money from your wallet")
+        }
         Message.print(sender, "/bounty addreward <player> <package> [reason]${ChatColor.WHITE}: Fund a preset package")
         Message.print(sender, "/bounty materials${ChatColor.WHITE}: Allowed reward ores")
         Message.print(sender, "/bounty rewards${ChatColor.WHITE}: Preset packages")
@@ -130,6 +136,21 @@ class BountyCommand :
         place(player, target, BountyItems.stacks(material, amount), reason)
     }
 
+    private fun cmdAddMoney(sender: CommandSender, args: Array<out String>) {
+        val player = player(sender) ?: return
+        if (!player.hasPermission(PERM_ADD)) {
+            Message.error(player, "You do not have permission to fund bounties")
+            return
+        }
+        if (args.size < 3) {
+            Message.error(player, "Usage: /bounty addmoney <player> <amount> [reason]  (paid from your wallet)")
+            return
+        }
+        val target = resolveTarget(player, args[1]) ?: return
+        val reason = reason(player, args, 3) ?: return
+        Bounties.fundMoney(player, target.first, target.second, args[2], reason)?.let { Message.error(player, it) }
+    }
+
     private fun cmdAddItem(sender: CommandSender, args: Array<out String>) {
         val player = player(sender) ?: return
         if (!player.hasPermission(PERM_ADD)) {
@@ -192,6 +213,11 @@ class BountyCommand :
         for ((bounty, count) in rows) {
             Message.print(sender, "${bounty.targetName}${ChatColor.WHITE}: $count contribution(s). /bounty info ${bounty.targetName}")
         }
+        if (Economy.enabled && page == 0) {
+            for ((_, targetName, total) in EconomyExtras.moneyTargets().take(PAGE_SIZE)) {
+                Message.print(sender, "$targetName${ChatColor.WHITE}: ${Economy.show(total)} in money. /bounty info $targetName")
+            }
+        }
     }
 
     private fun cmdInfo(sender: CommandSender, args: Array<out String>) {
@@ -202,7 +228,14 @@ class BountyCommand :
         val target = resolveTarget(sender, args[1]) ?: return
         val page = page(args, 2)
         val rows = Bounties.active(target.first.uniqueId)
-        Message.print(sender, "${ChatColor.BOLD}${target.second}${ChatColor.RESET}: ${rows.size} contribution(s)")
+        val moneyRows = if (Economy.enabled) EconomyExtras.activeMoney(target.first.uniqueId) else emptyList()
+        Message.print(sender, "${ChatColor.BOLD}${target.second}${ChatColor.RESET}: ${rows.size + moneyRows.size} contribution(s)")
+        if (page == 0) {
+            for ((id, money) in moneyRows.take(PAGE_SIZE)) {
+                val tag = if (isAdmin(sender)) " ${ChatColor.GRAY}[$id]" else ""
+                Message.print(sender, "${Economy.show(money.cents)} money${ChatColor.WHITE} - ${money.reason} (funded by ${name(java.util.UUID.fromString(money.sponsor))})$tag")
+            }
+        }
         for (bounty in rows.drop(page * PAGE_SIZE).take(PAGE_SIZE)) {
             val id = if (isAdmin(sender)) " ${ChatColor.GRAY}[${bounty.id}]" else ""
             Message.print(sender, "${bounty.summary}${ChatColor.WHITE} - ${bounty.reason} (funded by ${name(bounty.sponsor)})$id")
@@ -264,6 +297,15 @@ class BountyCommand :
             Message.error(sender, "Usage: /bounty refund <contribution-id>")
             return
         }
+        if (EconomyExtras.hasMoneyContribution(args[1])) {
+            val moneyError = EconomyExtras.refundMoney(args[1])
+            if (moneyError != null) {
+                Message.error(sender, moneyError)
+            } else {
+                Message.print(sender, "Money returned to the original funder's wallet")
+            }
+            return
+        }
         val error = Bounties.refund(args[1])
         if (error != null) {
             Message.error(sender, error)
@@ -291,14 +333,14 @@ class BountyCommand :
     override fun onTabComplete(sender: CommandSender, command: Command, alias: String, args: Array<out String>): List<String> {
         val options: Collection<String> = when {
             args.size == 1 -> {
-                val subs = mutableListOf("help", "list", "info", "add", "additem", "addreward", "materials", "rewards", "collect", "wallet")
+                val subs = mutableListOf("help", "list", "info", "add", "additem", "addmoney", "addreward", "materials", "rewards", "collect", "wallet")
                 if (isAdmin(sender)) {
                     subs.addAll(listOf("status", "audit", "refund", "return"))
                 }
                 subs
             }
 
-            args.size == 2 && args[0].lowercase() in setOf("add", "additem", "addreward", "info") -> Nodes.residents.values.map { it.name }
+            args.size == 2 && args[0].lowercase() in setOf("add", "additem", "addmoney", "addreward", "info") -> Nodes.residents.values.map { it.name }
 
             args.size == 3 && args[0].equals("add", ignoreCase = true) -> Bounties.allowed.map { it.name }
 

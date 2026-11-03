@@ -2,7 +2,7 @@ main: phonon.nodes.NodesPlugin
 name: nodes
 version: 0.1.0
 api-version: 1.16
-softdepend: [kotlin, Essentials]
+softdepend: [kotlin, Essentials, Votifier]
 
 commands:
   nodesadmin:

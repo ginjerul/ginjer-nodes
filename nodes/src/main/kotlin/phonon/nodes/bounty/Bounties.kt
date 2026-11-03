@@ -20,6 +20,9 @@ import org.bukkit.entity.Player
 import org.bukkit.inventory.ItemStack
 import phonon.nodes.Message
 import phonon.nodes.Nodes
+import phonon.nodes.economy.Economy
+import phonon.nodes.economy.EconomyException
+import phonon.nodes.economy.EconomyExtras
 import phonon.nodes.objects.Town
 import phonon.nodes.vassal.Vassals
 import java.io.FileReader
@@ -322,7 +325,8 @@ object Bounties {
     // funding
     // ===================================
     // returns an error message, or null when the bounty was placed
-    fun fund(player: Player, target: OfflinePlayer, targetName: String, items: List<ItemStack>, reason: String): String? {
+    // rules shared by ore and money bounties; an error message, or null when allowed
+    private fun preCheck(player: Player, target: OfflinePlayer): String? {
         if (!enabled) {
             return "Bounties are disabled"
         }
@@ -340,6 +344,37 @@ object Bounties {
         if (now - (lastFunding[player.uniqueId] ?: 0L) < placementCooldownMs) {
             return "Please wait before placing another bounty"
         }
+        return null
+    }
+
+    // returns an error message, or null when the money bounty was placed.
+    // The money moves from the funder's wallet into escrow in the economy ledger.
+    fun fundMoney(player: Player, target: OfflinePlayer, targetName: String, amount: String, reason: String): String? {
+        preCheck(player, target)?.let { return it }
+        if (!Economy.enabled) {
+            return "The economy is disabled"
+        }
+        try {
+            val cents = Economy.parseMoney(amount)
+            val id = EconomyExtras.fundMoney(player, target, targetName, cents, reason)
+            lastFunding[player.uniqueId] = System.currentTimeMillis()
+            save()
+            val text = "${player.name} funded a money bounty on $targetName: ${Economy.show(cents)}"
+            if (broadcastPlacement) {
+                Message.broadcast("${ChatColor.GOLD}[Bounty] ${ChatColor.WHITE}$text")
+            } else {
+                Message.print(player, text)
+            }
+            Message.print(player, "Contribution ID: $id")
+            return null
+        } catch (e: EconomyException) {
+            return e.message ?: "Economy error"
+        }
+    }
+
+    fun fund(player: Player, target: OfflinePlayer, targetName: String, items: List<ItemStack>, reason: String): String? {
+        preCheck(player, target)?.let { return it }
+        val now = System.currentTimeMillis()
         if (items.isEmpty()) {
             return "No items to fund"
         }
@@ -399,7 +434,8 @@ object Bounties {
             return
         }
         val activeBounties = active(victim.uniqueId)
-        if (activeBounties.isEmpty()) {
+        val hasMoney = Economy.enabled && EconomyExtras.activeMoney(victim.uniqueId).isNotEmpty()
+        if (activeBounties.isEmpty() && !hasMoney) {
             return
         }
         val now = System.currentTimeMillis()
@@ -424,9 +460,12 @@ object Bounties {
 
         val town = Nodes.getResident(hunter)?.town
         val toTown = rewardToTown && town != null
-        if (rewardToTown && town == null && !townlessFallback) {
+        val itemsBlocked = rewardToTown && town == null && !townlessFallback
+        if (itemsBlocked && activeBounties.isNotEmpty()) {
             Message.error(hunter, "Bounty rewards go to a town. Join a town to claim; the bounty stays active")
-            return
+            if (!hasMoney) {
+                return
+            }
         }
 
         val claimKey = "${hunter.uniqueId}:${victim.uniqueId}"
@@ -435,9 +474,16 @@ object Bounties {
             Message.error(hunter, "You claimed a bounty on ${victim.name} too recently")
             return
         }
-        val eligible = activeBounties.filter { it.sponsor != hunter.uniqueId && it.created <= now - minimumAgeMs }
-        if (eligible.isEmpty()) {
-            Message.error(hunter, "No eligible bounty ores: still maturing, or you funded them yourself")
+        val eligible = if (itemsBlocked) {
+            emptyList()
+        } else {
+            activeBounties.filter { it.sponsor != hunter.uniqueId && it.created <= now - minimumAgeMs }
+        }
+        val moneyEligible = if (hasMoney) EconomyExtras.eligibleMoney(victim.uniqueId, hunter.uniqueId, now - minimumAgeMs) else emptyList()
+        if (eligible.isEmpty() && moneyEligible.isEmpty()) {
+            if (!itemsBlocked) {
+                Message.error(hunter, "No eligible bounty rewards: still maturing, or you funded them yourself")
+            }
             return
         }
 
@@ -459,10 +505,26 @@ object Bounties {
             )
             bounty.state = BountyState.CLAIMED
         }
+        val moneyPaid = try {
+            EconomyExtras.claimMoney(moneyEligible, hunter)
+        } catch (e: EconomyException) {
+            Message.error(hunter, "Money reward failed: ${e.message}")
+            0L
+        }
         claims[claimKey] = now
         save()
 
-        val text = "${hunter.name} claimed ${eligible.size} ore reward package(s) for defeating ${victim.name}"
+        val parts = mutableListOf<String>()
+        if (eligible.isNotEmpty()) {
+            parts.add("${eligible.size} ore reward package(s)")
+        }
+        if (moneyPaid > 0) {
+            parts.add("${Economy.show(moneyPaid)} in money")
+        }
+        if (parts.isEmpty()) {
+            return
+        }
+        val text = "${hunter.name} claimed ${parts.joinToString(" and ")} for defeating ${victim.name}"
         if (broadcastClaims) {
             Message.broadcast("${ChatColor.GOLD}[Bounty] ${ChatColor.WHITE}$text")
         } else {

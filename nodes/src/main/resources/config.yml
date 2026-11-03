@@ -599,3 +599,35 @@ economy:
     port: '20.00'
     road: '1.00'
     power: '10.00'
+  # optional fees: percent added on top of /economy pay, or taken from market sales.
+  # Fees go into the reserve, which funds loans. 0 = off.
+  fees:
+    transferPercent: 0
+    marketPercent: 0
+  # optional tax: every 24 hours each town pays this percent of its treasury to its
+  # nation (the capital pays nothing). 0 = off.
+  tax:
+    townPercentPerDay: 0
+  # /economy sell and /economy prices: the server buys these items at this price each.
+  # Items with custom names or enchantments are never bought. Money is paid to the
+  # wallet. dailyLimit caps what one player (or one town) can sell per day, 0 = no cap.
+  sell:
+    dailyLimit: '0'
+    prices:
+      COAL: '0.50'
+      IRON_INGOT: '2.00'
+      COPPER_INGOT: '1.00'
+      GOLD_INGOT: '4.00'
+      DIAMOND: '20.00'
+      EMERALD: '15.00'
+      REDSTONE: '0.25'
+      LAPIS_LAZULI: '0.50'
+  # money paid to a player's wallet for each vote. Needs NuVotifier/Votifier, or a vote
+  # plugin that runs /economyadmin vote <player> [service]. 0 = off.
+  vote:
+    reward: '0'
+  # player market: /economy market sell|buy|cancel|list|mine and the menu
+  market:
+    enabled: true
+    maxListingsPerPlayer: 10
+    maxPrice: '1000000'

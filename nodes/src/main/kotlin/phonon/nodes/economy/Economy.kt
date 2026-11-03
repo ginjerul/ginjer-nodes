@@ -1,6 +1,8 @@
 /*
- * National economy: nation, personal and business accounts, recurring
+ * National economy: nation, town, personal and business accounts, recurring
  * import/export routes, loans from a funded reserve and infrastructure upkeep.
+ * Optional fees and town taxes feed the reserve. Selling, voting, the player
+ * market and money bounties live in EconomyExtras.
  * Currency is separate from Vault. All balances live in one ledger that is
  * saved atomically, so a failed operation leaves no partial transaction.
  */
@@ -13,6 +15,7 @@ import org.bukkit.configuration.file.FileConfiguration
 import org.bukkit.entity.Player
 import phonon.nodes.Nodes
 import phonon.nodes.objects.Nation
+import phonon.nodes.objects.Town
 import java.io.IOException
 import java.math.BigDecimal
 import java.math.RoundingMode
@@ -71,7 +74,34 @@ class EcoInfra(
     var arrears: Long = 0L,
 )
 
+class EcoListing(
+    var seller: String = "",
+    var item: String = "",
+    var price: Long = 0L,
+    var summary: String = "",
+    var created: Long = 0L,
+)
+
+class EcoBountyMoney(
+    var sponsor: String = "",
+    var target: String = "",
+    var targetName: String = "",
+    var cents: Long = 0L,
+    var reason: String = "",
+    var created: Long = 0L,
+    var status: String = "ACTIVE",
+)
+
+class EcoSold(
+    var day: Long = 0L,
+    var cents: Long = 0L,
+)
+
 class EcoState(
+    var lastTax: Long = 0L,
+    var listings: MutableMap<String, EcoListing> = LinkedHashMap(),
+    var bountyMoney: MutableMap<String, EcoBountyMoney> = LinkedHashMap(),
+    var sold: MutableMap<String, EcoSold> = LinkedHashMap(),
     var balances: MutableMap<String, Long> = LinkedHashMap(),
     var records: MutableList<EcoRecord> = ArrayList(),
     var businesses: MutableMap<String, String> = LinkedHashMap(),
@@ -116,7 +146,18 @@ object Economy {
 
     val INFRA_TYPES: List<String> = listOf("railway", "port", "road", "power")
 
-    private var state = EcoState()
+    // optional features, all off or empty until configured
+    internal var transferFeePercent = 0.0
+    internal var marketFeePercent = 0.0
+    internal var townTaxPercent = 0.0
+    internal var sellPrices: Map<Material, Long> = emptyMap()
+    internal var sellDailyLimit = 0L
+    internal var voteReward = 0L
+    internal var marketEnabled = true
+    internal var marketMaxListings = 10
+    internal var marketMaxPrice = 100_000_000L
+
+    internal var state = EcoState()
     private var failed = false
 
     fun loadConfig(config: FileConfiguration) {
@@ -140,6 +181,53 @@ object Economy {
         for (type in INFRA_TYPES) {
             infraRates[type] = sec.getString("infrastructure.$type", infraRates[type] ?: "1.00")!!
         }
+        transferFeePercent = sec.getDouble("fees.transferPercent", 0.0).coerceIn(0.0, 50.0)
+        marketFeePercent = sec.getDouble("fees.marketPercent", 0.0).coerceIn(0.0, 50.0)
+        townTaxPercent = sec.getDouble("tax.townPercentPerDay", 0.0).coerceIn(0.0, 100.0)
+        sellDailyLimit = optionalMoney(sec.get("sell.dailyLimit"), "sell.dailyLimit")
+        voteReward = optionalMoney(sec.get("vote.reward"), "vote.reward")
+        marketEnabled = sec.getBoolean("market.enabled", true)
+        marketMaxListings = sec.getInt("market.maxListingsPerPlayer", 10).coerceIn(1, 100)
+        val maxPrice = optionalMoney(sec.get("market.maxPrice"), "market.maxPrice")
+        marketMaxPrice = if (maxPrice > 0) maxPrice else 100_000_000L
+        val prices = LinkedHashMap<Material, Long>()
+        val priceSec = sec.getConfigurationSection("sell.prices")
+        if (priceSec != null) {
+            for (key in priceSec.getKeys(false)) {
+                val mat = Material.matchMaterial(key)
+                val cents = optionalMoney(priceSec.get(key), "sell.prices.$key")
+                if (mat == null || !mat.isItem || mat.isAir || cents <= 0) {
+                    Nodes.logger?.warning("[Economy] Ignoring sell price for '$key'")
+                    continue
+                }
+                prices[mat] = cents
+            }
+        }
+        sellPrices = prices
+    }
+
+    // a money setting in config; 0, empty or missing means off
+    private fun optionalMoney(value: Any?, name: String): Long {
+        val text = value?.toString()?.trim()
+        if (text.isNullOrEmpty()) {
+            return 0L
+        }
+        return try {
+            if (BigDecimal(text).signum() == 0) 0L else parseMoney(text)
+        } catch (_: Exception) {
+            Nodes.logger?.warning("[Economy] Ignoring invalid amount '$text' for $name")
+            0L
+        }
+    }
+
+    internal fun percentOf(cents: Long, percent: Double): Long {
+        if (percent <= 0.0 || cents <= 0) {
+            return 0L
+        }
+        return BigDecimal.valueOf(cents)
+            .multiply(BigDecimal.valueOf(percent))
+            .divide(BigDecimal.valueOf(100L), 0, RoundingMode.FLOOR)
+            .longValueExact()
     }
 
     // ===================================
@@ -216,7 +304,7 @@ object Economy {
 
     fun balance(account: String): Long = state.balances[account] ?: 0L
 
-    private fun credit(account: String, cents: Long) {
+    internal fun credit(account: String, cents: Long) {
         val value = Math.addExact(balance(account), cents)
         if (value < 0) {
             throw EconomyException("Insufficient funds in ${label(account)}")
@@ -224,20 +312,20 @@ object Economy {
         state.balances[account] = value
     }
 
-    private fun requireAvailable(account: String) {
+    internal fun requireAvailable(account: String) {
         if (state.loans.values.any { it.borrower == account && it.status == "DEFAULT" }) {
             throw EconomyException("${label(account)} is in default; repay the debt before spending")
         }
     }
 
-    private fun log(action: String, from: String, to: String, amount: Long) {
+    internal fun log(action: String, from: String, to: String, amount: Long) {
         state.records.add(EcoRecord(System.currentTimeMillis(), action, from, to, amount))
         if (state.records.size > MAX_RECORDS) {
             state.records.subList(0, state.records.size - MAX_RECORDS).clear()
         }
     }
 
-    private fun move(from: String, to: String, cents: Long, reason: String) {
+    internal fun move(from: String, to: String, cents: Long, reason: String) {
         if (cents <= 0 || from == to) {
             throw EconomyException("Invalid transfer")
         }
@@ -246,7 +334,7 @@ object Economy {
         log(reason, from, to, cents)
     }
 
-    private fun newId(existing: Map<String, Any>): String {
+    internal fun newId(existing: Map<String, Any>): String {
         while (true) {
             val id = UUID.randomUUID().toString().substring(0, 8)
             if (!existing.containsKey(id)) {
@@ -256,7 +344,10 @@ object Economy {
     }
 
     // readable account name for messages
-    private fun label(account: String): String {
+    internal fun label(account: String): String {
+        if (account.startsWith("town-")) {
+            return townByAccount(account)?.name ?: "a deleted town"
+        }
         if (account.startsWith("nation-")) {
             val nation = nationByAccount(account)
             return nation?.name ?: "a deleted nation"
@@ -268,6 +359,8 @@ object Economy {
         }
         return account
     }
+
+    private fun townByAccount(account: String): Town? = Nodes.towns.values.firstOrNull { "town-${it.uuid}" == account }
 
     private fun nationByAccount(account: String): Nation? = Nodes.nations.values.firstOrNull { "nation-${it.uuid}" == account }
 
@@ -314,10 +407,22 @@ object Economy {
         return "nation-${nation.uuid}"
     }
 
+    // manage = true needs the town leader or an officer
+    internal fun townAccount(player: Player, manage: Boolean): String {
+        val resident = Nodes.getResident(player)
+        val town = resident?.town ?: throw EconomyException("Join a town first")
+        if (manage && town.leader !== resident && !town.officers.contains(resident)) {
+            throw EconomyException("Only the town leader or an officer can do that")
+        }
+        return "town-${town.uuid}"
+    }
+
     private fun account(player: Player, name: String, manage: Boolean): String = when {
         name == "player" -> "player-${player.uniqueId}"
 
         name == "nation" -> nationAccount(player, manage)
+
+        name == "town" -> townAccount(player, manage)
 
         name.startsWith("business-") -> {
             if (state.businesses[name] != player.uniqueId.toString()) {
@@ -326,7 +431,7 @@ object Economy {
             name
         }
 
-        else -> throw EconomyException("Use player, nation, or business-<name>")
+        else -> throw EconomyException("Use player, town, nation, or business-<name>")
     }
 
     private fun resolvePlayerId(text: String): UUID {
@@ -360,11 +465,15 @@ object Economy {
         val account = account(player, name, true)
         val dest = "player-${resolvePlayerId(who)}"
         val cents = parseMoney(amount)
+        val fee = percentOf(cents, transferFeePercent)
         transaction {
             requireAvailable(account)
             move(account, dest, cents, "payment by ${player.name}")
+            if (fee > 0) {
+                move(account, "reserve", fee, "transfer-fee")
+            }
         }
-        return "Paid ${show(cents)}"
+        return if (fee > 0) "Paid ${show(cents)} plus a ${show(fee)} fee" else "Paid ${show(cents)}"
     }
 
     fun createBusiness(player: Player, name: String): String {
@@ -629,9 +738,36 @@ object Economy {
                 settleLoans(now)
                 settleInfrastructure(now)
                 settleRoutes(now)
+                settleTaxes(now)
             }
         } catch (e: Exception) {
             Nodes.logger?.severe("[Economy] Scheduled settlement rolled back: ${e.message}")
+        }
+    }
+
+    // once a day each town pays a share of its treasury to its nation; the capital pays nothing
+    private fun settleTaxes(now: Long) {
+        if (townTaxPercent <= 0.0) {
+            return
+        }
+        if (state.lastTax == 0L) {
+            state.lastTax = now
+            return
+        }
+        if (now - state.lastTax < DAY_MS) {
+            return
+        }
+        state.lastTax = now
+        for (town in Nodes.towns.values) {
+            val nation = town.nation ?: continue
+            if (nation.capital === town) {
+                continue
+            }
+            val from = "town-${town.uuid}"
+            val tax = percentOf(balance(from), townTaxPercent)
+            if (tax > 0) {
+                move(from, "nation-${nation.uuid}", tax, "town-tax")
+            }
         }
     }
 
