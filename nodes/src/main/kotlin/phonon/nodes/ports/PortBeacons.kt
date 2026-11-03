@@ -16,7 +16,7 @@ object PortBeacons {
     var enabled = false
     private var pillar: Material = Material.BEDROCK
     private var pillarHeight = 20
-    private var startY = 50
+    private var startY = 50 // used for ports without a stored request height
     private var light: Material = Material.BEACON
     private var lightHeight = 1
 
@@ -47,9 +47,10 @@ object PortBeacons {
 
     private fun column(port: Port, action: (org.bukkit.block.Block, Material) -> Unit) {
         val world = Bukkit.getWorlds().firstOrNull() ?: return
-        val top = startY + pillarHeight
         val maxY = world.maxHeight - 1
-        for (y in startY until minOf(top, maxY + 1)) {
+        val bottom = (port.beaconY ?: startY).coerceIn(world.minHeight, maxY)
+        val top = bottom + pillarHeight
+        for (y in bottom until minOf(top, maxY + 1)) {
             action(world.getBlockAt(port.locX, y, port.locZ), pillar)
         }
         for (y in top until minOf(top + lightHeight, maxY + 1)) {

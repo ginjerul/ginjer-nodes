@@ -442,6 +442,7 @@ public object Deserializer {
                     portObject.costAlly = port.get("costAlly")?.asLong ?: 0L
                     portObject.costNeutral = port.get("costNeutral")?.asLong ?: 0L
                     portObject.costEnemy = port.get("costEnemy")?.asLong ?: 0L
+                    portObject.beaconY = port.get("beaconY")?.asInt
                     portObject.needsUpdate()
                 }
             }

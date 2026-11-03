@@ -26,6 +26,10 @@ data class Port(
     var costNeutral: Long = 0L
     var costEnemy: Long = 0L
 
+    // y level the beacon pillar starts at (the height the port was requested at);
+    // null uses portBeacon.startY from the config
+    var beaconY: Int? = null
+
     private var saveState: PortSaveState
 
     @Suppress("PropertyName")
@@ -47,6 +51,7 @@ data class Port(
         public val costAlly = p.costAlly
         public val costNeutral = p.costNeutral
         public val costEnemy = p.costEnemy
+        public val beaconY = p.beaconY
 
         public override var jsonString: String? = null
 
@@ -66,6 +71,7 @@ data class Port(
                     "\"costAlly\":$costAlly," +
                     "\"costNeutral\":$costNeutral," +
                     "\"costEnemy\":$costEnemy" +
+                    (if (beaconY != null) ",\"beaconY\":$beaconY" else "") +
                     "}"
                 )
 

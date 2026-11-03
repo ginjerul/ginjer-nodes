@@ -392,8 +392,9 @@ allowPortWarpWithoutBoat: false
 portNotInShipMultiplier: 2.0
 
 # Beacon pillars that mark ports (off by default). A pillar is placed at each port's
-# x/z in the main world from startY upward, topped with light blocks. Deleting a port
-# removes its pillar.
+# x/z in the main world, topped with light blocks. It starts at the height the port was
+# requested at (/port request); ports made without a request height (/nda port create)
+# start at startY. Deleting a port removes its pillar.
 portBeacon:
   enabled: false
   pillarMaterial: BEDROCK

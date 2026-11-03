@@ -42,6 +42,8 @@ class PortRequest(
     var requesterName: String = "",
     var groups: MutableList<String> = ArrayList(),
     var created: Long = 0L,
+    // height the player stood at; the port's beacon pillar starts here (null on old requests)
+    var y: Int? = null,
 )
 
 object PortRequests {
@@ -133,6 +135,7 @@ object PortRequests {
             requesterName = player.name,
             groups = groups,
             created = System.currentTimeMillis(),
+            y = player.location.blockY,
         )
         save()
         for (admin in Bukkit.getOnlinePlayers()) {
@@ -176,7 +179,7 @@ object PortRequests {
         }
         val groups = HashSet<PortGroup>()
         request.groups.forEach { Nodes.getPortGroupFromName(it)?.let { group -> groups.add(group) } }
-        Nodes.createPort(request.name, request.x, request.z, groups, false).getOrElse { return "Could not create the port: ${it.message}" }
+        Nodes.createPort(request.name, request.x, request.z, groups, false, request.y).getOrElse { return "Could not create the port: ${it.message}" }
         requests.remove(request.name)
         save()
         notify(request, "${ChatColor.GREEN}Your port request \"${request.name}\" was approved by ${by.name}")

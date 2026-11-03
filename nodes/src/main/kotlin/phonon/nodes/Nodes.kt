@@ -3159,12 +3159,14 @@ public object Nodes {
         locZ: Int,
         groups: HashSet<PortGroup>,
         isPublic: Boolean,
+        beaconY: Int? = null,
     ): Result<Port> {
         if (ports.containsKey(name)) {
             return Result.failure(ErrorPortExists)
         }
 
         val port = Port(name, locX, locZ, groups, isPublic)
+        port.beaconY = beaconY
 
         ports.put(name, port)
 
