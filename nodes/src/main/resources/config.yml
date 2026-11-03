@@ -278,6 +278,12 @@ warBossBarMaxDistanceChunks: 6
 maxConcurrentAttacks: 0
 maxAttacksPerTown: 0
 
+# Proximity alliances: an alliance can only be offered or accepted while a player of
+# the other town (or nation) is within this many blocks of you, in the same world.
+# Players with nodes.ally.proximity.bypass are exempt.
+allyProximity: false
+allyProximityDistance: 50
+
 # Attack rules
 noFriendlyFire: false
 allowUnownedAttack: true

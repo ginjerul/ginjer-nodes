@@ -4,11 +4,14 @@
 
 package phonon.nodes.chat
 
+import org.bukkit.Bukkit
 import org.bukkit.ChatColor
 import org.bukkit.entity.Player
 import org.bukkit.event.player.AsyncPlayerChatEvent
 import phonon.nodes.Nodes
 import phonon.nodes.objects.Resident
+import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 public enum class ChatMode {
     GLOBAL,
@@ -20,6 +23,36 @@ public enum class ChatMode {
 public object Chat {
 
     val playersMuteGlobal: HashSet<Player> = hashSetOf()
+
+    // admins with /nda socialspy on: they also see town, nation and ally chat
+    val spies: MutableSet<UUID> = ConcurrentHashMap.newKeySet()
+
+    // sends a private copy of a channel message to every spy who did not already get it
+    private fun spy(event: AsyncPlayerChatEvent, channel: String) {
+        if (spies.isEmpty()) {
+            return
+        }
+        val text = "${ChatColor.DARK_GRAY}[Spy|$channel] ${ChatColor.GRAY}${event.player.name}: ${event.message}"
+        for (uuid in spies.toList()) {
+            val spyPlayer = Bukkit.getPlayer(uuid)
+            if (spyPlayer == null || spyPlayer === event.player || event.recipients.contains(spyPlayer)) {
+                continue
+            }
+            if (!spyPlayer.hasPermission("nodes.admin")) {
+                spies.remove(uuid)
+                continue
+            }
+            spyPlayer.sendMessage(text)
+        }
+    }
+
+    // toggles social spy for a player; returns true when it is now on
+    fun toggleSpy(player: Player): Boolean = if (spies.remove(player.uniqueId)) {
+        false
+    } else {
+        spies.add(player.uniqueId)
+        true
+    }
 
     var colorDefault = ChatColor.WHITE
     val colorGreen = ChatColor.GREEN
@@ -67,6 +100,7 @@ public object Chat {
                 event.getRecipients().clear()
                 event.getRecipients().addAll(town.playersOnline)
                 event.setFormat(formatMsgTown(resident))
+                spy(event, "Town: ${town.name}")
             }
             ChatMode.NATION -> {
                 val nation = resident.nation
@@ -77,6 +111,7 @@ public object Chat {
                 event.getRecipients().clear()
                 event.getRecipients().addAll(nation.playersOnline)
                 event.setFormat(formatMsgNation(resident))
+                spy(event, "Nation: ${nation.name}")
             }
             ChatMode.ALLY -> {
                 val town = resident.town
@@ -90,6 +125,7 @@ public object Chat {
                     event.getRecipients().addAll(allyTown.playersOnline)
                 }
                 event.setFormat(formatMsgAlly(resident))
+                spy(event, "Ally: ${town.name}")
             }
         }
     }

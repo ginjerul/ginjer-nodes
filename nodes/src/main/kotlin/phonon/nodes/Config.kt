@@ -337,6 +337,10 @@ public object Config {
      */
     public var noFriendlyFire: Boolean = false
 
+    // alliances can only be offered or accepted while a player of the other side is this close
+    public var allyProximity: Boolean = false
+    public var allyProximityDistance: Double = 50.0
+
     public var allowUnownedAttack: Boolean = true
     public var allowBorderSkirmishFromWilderness: Boolean = true
     public var allowAllInteractsInFlaggedChunks: Boolean = true
@@ -620,6 +624,8 @@ public object Config {
         Config.playersInChunkMultiplierMin = config.getDouble("playersInChunkMultiplierMin", Config.playersInChunkMultiplierMin)
 
         Config.noFriendlyFire = config.getBoolean("noFriendlyFire", Config.noFriendlyFire)
+        Config.allyProximity = config.getBoolean("allyProximity", Config.allyProximity)
+        Config.allyProximityDistance = config.getDouble("allyProximityDistance", Config.allyProximityDistance).coerceIn(1.0, 100000.0)
 
         Config.allowUnownedAttack = config.getBoolean("allowUnownedAttack", Config.allowUnownedAttack)
         Config.allowBorderSkirmishFromWilderness = config.getBoolean("allowBorderSkirmishFromWilderness", Config.allowBorderSkirmishFromWilderness)

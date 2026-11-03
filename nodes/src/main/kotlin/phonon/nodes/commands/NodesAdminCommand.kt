@@ -74,6 +74,7 @@ private val SUBCOMMANDS: List<String> = listOf(
     "debug",
     "miningboost",
     "stats",
+    "socialspy",
     "rallycap",
     "announce",
     "plot",
@@ -301,6 +302,18 @@ public class NodesAdminCommand :
         val shown = if (n < 0) "unlimited" else n.toString()
         Message.print(sender, "${org.bukkit.ChatColor.GREEN}Rally cap for ${nation.name}: $shown")
     }
+    private fun socialSpy(sender: CommandSender) {
+        if (sender !is Player) {
+            Message.error(sender, "Only players in game can use")
+            return
+        }
+        if (phonon.nodes.chat.Chat.toggleSpy(sender)) {
+            Message.print(sender, "${ChatColor.GREEN}Social spy on: you now see town, nation and ally chat")
+        } else {
+            Message.print(sender, "${ChatColor.GREEN}Social spy off")
+        }
+    }
+
     private fun adminStats(sender: CommandSender, args: Array<String>) {
         if (!sender.hasPermission("nodes.stats.admin") && !sender.isOp) {
             Message.error(sender, "No permission")
@@ -338,6 +351,7 @@ public class NodesAdminCommand :
             "surrender" -> adminSurrender(sender, args)
             "miningboost" -> miningBoost(sender, args)
             "stats" -> adminStats(sender, args)
+            "socialspy" -> socialSpy(sender)
             "announce" -> adminAnnounce(sender, args)
             "resident" -> manageResident(sender, args)
             "town" -> manageTown(sender, args)
@@ -665,6 +679,7 @@ public class NodesAdminCommand :
         Message.print(sender, "/nodesadmin runincome${ChatColor.WHITE}: Runs income for all towns")
         Message.print(sender, "/nodesadmin debug${ChatColor.WHITE}: World object debugger")
         Message.print(sender, "/nodesadmin miningboost${ChatColor.WHITE}: Mining rate/amount boosts")
+        Message.print(sender, "/nodesadmin socialspy${ChatColor.WHITE}: Toggle seeing town, nation and ally chat")
         Message.print(sender, "/nodesadmin stats reset <player|all confirm>${ChatColor.WHITE}: Reset K/D stats (all = everyone)")
         Message.print(sender, "/nodesadmin announce <message>${ChatColor.WHITE}: Announce for all players")
         Message.print(sender, "/nodesadmin plot list|delete <name>${ChatColor.WHITE}: Manage plots")

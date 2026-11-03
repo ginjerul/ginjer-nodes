@@ -10,6 +10,7 @@ import org.bukkit.command.CommandExecutor
 import org.bukkit.command.CommandSender
 import org.bukkit.command.TabCompleter
 import org.bukkit.entity.Player
+import phonon.nodes.Config
 import phonon.nodes.Message
 import phonon.nodes.Nodes
 import phonon.nodes.objects.Nation
@@ -113,10 +114,24 @@ public class AllyCommand :
         Message.error(player, "Town or nation \"${target}\" does not exist")
     }
 
+    // true when a player of the other town (or nation) is in the same world within allyProximityDistance
+    private fun otherSideIsNear(player: Player, other: Town, otherNation: Nation?): Boolean {
+        val limit = Config.allyProximityDistance * Config.allyProximityDistance
+        val candidates = otherNation?.playersOnline ?: other.playersOnline
+        val here = player.location
+        return candidates.any { it.world == here.world && it.location.distanceSquared(here) <= limit }
+    }
+
     // The alliance forms once both sides have offered
     private fun offerAlliance(player: Player, town: Town, other: Town, townNation: Nation?, otherNation: Nation?) {
         if (town === other) {
             Message.error(player, "You cannot make a peace treaty with yourself.")
+            return
+        }
+
+        if (Config.allyProximity && !player.hasPermission("nodes.ally.proximity.bypass") && !otherSideIsNear(player, other, otherNation)) {
+            val who = otherNation?.name ?: other.name
+            Message.error(player, "To ally with $who, one of their players must be within ${Config.allyProximityDistance.toInt()} blocks of you")
             return
         }
 
