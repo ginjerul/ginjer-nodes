@@ -13,11 +13,13 @@ repositories {
     mavenCentral()
     maven("https://repo.papermc.io/repository/maven-public/")
     maven("https://repo.dmulloy2.net/nexus/repository/public/")
+    maven("https://repo.codemc.io/repository/maven-releases/")
 }
 
 dependencies {
     compileOnly("org.jetbrains.kotlin:kotlin-stdlib")
     compileOnly(files("libs/xc.jar"))
+    compileOnly("com.github.retrooper:packetevents-spigot:2.12.0")
     compileOnly("com.google.code.gson:gson:2.13.2")
     implementation("org.bstats:bstats-bukkit:3.1.0")
 

@@ -273,6 +273,7 @@ public class NodesPlugin : JavaPlugin() {
         PortPolicies.load()
         phonon.nodes.rules.TownFlags.load()
         phonon.nodes.rules.TownRules.start(this)
+        phonon.nodes.tab.TabList.start(this)
         // beacon pillars are placed once the worlds are up
         server.scheduler.runTaskLater(this, Runnable { PortBeacons.placeAll() }, 100L)
 

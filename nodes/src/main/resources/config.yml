@@ -437,6 +437,46 @@ minimumDistanceForNewTownVal: 32
 hiddenOreMechanic: true
 hiddenOreSilktouch: false
 
+# custom tab list with four columns: Staff | Nation | Allies | Enemies.
+# Needs the PacketEvents plugin; without it the normal tab list stays. Text is MiniMessage.
+# Nation lists the online players of your nation's towns (leaders and officers get icons),
+# Allies and Enemies list the online players of each allied / enemy town.
+tabList:
+  enabled: false
+  updateTicks: 40
+  columnHeaders:
+    staff: "<gradient:#FFAA50:#FFD080><bold>STAFF</bold></gradient>"
+    nation: "<gradient:#7DD4FF:#A0E0FF><bold>NATION</bold></gradient>"
+    allies: "<gradient:#77DD77:#A0EEA0><bold>ALLIES</bold></gradient>"
+    enemies: "<gradient:#FF7070:#FFA0A0><bold>ENEMIES</bold></gradient>"
+  # lines above and below the columns. Placeholders: %ping% %player% %online% %tps%
+  header:
+    - ""
+  footer:
+    - "<gray>Ping: <green>%ping%ms</green> <dark_gray>|</dark_gray> <gray>Online: <white>%online%</white>"
+  # staff are listed by the first permission they have, top to bottom
+  staffPermissions:
+    admin:
+      permission: "nodes.staff.admin"
+      prefix: "<#FFCC50>✦ "
+      color: "<#FFDD80>"
+    mod:
+      permission: "nodes.staff.mod"
+      prefix: "<#50C8FF>✦ "
+      color: "<#70D8FF>"
+    helper:
+      permission: "nodes.staff.helper"
+      prefix: "<#D4A0FF>✦ "
+      color: "<#E0B0FF>"
+  icons:
+    nationLeader: "<gold>♛ </gold>"
+    leader: "<gold>★ </gold>"
+    officer: "<yellow>✦ </yellow>"
+    member: "<dark_gray>▪ </dark_gray>"
+  # most players shown under one town before "+N more"
+  maxPlayersPerSection: 15
+  showPlayerPing: false
+
 # chat: lines starting with > turn green, and text put in front of every player's name (& colors)
 greenText: true
 chatPrefix: ""
