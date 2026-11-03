@@ -13,6 +13,7 @@ import org.bukkit.entity.Player
 import phonon.nodes.Config
 import phonon.nodes.Message
 import phonon.nodes.Nodes
+import phonon.nodes.objects.Coord
 import phonon.nodes.objects.Nation
 import phonon.nodes.objects.Town
 import phonon.nodes.utils.string.filterTownOrNation
@@ -114,13 +115,26 @@ public class AllyCommand :
         Message.error(player, "Town or nation \"${target}\" does not exist")
     }
 
-    // true when a player of the other town (or nation) is in the same world within allyProximityDistance
-    private fun otherSideIsNear(player: Player, other: Town, otherNation: Nation?): Boolean {
-        val limit = Config.allyProximityDistance * Config.allyProximityDistance
-        val candidates = otherNation?.playersOnline ?: other.playersOnline
-        val here = player.location
-        return candidates.any { it.world == here.world && it.location.distanceSquared(here) <= limit }
+    // blocks between the closest pair of town homes of the two sides (a nation counts all of its
+    // towns); null when a home position is unknown
+    private fun distanceBetweenSides(town: Town, townNation: Nation?, other: Town, otherNation: Nation?): Double? {
+        val mine = (townNation?.towns ?: setOf(town)).mapNotNull { homeChunk(it) }
+        val theirs = (otherNation?.towns ?: setOf(other)).mapNotNull { homeChunk(it) }
+        if (mine.isEmpty() || theirs.isEmpty()) {
+            return null
+        }
+        var best = Double.MAX_VALUE
+        for (a in mine) {
+            for (b in theirs) {
+                val dx = (a.x - b.x).toDouble()
+                val dz = (a.z - b.z).toDouble()
+                best = minOf(best, Math.sqrt(dx * dx + dz * dz) * 16.0)
+            }
+        }
+        return best
     }
+
+    private fun homeChunk(town: Town): Coord? = Nodes.territories[town.home]?.core
 
     // The alliance forms once both sides have offered
     private fun offerAlliance(player: Player, town: Town, other: Town, townNation: Nation?, otherNation: Nation?) {
@@ -129,10 +143,13 @@ public class AllyCommand :
             return
         }
 
-        if (Config.allyProximity && !player.hasPermission("nodes.ally.proximity.bypass") && !otherSideIsNear(player, other, otherNation)) {
-            val who = otherNation?.name ?: other.name
-            Message.error(player, "To ally with $who, one of their players must be within ${Config.allyProximityDistance.toInt()} blocks of you")
-            return
+        if (Config.allyProximity && !player.hasPermission("nodes.ally.proximity.bypass")) {
+            val blocks = distanceBetweenSides(town, townNation, other, otherNation)
+            if (blocks != null && blocks > Config.allyProximityDistance) {
+                val who = otherNation?.name ?: other.name
+                Message.error(player, "$who is too far away to ally (${blocks.toInt()} blocks between your closest towns, the limit is ${Config.allyProximityDistance.toInt()})")
+                return
+            }
         }
 
         val result = Alliance.request(town, other)
