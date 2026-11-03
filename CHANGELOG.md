@@ -25,7 +25,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Economy: optional costs paid in the economy (`economy.costs`: `townCreation` from the wallet, `territoryClaimPerPower` from the town treasury) and daily upkeep (`economy.upkeep`: `townPerClaimPerDay`, `nationPerTownPerDay`). An account that cannot pay is skipped and nothing is deleted.
 - Chat: `/localchat` (`/lc`) and `/rpchat` (`/rp`) channels limited by `localChatDistance` and `rpChatDistance`, and `chatPrefixMode` to choose the global chat prefix.
 - Small options: `townRenameCooldown`, `maxClaimsPerTown`, `maxDaysForInactivity` with `/nda inactive [days]`, and `dailyEventTime` to run daily tax and upkeep at a set time.
-- Capturing towns: `instantAnnexOnCapture` annexes every territory the moment its core is captured, and `capturedTownJoinsNation` keeps a captured town (home taken) alive and adds it to the attacker's nation instead of destroying it. Both respect the war and annex blacklists and whitelists.
+- Capturing towns: `instantAnnexOnCapture` annexes a town the moment its home is captured (off = use `/town annex`; normal territories always need `/town annex`), and `capturedTownJoinsNation` keeps a captured town (home taken) alive and adds it to the attacker's nation instead of destroying it. Both respect the war and annex blacklists and whitelists.
 
 ## [0.1.0] – 2026-11-02
 
