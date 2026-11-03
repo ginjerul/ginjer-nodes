@@ -8,7 +8,6 @@ commands:
   nodesadmin:
     description: Admin commands for Nodes
     aliases: [nda]
-    permission: nodes.admin
     usage: /nodesadmin help or /na help
   town:
     description: Manage player towns (Nodes)
@@ -156,8 +155,36 @@ commands:
 # ALL permission nodes live here — NOT under commands
 permissions:
   nodes.admin:
-    description: Nodes admin
+    description: Nodes admin, every /nodesadmin command
     default: op
+    children:
+      nodes.admin.reload: true
+      nodes.admin.war: true
+      nodes.admin.surrender: true
+      nodes.admin.port: true
+      nodes.admin.resident: true
+      nodes.admin.town: true
+      nodes.admin.nation: true
+      nodes.admin.enemy: true
+      nodes.admin.peace: true
+      nodes.admin.ally: true
+      nodes.admin.allyremove: true
+      nodes.admin.truce: true
+      nodes.admin.truceremove: true
+      nodes.admin.treaty: true
+      nodes.admin.save: true
+      nodes.admin.load: true
+      nodes.admin.runincome: true
+      nodes.admin.playersonline: true
+      nodes.admin.debug: true
+      nodes.admin.miningboost: true
+      nodes.admin.stats: true
+      nodes.admin.socialspy: true
+      nodes.admin.pvp: true
+      nodes.admin.inactive: true
+      nodes.admin.rallycap: true
+      nodes.admin.announce: true
+      nodes.admin.plot: true
   nodes.command.town:
     default: true
   nodes.command.nation:
@@ -206,6 +233,87 @@ permissions:
   nodes.stats.other:
     description: View other players stats
     default: true
+  nodes.admin.reload:
+    description: /nodesadmin reload (grant nodes.admin.reload.<action> for a single action)
+    default: false
+  nodes.admin.war:
+    description: /nodesadmin war (grant nodes.admin.war.<action> for a single action)
+    default: false
+  nodes.admin.surrender:
+    description: /nodesadmin surrender (grant nodes.admin.surrender.<action> for a single action)
+    default: false
+  nodes.admin.port:
+    description: /nodesadmin port (grant nodes.admin.port.<action> for a single action)
+    default: false
+  nodes.admin.resident:
+    description: /nodesadmin resident (grant nodes.admin.resident.<action> for a single action)
+    default: false
+  nodes.admin.town:
+    description: /nodesadmin town (grant nodes.admin.town.<action> for a single action)
+    default: false
+  nodes.admin.nation:
+    description: /nodesadmin nation (grant nodes.admin.nation.<action> for a single action)
+    default: false
+  nodes.admin.enemy:
+    description: /nodesadmin enemy (grant nodes.admin.enemy.<action> for a single action)
+    default: false
+  nodes.admin.peace:
+    description: /nodesadmin peace (grant nodes.admin.peace.<action> for a single action)
+    default: false
+  nodes.admin.ally:
+    description: /nodesadmin ally (grant nodes.admin.ally.<action> for a single action)
+    default: false
+  nodes.admin.allyremove:
+    description: /nodesadmin allyremove (grant nodes.admin.allyremove.<action> for a single action)
+    default: false
+  nodes.admin.truce:
+    description: /nodesadmin truce (grant nodes.admin.truce.<action> for a single action)
+    default: false
+  nodes.admin.truceremove:
+    description: /nodesadmin truceremove (grant nodes.admin.truceremove.<action> for a single action)
+    default: false
+  nodes.admin.treaty:
+    description: /nodesadmin treaty (grant nodes.admin.treaty.<action> for a single action)
+    default: false
+  nodes.admin.save:
+    description: /nodesadmin save (grant nodes.admin.save.<action> for a single action)
+    default: false
+  nodes.admin.load:
+    description: /nodesadmin load (grant nodes.admin.load.<action> for a single action)
+    default: false
+  nodes.admin.runincome:
+    description: /nodesadmin runincome (grant nodes.admin.runincome.<action> for a single action)
+    default: false
+  nodes.admin.playersonline:
+    description: /nodesadmin playersonline (grant nodes.admin.playersonline.<action> for a single action)
+    default: false
+  nodes.admin.debug:
+    description: /nodesadmin debug (grant nodes.admin.debug.<action> for a single action)
+    default: false
+  nodes.admin.miningboost:
+    description: /nodesadmin miningboost (grant nodes.admin.miningboost.<action> for a single action)
+    default: false
+  nodes.admin.stats:
+    description: /nodesadmin stats (grant nodes.admin.stats.<action> for a single action)
+    default: false
+  nodes.admin.socialspy:
+    description: /nodesadmin socialspy (grant nodes.admin.socialspy.<action> for a single action)
+    default: false
+  nodes.admin.pvp:
+    description: /nodesadmin pvp (grant nodes.admin.pvp.<action> for a single action)
+    default: false
+  nodes.admin.inactive:
+    description: /nodesadmin inactive (grant nodes.admin.inactive.<action> for a single action)
+    default: false
+  nodes.admin.rallycap:
+    description: /nodesadmin rallycap (grant nodes.admin.rallycap.<action> for a single action)
+    default: false
+  nodes.admin.announce:
+    description: /nodesadmin announce (grant nodes.admin.announce.<action> for a single action)
+    default: false
+  nodes.admin.plot:
+    description: /nodesadmin plot (grant nodes.admin.plot.<action> for a single action)
+    default: false
   nodes.stats.admin:
     description: Reset stats
     default: op
@@ -224,9 +332,6 @@ permissions:
   nodes.command.plot.permissions:
     description: Edit plot permission rules
     default: true
-  nodes.admin.plot:
-    description: Admin plot commands via /nda plot
-    default: op
   nodes.command.killshop:
     description: Open killshop / view points
     default: true

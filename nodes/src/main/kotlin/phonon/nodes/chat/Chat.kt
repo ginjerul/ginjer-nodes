@@ -41,7 +41,7 @@ public object Chat {
             if (spyPlayer == null || spyPlayer === event.player || event.recipients.contains(spyPlayer)) {
                 continue
             }
-            if (!spyPlayer.hasPermission("nodes.admin")) {
+            if (!phonon.nodes.utils.AdminPerms.has(spyPlayer, "socialspy")) {
                 spies.remove(uuid)
                 continue
             }

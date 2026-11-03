@@ -167,5 +167,5 @@ Common sub-commands:
 
 **Description:** Administrative commands for managing the Nodes plugin.  
 **Aliases:** `/nda`  
-**Permission:** `nodes.admin`  
+**Permission:** `nodes.admin` for everything. Lower staff can get `nodes.admin.<command>` (all of one command, e.g. `nodes.admin.town`) or `nodes.admin.<command>.<action>` (one action, e.g. `nodes.admin.town.addplayer`) instead. `/nda help` and tab completion only show what the sender may use.  
 **Usage:** `/nodesadmin help`

@@ -29,6 +29,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Capturing towns: `economy.plunder` takes money from a captured town's treasury, and `onlyKeepCapital` makes a town that joins the attacker's nation keep only its home territory.
 - `warProximity`/`warProximityDistance` limit war declarations by distance, `minimumDistanceForNewTown` keeps new towns apart, `canClaimDuringWar`, `canSetCapitalDuringWar` and `canSetCapitalIfEnemies` add war rules, `explodeChests` can protect chests from explosions, `hiddenOreMechanic`/`hiddenOreSilktouch` control hidden ore, and `greenText`/`chatPrefix` tune chat.
 - Tab list (`tabList:` in the config, off by default): four columns Staff | Nation | Allies | Enemies with each town's online players and icons for nation leaders, town leaders and officers. Needs the PacketEvents plugin (optional).
+- Admin permissions: `/nda` can be split between staff. `nodes.admin` is still everything, `nodes.admin.<command>` gives one command (e.g. `nodes.admin.town`) and `nodes.admin.<command>.<action>` one action (e.g. `nodes.admin.town.addplayer`, `nodes.admin.resident.towncooldown`). Help and tab completion only show what a player can use. Social spy needs `nodes.admin.socialspy`, port request alerts and the request menu `nodes.admin.port.requests`.
 
 ## [0.1.0] – 2026-11-02
 

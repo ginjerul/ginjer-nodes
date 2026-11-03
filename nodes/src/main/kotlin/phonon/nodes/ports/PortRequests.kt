@@ -139,7 +139,7 @@ object PortRequests {
         )
         save()
         for (admin in Bukkit.getOnlinePlayers()) {
-            if (admin.hasPermission("nodes.admin")) {
+            if (phonon.nodes.utils.AdminPerms.has(admin, "port", "requests")) {
                 Message.print(admin, "${ChatColor.AQUA}[Ports] ${town.name} requested port \"$name\" at ($x, $z). Review with /nda port requests")
             }
         }
@@ -243,7 +243,7 @@ class PortRequestMenuListener : Listener {
         val holder = event.view.topInventory.holder as? RequestHolder ?: return
         event.isCancelled = true
         val admin = event.whoClicked as? Player ?: return
-        if (!admin.hasPermission("nodes.admin")) {
+        if (!phonon.nodes.utils.AdminPerms.has(admin, "port", "requests")) {
             admin.closeInventory()
             return
         }

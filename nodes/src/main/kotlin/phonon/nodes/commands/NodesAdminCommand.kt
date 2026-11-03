@@ -33,6 +33,7 @@ import phonon.nodes.objects.TerritoryId
 import phonon.nodes.objects.Town
 import phonon.nodes.ports.PortRequestMenu
 import phonon.nodes.ports.PortRequests
+import phonon.nodes.utils.AdminPerms
 import phonon.nodes.utils.sanitizeString
 import phonon.nodes.utils.string.filterByStart
 import phonon.nodes.utils.string.filterNation
@@ -352,10 +353,6 @@ public class NodesAdminCommand :
     }
 
     private fun adminStats(sender: CommandSender, args: Array<String>) {
-        if (!sender.hasPermission("nodes.stats.admin") && !sender.isOp) {
-            Message.error(sender, "No permission")
-            return
-        }
         if (args.size >= 3 && args[1].equals("reset", ignoreCase = true) && args[2].equals("all", ignoreCase = true)) {
             if (args.size < 4 || !args[3].equals("confirm", ignoreCase = true)) {
                 Message.error(sender, "This wipes the kills and deaths of EVERY player. Type /nda stats reset all confirm to do it (a backup of player-stats.json is kept)")
@@ -381,7 +378,13 @@ public class NodesAdminCommand :
             return true
         }
 
-        when (args[0].lowercase()) {
+        val sub = args[0].lowercase()
+        if (sub != "help" && !AdminPerms.has(sender, sub, args.getOrNull(1))) {
+            Message.error(sender, "You do not have permission for /nodesadmin $sub" + (args.getOrNull(1)?.let { " $it" } ?: ""))
+            return true
+        }
+
+        when (sub) {
             "help" -> printHelp(sender)
             "reload" -> reload(sender, args)
             "war" -> war(sender, args)
@@ -419,8 +422,11 @@ public class NodesAdminCommand :
     }
 
     override fun onTabComplete(sender: CommandSender, command: Command, alias: String, args: Array<String>): List<String> {
+        if (!AdminPerms.any(sender)) {
+            return emptyList()
+        }
         if (args.size == 1) {
-            return filterByStart(SUBCOMMANDS, args[0])
+            return filterByStart(SUBCOMMANDS.filter { AdminPerms.canSee(sender, it) }, args[0])
         } else if (args.size > 1) {
             when (args[0].lowercase()) {
                 "reload" -> {
@@ -699,32 +705,38 @@ public class NodesAdminCommand :
         return listOf()
     }
 
+    private fun helpLine(sender: CommandSender, sub: String, text: String) {
+        if (AdminPerms.canSee(sender, sub)) {
+            Message.print(sender, text)
+        }
+    }
+
     private fun printHelp(sender: CommandSender) {
         Message.print(sender, "${ChatColor.BOLD}[Nodes] Admin commands:")
-        Message.print(sender, "/nodesadmin reload${ChatColor.WHITE}: Reloads modules of plugin")
-        Message.print(sender, "/nodesadmin war${ChatColor.WHITE}: Enable/disable war")
-        Message.print(sender, "/nodesadmin surrender reset <town>${ChatColor.WHITE}: Clear a town's surrender cooldown")
-        Message.print(sender, "/nodesadmin town${ChatColor.WHITE}: Manage towns (see \"/nodesadmin town help\")")
-        Message.print(sender, "/nodesadmin nation${ChatColor.WHITE}: Manage nations (see \"/nodesadmin nation help\")")
-        Message.print(sender, "/nodesadmin port${ChatColor.WHITE}: Manage ports (see \"/nodesadmin port help\")")
-        Message.print(sender, "/nodesadmin enemy${ChatColor.WHITE}: Make two towns/nations enemies")
-        Message.print(sender, "/nodesadmin peace${ChatColor.WHITE}: Sets peace between two towns/nations")
-        Message.print(sender, "/nodesadmin ally${ChatColor.WHITE}: Sets alliance between two towns/nations")
-        Message.print(sender, "/nodesadmin allyremove${ChatColor.WHITE}: Removes alliance between two towns/nations")
-        Message.print(sender, "/nodesadmin truce${ChatColor.WHITE}: Sets truce between two towns/nations")
-        Message.print(sender, "/nodesadmin truceremove${ChatColor.WHITE}: Removes truce between two towns/nations")
-        Message.print(sender, "/nodesadmin save${ChatColor.WHITE}: Force save world")
-        Message.print(sender, "/nodesadmin load${ChatColor.WHITE}: Force load world")
-        Message.print(sender, "/nodesadmin runincome${ChatColor.WHITE}: Runs income for all towns")
-        Message.print(sender, "/nodesadmin debug${ChatColor.WHITE}: World object debugger")
-        Message.print(sender, "/nodesadmin miningboost${ChatColor.WHITE}: Mining rate/amount boosts")
-        Message.print(sender, "/nodesadmin pvp <town> <on|off>${ChatColor.WHITE}: Set a town's PvP switch")
-        Message.print(sender, "/nodesadmin inactive [days]${ChatColor.WHITE}: List residents who have not logged in for that long")
-        Message.print(sender, "/nodesadmin socialspy${ChatColor.WHITE}: Toggle seeing town, nation and ally chat")
-        Message.print(sender, "/nodesadmin stats reset <player|all confirm>${ChatColor.WHITE}: Reset K/D stats (all = everyone)")
-        Message.print(sender, "/nodesadmin announce <message>${ChatColor.WHITE}: Announce for all players")
-        Message.print(sender, "/nodesadmin plot list|delete <name>${ChatColor.WHITE}: Manage plots")
-        Message.print(sender, "/nodesadmin rallycap <nation> <n|-1>${ChatColor.WHITE}: Manage rallycaps")
+        helpLine(sender, "reload", "/nodesadmin reload${ChatColor.WHITE}: Reloads modules of plugin")
+        helpLine(sender, "war", "/nodesadmin war${ChatColor.WHITE}: Enable/disable war")
+        helpLine(sender, "surrender", "/nodesadmin surrender reset <town>${ChatColor.WHITE}: Clear a town's surrender cooldown")
+        helpLine(sender, "town", "/nodesadmin town${ChatColor.WHITE}: Manage towns (see \"/nodesadmin town help\")")
+        helpLine(sender, "nation", "/nodesadmin nation${ChatColor.WHITE}: Manage nations (see \"/nodesadmin nation help\")")
+        helpLine(sender, "port", "/nodesadmin port${ChatColor.WHITE}: Manage ports (see \"/nodesadmin port help\")")
+        helpLine(sender, "enemy", "/nodesadmin enemy${ChatColor.WHITE}: Make two towns/nations enemies")
+        helpLine(sender, "peace", "/nodesadmin peace${ChatColor.WHITE}: Sets peace between two towns/nations")
+        helpLine(sender, "ally", "/nodesadmin ally${ChatColor.WHITE}: Sets alliance between two towns/nations")
+        helpLine(sender, "allyremove", "/nodesadmin allyremove${ChatColor.WHITE}: Removes alliance between two towns/nations")
+        helpLine(sender, "truce", "/nodesadmin truce${ChatColor.WHITE}: Sets truce between two towns/nations")
+        helpLine(sender, "truceremove", "/nodesadmin truceremove${ChatColor.WHITE}: Removes truce between two towns/nations")
+        helpLine(sender, "save", "/nodesadmin save${ChatColor.WHITE}: Force save world")
+        helpLine(sender, "load", "/nodesadmin load${ChatColor.WHITE}: Force load world")
+        helpLine(sender, "runincome", "/nodesadmin runincome${ChatColor.WHITE}: Runs income for all towns")
+        helpLine(sender, "debug", "/nodesadmin debug${ChatColor.WHITE}: World object debugger")
+        helpLine(sender, "miningboost", "/nodesadmin miningboost${ChatColor.WHITE}: Mining rate/amount boosts")
+        helpLine(sender, "pvp", "/nodesadmin pvp <town> <on|off>${ChatColor.WHITE}: Set a town's PvP switch")
+        helpLine(sender, "inactive", "/nodesadmin inactive [days]${ChatColor.WHITE}: List residents who have not logged in for that long")
+        helpLine(sender, "socialspy", "/nodesadmin socialspy${ChatColor.WHITE}: Toggle seeing town, nation and ally chat")
+        helpLine(sender, "stats", "/nodesadmin stats reset <player|all confirm>${ChatColor.WHITE}: Reset K/D stats (all = everyone)")
+        helpLine(sender, "announce", "/nodesadmin announce <message>${ChatColor.WHITE}: Announce for all players")
+        helpLine(sender, "plot", "/nodesadmin plot list|delete <name>${ChatColor.WHITE}: Manage plots")
+        helpLine(sender, "rallycap", "/nodesadmin rallycap <nation> <n|-1>${ChatColor.WHITE}: Manage rallycaps")
         if (org.bukkit.Bukkit.getPluginManager().getPlugin("GinjerMap") != null) {
             Message.print(sender, "/ginjermap${ChatColor.WHITE}: Web map rendering and editor (see \"/ginjermap help\")")
         }

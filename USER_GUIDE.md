@@ -61,6 +61,8 @@ Ports allow quick travel between coastal territories. Run `/port list` to see av
 | Permission | Default | Description |
 |------------|---------|-------------|
 | `nodes.admin` | op | Access to all `/nodesadmin` commands |
+| `nodes.admin.<command>` | false | Only that `/nodesadmin` command, e.g. `nodes.admin.town`, `nodes.admin.resident`, `nodes.admin.stats`, `nodes.admin.pvp` |
+| `nodes.admin.<command>.<action>` | false | Only one action of a command, e.g. `nodes.admin.town.addplayer`, `nodes.admin.resident.towncooldown`, `nodes.admin.port.requests` |
 | `nodes.command.town` | true | Use `/town` commands |
 | `nodes.command.nation` | true | Use `/nation` commands |
 | `nodes.command.nodes` | true | Use `/nodes` info commands |
