@@ -10,10 +10,12 @@ import org.bukkit.command.CommandExecutor
 import org.bukkit.command.CommandSender
 import org.bukkit.command.TabCompleter
 import org.bukkit.entity.Player
+import phonon.nodes.Config
 import phonon.nodes.Message
 import phonon.nodes.Nodes
 import phonon.nodes.objects.Nation
 import phonon.nodes.objects.Town
+import phonon.nodes.utils.DiplomaticDistance
 import phonon.nodes.utils.string.filterTownOrNation
 import phonon.nodes.war.Truce
 
@@ -132,6 +134,15 @@ public class WarCommand :
         if (town.enemies.contains(enemy) || enemy.enemies.contains(town)) {
             Message.error(player, "You are already at war with ${enemy.name}")
             return
+        }
+
+        if (Config.warProximity && !player.hasPermission("nodes.war.proximity.bypass")) {
+            val blocks = DiplomaticDistance.blocks(town, townNation, enemy, enemyNation)
+            if (blocks != null && blocks > Config.warProximityDistance) {
+                val who = enemyNation?.name ?: enemy.name
+                Message.error(player, "$who is too far away to declare war on (${blocks.toInt()} blocks between your closest towns, the limit is ${Config.warProximityDistance.toInt()})")
+                return
+            }
         }
 
         val result = Nodes.addEnemy(town, enemy)

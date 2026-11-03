@@ -26,6 +26,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Chat: `/localchat` (`/lc`) and `/rpchat` (`/rp`) channels limited by `localChatDistance` and `rpChatDistance`, and `chatPrefixMode` to choose the global chat prefix.
 - Small options: `townRenameCooldown`, `maxClaimsPerTown`, `maxDaysForInactivity` with `/nda inactive [days]`, and `dailyEventTime` to run daily tax and upkeep at a set time.
 - Capturing towns: `instantAnnexOnCapture` annexes a town the moment its home is captured (off = use `/town annex`; normal territories always need `/town annex`), and `capturedTownJoinsNation` keeps a captured town (home taken) alive and adds it to the attacker's nation instead of destroying it. Both respect the war and annex blacklists and whitelists.
+- Capturing towns: `economy.plunder` takes money from a captured town's treasury, and `onlyKeepCapital` makes a town that joins the attacker's nation keep only its home territory.
+- `warProximity`/`warProximityDistance` limit war declarations by distance, `minimumDistanceForNewTown` keeps new towns apart, `canClaimDuringWar`, `canSetCapitalDuringWar` and `canSetCapitalIfEnemies` add war rules, `explodeChests` can protect chests from explosions, `hiddenOreMechanic`/`hiddenOreSilktouch` control hidden ore, and `greenText`/`chatPrefix` tune chat.
 
 ## [0.1.0] – 2026-11-02
 

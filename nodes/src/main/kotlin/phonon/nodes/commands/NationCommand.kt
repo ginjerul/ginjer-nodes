@@ -390,6 +390,15 @@ public class NationCommand :
             return
         }
 
+        if (!Config.canSetCapitalDuringWar && Nodes.war.enabled == true) {
+            Message.error(player, "Cannot change the capital during war")
+            return
+        }
+        if (!Config.canSetCapitalIfEnemies && nation.enemies.isNotEmpty()) {
+            Message.error(player, "Cannot change the capital while your nation has enemies")
+            return
+        }
+
         Nodes.setNationCapital(nation, newCapital)
 
         Message.broadcast("${ChatColor.BOLD}${newCapital.name} is now the capital of ${nation.name}")

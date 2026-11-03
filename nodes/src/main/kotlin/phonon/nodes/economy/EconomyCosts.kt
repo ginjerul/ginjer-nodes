@@ -7,6 +7,7 @@
 package phonon.nodes.economy
 
 import org.bukkit.entity.Player
+import phonon.nodes.Nodes
 import phonon.nodes.objects.Town
 
 object EconomyCosts {
@@ -35,6 +36,31 @@ object EconomyCosts {
         Economy.transaction {
             Economy.requireAvailable(account)
             Economy.move(account, "upkeep", cents, reason)
+        }
+    }
+
+    // a captured town pays the attacker: economy.plunder.perClaimPower for every claim power the town
+    // used, but never more than maxPercentOfTreasury of its treasury. Returns what was taken.
+    fun plunder(from: Town, to: Town, claimPower: Int): Long {
+        if (!Economy.enabled || Economy.plunderPerPower <= 0 || from === to) {
+            return 0L
+        }
+        val source = "town-${from.uuid}"
+        val held = Economy.balance(source)
+        val wanted = Math.multiplyExact(Economy.plunderPerPower, maxOf(0, claimPower).toLong())
+        val cap = (held * Economy.plunderMaxPercent / 100.0).toLong()
+        val take = minOf(wanted, cap, held)
+        if (take <= 0) {
+            return 0L
+        }
+        return try {
+            Economy.transaction {
+                Economy.move(source, "town-${to.uuid}", take, "plunder")
+            }
+            take
+        } catch (e: Exception) {
+            Nodes.logger?.warning("[Economy] Plunder from ${from.name} failed: ${e.message}")
+            0L
         }
     }
 

@@ -12,6 +12,7 @@ package phonon.nodes.listeners
 
 import org.bukkit.ChatColor
 import org.bukkit.Material
+import org.bukkit.Tag
 import org.bukkit.block.Block
 import org.bukkit.enchantments.Enchantment
 import org.bukkit.entity.Player
@@ -583,6 +584,7 @@ public class NodesWorldListener : Listener {
 
     @EventHandler(priority = EventPriority.LOW)
     public fun onEntityExplode(event: EntityExplodeEvent) {
+        sparePlayerStorage(event.blockList())
         if (Config.restrictExplosions) {
             if (!Nodes.war.enabled) {
                 if (Config.onlyAllowExplosionsDuringWar) {
@@ -630,6 +632,7 @@ public class NodesWorldListener : Listener {
 
     @EventHandler(priority = EventPriority.LOW)
     public fun onBlockExplode(event: BlockExplodeEvent) {
+        sparePlayerStorage(event.blockList())
         if (Config.restrictExplosions) {
             if (!Nodes.war.enabled) {
                 if (Config.onlyAllowExplosionsDuringWar) {
@@ -789,9 +792,23 @@ private fun handleCropHarvest(block: Block) {
     }
 }
 
+// explodeChests: false keeps chests, barrels and shulker boxes out of explosions
+private fun sparePlayerStorage(blocks: MutableList<Block>) {
+    if (Config.explodeChests) {
+        return
+    }
+    blocks.removeIf {
+        it.type == Material.CHEST || it.type == Material.TRAPPED_CHEST || it.type == Material.BARREL ||
+            Tag.SHULKER_BOXES.isTagged(it.type)
+    }
+}
+
 private fun handleHiddenOre(player: Player, block: Block) {
+    if (!Config.hiddenOreMechanic) {
+        return
+    }
     val inMainHand: ItemStack? = player.inventory.itemInMainHand
-    if (inMainHand?.hasItemMeta() == true && inMainHand.enchantments.containsKey(Enchantment.SILK_TOUCH)) {
+    if (!Config.hiddenOreSilktouch && inMainHand?.hasItemMeta() == true && inMainHand.enchantments.containsKey(Enchantment.SILK_TOUCH)) {
         return
     }
 

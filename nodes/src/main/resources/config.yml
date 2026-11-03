@@ -411,6 +411,36 @@ instantAnnexOnCapture: true
 # Takes priority over annexing the home, which would destroy the town.
 capturedTownJoinsNation: false
 
+# with capturedTownJoinsNation: the captured town keeps only its home territory,
+# all its other territories are annexed by the attacker
+onlyKeepCapital: false
+
+# can claim territory / change the nation capital while war is on
+canClaimDuringWar: true
+canSetCapitalDuringWar: true
+# false = a nation with enemies cannot change its capital
+canSetCapitalIfEnemies: true
+
+# false = chests, barrels and shulker boxes are not destroyed by explosions
+explodeChests: true
+
+# war declarations are refused when the closest towns of the two sides are farther apart
+# than warProximityDistance blocks (same idea as allyProximity)
+warProximity: false
+warProximityDistance: 1500.0
+
+# a new town's territory must be at least this many chunks from every other town's territories
+minimumDistanceForNewTown: false
+minimumDistanceForNewTownVal: 32
+
+# hidden ore (ore blocks give the territory's ores) and whether silk touch can trigger it
+hiddenOreMechanic: true
+hiddenOreSilktouch: false
+
+# chat: lines starting with > turn green, and text put in front of every player's name (& colors)
+greenText: true
+chatPrefix: ""
+
 # can only annex territories during war time
 canOnlyAnnexDuringWar: true
 
@@ -799,6 +829,11 @@ economy:
   upkeep:
     townPerClaimPerDay: '0'
     nationPerTownPerDay: '0'
+  # plunder when a town's home is captured (0 = off): the attacker's town takes perClaimPower for
+  # every claim power the captured town used, at most maxPercentOfTreasury of its treasury
+  plunder:
+    perClaimPower: '0'
+    maxPercentOfTreasury: 50
   # port warp fees (/port fee): fees are paid from the wallet into the port owner town's
   # treasury. maxFee is the highest fee an owner may set.
   ports:

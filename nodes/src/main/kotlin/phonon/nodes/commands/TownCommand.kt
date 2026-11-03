@@ -429,6 +429,21 @@ public class TownCommand :
             return
         }
 
+        if (Config.minimumDistanceForNewTown) {
+            val limit = Config.minimumDistanceForNewTownVal
+            val core = territory.core
+            val near = Nodes.towns.values.firstOrNull { other ->
+                other.territories.any { id ->
+                    val c = Nodes.getTerritoryFromId(id)?.core
+                    c != null && Math.hypot((c.x - core.x).toDouble(), (c.z - core.z).toDouble()) < limit
+                }
+            }
+            if (near != null) {
+                Message.error(player, "This is too close to the town ${near.name}: towns must be at least $limit chunks apart")
+                return
+            }
+        }
+
         val creationCost = EconomyCosts.townCreationCost()
         if (!EconomyCosts.walletCovers(player, creationCost)) {
             Message.error(player, "Creating a town costs ${EconomyCosts.show(creationCost)} from your wallet. See /economy balance player")
@@ -1374,6 +1389,11 @@ public class TownCommand :
         val territory = Nodes.getTerritoryFromBlock(loc.x.toInt(), loc.z.toInt())
         if (territory == null) {
             Message.error(player, "This chunk has no territory")
+            return
+        }
+
+        if (!Config.canClaimDuringWar && Nodes.war.enabled == true) {
+            Message.error(player, "Cannot claim territory during war")
             return
         }
 

@@ -1020,6 +1020,7 @@ public object FlagWar {
                     Config.capturedTownJoinsNation && townMayBeTakenOver(attackerTown, defenderTown)
                 ) {
                     // the town survives: it gets its land back and joins the attacker's nation
+                    plunderTown(attackerTown, defenderTown)
                     Nodes.releaseTerritory(territory)
                     val oldNation = defenderTown.nation
                     if (oldNation != null) {
@@ -1030,6 +1031,15 @@ public object FlagWar {
                             "${ChatColor.DARK_RED}[War] ${defenderTown.name} was captured and joined the nation ${attackerNation.name}!",
                         )
                     }
+                    if (Config.onlyKeepCapital) {
+                        // the town keeps only its home; its other territories go to the attacker
+                        for (id in defenderTown.territories.toList()) {
+                            if (id == defenderTown.home) continue
+                            val other = Nodes.getTerritoryFromId(id) ?: continue
+                            Nodes.captureTerritory(attackerTown, other)
+                            Nodes.annexTerritory(attackerTown, other)
+                        }
+                    }
                 } else if (defenderTown != null &&
                     wasHome && Config.instantAnnexOnCapture &&
                     FlagWar.canAnnexTerritories &&
@@ -1037,6 +1047,9 @@ public object FlagWar {
                     townMayBeTakenOver(attackerTown, defenderTown) &&
                     !phonon.nodes.war.Warzone.isEnabledWarzoneTown(defenderTown)
                 ) {
+                    if (wasHome) {
+                        plunderTown(attackerTown, defenderTown)
+                    }
                     Nodes.annexTerritory(attackerTown, territory)
                 }
                 Nodes.renderMinimaps()
@@ -1102,6 +1115,16 @@ public object FlagWar {
         if (FlagWar.chunkToAttacker.isEmpty()) {
             FlagWar.attackTickTask?.cancel()
             FlagWar.attackTickTask = null
+        }
+    }
+
+    // takes the plunder (economy.plunder) from a town whose home was just captured
+    private fun plunderTown(attacker: Town, defender: Town) {
+        val taken = phonon.nodes.economy.EconomyCosts.plunder(defender, attacker, defender.claimsUsed)
+        if (taken > 0) {
+            Message.broadcast(
+                "${ChatColor.GOLD}[War] ${attacker.name} plundered ${phonon.nodes.economy.EconomyCosts.show(taken)} from ${defender.name}!",
+            )
         }
     }
 

@@ -72,7 +72,7 @@ public object Chat {
 
     public fun process(event: AsyncPlayerChatEvent) {
         val msg = event.getMessage()
-        if (msg.get(0) == '>') {
+        if (Config.greenText && msg.isNotEmpty() && msg[0] == '>') {
             event.setMessage("${colorGreen}$msg")
         }
 
@@ -165,6 +165,11 @@ public object Chat {
     }
 
     public fun formatResidentName(resident: Resident): String {
+        // chatPrefix goes in front of every name; '%' is escaped because the result is a chat format string
+        return Config.chatPrefix.replace("%", "%%") + formatResidentNameBase(resident)
+    }
+
+    private fun formatResidentNameBase(resident: Resident): String {
         val town = resident.town
         val nation = resident.nation
 

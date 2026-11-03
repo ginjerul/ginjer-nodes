@@ -413,6 +413,30 @@ public object Config {
     // a captured town (home territory taken) joins the attacker's nation instead of being annexed
     public var capturedTownJoinsNation: Boolean = false
 
+    // with capturedTownJoinsNation: the town keeps only its home territory, the rest goes to the attacker
+    public var onlyKeepCapital: Boolean = false
+
+    // war declarations limited by the distance between the two sides' towns (like allyProximity)
+    public var warProximity: Boolean = false
+    public var warProximityDistance: Double = 1500.0
+
+    // new towns must be this many chunks from every other town's territory
+    public var minimumDistanceForNewTown: Boolean = false
+    public var minimumDistanceForNewTownVal: Int = 32
+
+    public var canClaimDuringWar: Boolean = true
+    public var canSetCapitalDuringWar: Boolean = true
+    public var canSetCapitalIfEnemies: Boolean = true
+
+    // false keeps chests, barrels and shulker boxes out of explosions
+    public var explodeChests: Boolean = true
+
+    public var hiddenOreMechanic: Boolean = true
+    public var hiddenOreSilktouch: Boolean = false
+
+    public var greenText: Boolean = true
+    public var chatPrefix: String = ""
+
     // use whitelist/blacklist for war (derived from list.size > 0 for lists below)
     public var warUseWhitelist: Boolean = false
     public var warUseBlacklist: Boolean = false
@@ -794,6 +818,19 @@ public object Config {
         Config.annexDisabled = config.getBoolean("annexDisabled", Config.annexDisabled)
         Config.instantAnnexOnCapture = config.getBoolean("instantAnnexOnCapture", Config.instantAnnexOnCapture)
         Config.capturedTownJoinsNation = config.getBoolean("capturedTownJoinsNation", Config.capturedTownJoinsNation)
+        Config.onlyKeepCapital = config.getBoolean("onlyKeepCapital", Config.onlyKeepCapital)
+        Config.warProximity = config.getBoolean("warProximity", Config.warProximity)
+        Config.warProximityDistance = config.getDouble("warProximityDistance", Config.warProximityDistance).coerceAtLeast(0.0)
+        Config.minimumDistanceForNewTown = config.getBoolean("minimumDistanceForNewTown", Config.minimumDistanceForNewTown)
+        Config.minimumDistanceForNewTownVal = config.getInt("minimumDistanceForNewTownVal", Config.minimumDistanceForNewTownVal).coerceAtLeast(0)
+        Config.canClaimDuringWar = config.getBoolean("canClaimDuringWar", Config.canClaimDuringWar)
+        Config.canSetCapitalDuringWar = config.getBoolean("canSetCapitalDuringWar", Config.canSetCapitalDuringWar)
+        Config.canSetCapitalIfEnemies = config.getBoolean("canSetCapitalIfEnemies", Config.canSetCapitalIfEnemies)
+        Config.explodeChests = config.getBoolean("explodeChests", Config.explodeChests)
+        Config.hiddenOreMechanic = config.getBoolean("hiddenOreMechanic", Config.hiddenOreMechanic)
+        Config.hiddenOreSilktouch = config.getBoolean("hiddenOreSilktouch", Config.hiddenOreSilktouch)
+        Config.greenText = config.getBoolean("greenText", Config.greenText)
+        Config.chatPrefix = (config.getString("chatPrefix", "") ?: "").replace('&', '\u00a7')
 
         Config.warWhitelist = parseUUIDSet(config, "warWhitelist")
         Config.warUseWhitelist = Config.warWhitelist.size > 0

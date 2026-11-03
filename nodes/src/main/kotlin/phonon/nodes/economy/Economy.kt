@@ -167,6 +167,8 @@ object Economy {
     internal var portMaxFee = 100_000L
     internal var townCreationCost = 0L
     internal var claimCostPerPower = 0L
+    internal var plunderPerPower = 0L
+    internal var plunderMaxPercent = 50.0
     internal var townUpkeepPerClaim = 0L
     internal var nationUpkeepPerTown = 0L
 
@@ -207,6 +209,8 @@ object Economy {
         portMaxFee = if (maxFee > 0) maxFee else 100_000L
         townCreationCost = optionalMoney(sec.get("costs.townCreation"), "costs.townCreation")
         claimCostPerPower = optionalMoney(sec.get("costs.territoryClaimPerPower"), "costs.territoryClaimPerPower")
+        plunderPerPower = optionalMoney(sec.get("plunder.perClaimPower"), "plunder.perClaimPower")
+        plunderMaxPercent = sec.getDouble("plunder.maxPercentOfTreasury", 50.0).coerceIn(0.0, 100.0)
         townUpkeepPerClaim = optionalMoney(sec.get("upkeep.townPerClaimPerDay"), "upkeep.townPerClaimPerDay")
         nationUpkeepPerTown = optionalMoney(sec.get("upkeep.nationPerTownPerDay"), "upkeep.nationPerTownPerDay")
         sellPrices = readPrices(sec.getConfigurationSection("sell.prices"), "sell.prices")
