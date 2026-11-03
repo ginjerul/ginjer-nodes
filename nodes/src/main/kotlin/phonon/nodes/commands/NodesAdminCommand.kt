@@ -31,6 +31,8 @@ import phonon.nodes.objects.Resident
 import phonon.nodes.objects.Territory
 import phonon.nodes.objects.TerritoryId
 import phonon.nodes.objects.Town
+import phonon.nodes.ports.PortRequestMenu
+import phonon.nodes.ports.PortRequests
 import phonon.nodes.utils.sanitizeString
 import phonon.nodes.utils.string.filterByStart
 import phonon.nodes.utils.string.filterNation
@@ -98,6 +100,9 @@ private val PORT_SUBCOMMANDS: List<String> = listOf(
     "delete",
     "addgroup",
     "removegroup",
+    "group",
+    "list",
+    "requests",
 )
 
 private val PORTGROUP_SUBCOMMANDS: List<String> = listOf(
@@ -425,6 +430,8 @@ public class NodesAdminCommand :
                             -> {
                                 return filterPort(args[2])
                             }
+                            "group" -> return filterByStart(listOf("add", "remove"), args[2])
+                            "requests" -> return filterByStart(PortRequests.all().map { it.name }, args[2])
                         }
                     } else if (args[1].lowercase() == "create") {
                         when (args.size) {
@@ -442,7 +449,11 @@ public class NodesAdminCommand :
                             -> {
                                 return filterPortGroup(args[3])
                             }
+                            "group" -> return filterPort(args[3])
+                            "requests" -> return filterByStart(listOf("approve", "deny"), args[3])
                         }
+                    } else if (args.size == 5 && args[1].lowercase() == "group") {
+                        return filterPortGroup(args[4])
                     }
                 }
 
@@ -915,6 +926,9 @@ public class NodesAdminCommand :
                 "delete" -> deletePort(sender, args)
                 "addgroup" -> addPortGroup(sender, args)
                 "removegroup" -> removePortGroup(sender, args)
+                "group" -> portGroupAlias(sender, args)
+                "list" -> listPorts(sender)
+                "requests" -> portRequests(sender, args)
                 else -> printPortHelp(sender)
             }
         }
@@ -925,6 +939,74 @@ public class NodesAdminCommand :
         Message.print(sender, "${ChatColor.AQUA}/nodesadmin port delete [name]${ChatColor.WHITE}: Delete a port")
         Message.print(sender, "${ChatColor.AQUA}/nodesadmin port addgroup [port] [group]${ChatColor.WHITE}: Add a port to a group")
         Message.print(sender, "${ChatColor.AQUA}/nodesadmin port removegroup [port] [group]${ChatColor.WHITE}: Remove a port from a group")
+        Message.print(sender, "${ChatColor.AQUA}/nodesadmin port group add|remove [port] [group]${ChatColor.WHITE}: Same as addgroup / removegroup")
+        Message.print(sender, "${ChatColor.AQUA}/nodesadmin port list${ChatColor.WHITE}: List all ports with owner and groups")
+        Message.print(sender, "${ChatColor.AQUA}/nodesadmin port requests${ChatColor.WHITE}: Menu of port requests, click one to teleport there")
+        Message.print(sender, "${ChatColor.AQUA}/nodesadmin port requests [name] approve|deny [reason]${ChatColor.WHITE}: Decide a request")
+    }
+
+    private fun listPorts(sender: CommandSender) {
+        Message.print(sender, "${ChatColor.AQUA}${ChatColor.BOLD}Ports (${Nodes.ports.size}):")
+        for (port in Nodes.ports.values.sortedBy { it.name }) {
+            val owner = Nodes.getPortOwner(port)?.name ?: "${ChatColor.GRAY}none"
+            val groups = if (port.groups.isEmpty()) "no groups" else port.groups.joinToString(", ") { it.name }
+            val kind = if (port.isPublic) " (public)" else ""
+            Message.print(sender, "${ChatColor.AQUA}${port.name} ${ChatColor.WHITE}(${port.locX}, ${port.locZ}) owner: $owner - $groups$kind")
+        }
+    }
+
+    // /nodesadmin port group add|remove [port] [group] runs addgroup / removegroup
+    private fun portGroupAlias(sender: CommandSender, args: Array<String>) {
+        val action = args.getOrNull(2)?.lowercase()
+        if (args.size < 5 || (action != "add" && action != "remove")) {
+            Message.error(sender, "Usage: /nodesadmin port group add|remove [port] [group]")
+            return
+        }
+        val mapped = arrayOf("port", if (action == "add") "addgroup" else "removegroup", args[3], args[4])
+        if (action == "add") addPortGroup(sender, mapped) else removePortGroup(sender, mapped)
+    }
+
+    private fun portRequests(sender: CommandSender, args: Array<String>) {
+        if (args.size == 2) {
+            val requests = PortRequests.all()
+            if (requests.isEmpty()) {
+                Message.print(sender, "No port requests")
+                return
+            }
+            if (sender is Player) {
+                PortRequestMenu.open(sender)
+                return
+            }
+            requests.forEach {
+                Message.print(sender, "${ChatColor.AQUA}${it.name} ${ChatColor.WHITE}${it.townName} (${it.x}, ${it.z}) by ${it.requesterName}")
+            }
+            return
+        }
+        if (args.size < 4) {
+            Message.error(sender, "Usage: /nodesadmin port requests [name] approve|deny [reason]")
+            return
+        }
+        when (args[3].lowercase()) {
+            "approve" -> {
+                val error = PortRequests.approve(args[2], sender)
+                if (error !== null) {
+                    Message.error(sender, error)
+                } else {
+                    Message.print(sender, "${ChatColor.GREEN}Approved: port \"${args[2].lowercase()}\" created. Add it to groups with /nodesadmin port addgroup if needed")
+                }
+            }
+
+            "deny" -> {
+                val error = PortRequests.deny(args[2], args.drop(4).joinToString(" "), sender)
+                if (error !== null) {
+                    Message.error(sender, error)
+                } else {
+                    Message.print(sender, "Denied port request \"${args[2].lowercase()}\"")
+                }
+            }
+
+            else -> Message.error(sender, "Usage: /nodesadmin port requests [name] approve|deny [reason]")
+        }
     }
 
     /**
@@ -940,6 +1022,10 @@ public class NodesAdminCommand :
 
         val portName = args[2].lowercase()
 
+        if (args.size < 5) {
+            Message.error(sender, "Usage: /nodesadmin port create [name] [x] [z]")
+            return
+        }
         val x = args[3].toIntOrNull()
         val z = args[4].toIntOrNull()
         if (x === null || z === null) {

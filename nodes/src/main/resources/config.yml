@@ -388,6 +388,20 @@ portWarpTime: 5.0
 # allow port warp without a boat
 allowPortWarpWithoutBoat: false
 
+# warp time multiplier when warping without a boat or ship (1.0 = same as in a ship)
+portNotInShipMultiplier: 2.0
+
+# Beacon pillars that mark ports (off by default). A pillar is placed at each port's
+# x/z in the main world from startY upward, topped with light blocks. Deleting a port
+# removes its pillar.
+portBeacon:
+  enabled: false
+  pillarMaterial: BEDROCK
+  pillarHeight: 20
+  startY: 50
+  lightMaterial: BEACON
+  lightHeight: 1
+
 # ===========================================
 # Supply Lines
 # ===========================================
@@ -631,3 +645,7 @@ economy:
     enabled: true
     maxListingsPerPlayer: 10
     maxPrice: '1000000'
+  # port warp fees (/port fee): fees are paid from the wallet into the port owner town's
+  # treasury. maxFee is the highest fee an owner may set.
+  ports:
+    maxFee: '1000'

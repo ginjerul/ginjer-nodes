@@ -72,6 +72,7 @@ import phonon.nodes.objects.TerritoryResources
 import phonon.nodes.objects.Town
 import phonon.nodes.objects.TownOutpost
 import phonon.nodes.objects.TownPair
+import phonon.nodes.ports.PortBeacons
 import phonon.nodes.serdes.Deserializer
 import phonon.nodes.supply.SupplyLines
 import phonon.nodes.tasks.OverMaxClaimsReminder
@@ -3122,6 +3123,7 @@ public object Nodes {
     }
 
     public fun destroyPort(port: Port) {
+        PortBeacons.remove(port)
         Nodes.ports.remove(port.name)
 
         val chunk = listOf(Math.floorDiv(port.locX, 16), Math.floorDiv(port.locZ, 16))
@@ -3171,6 +3173,7 @@ public object Nodes {
 
         port.needsUpdate()
         needsSave = true
+        PortBeacons.place(port)
 
         return Result.success(port)
     }

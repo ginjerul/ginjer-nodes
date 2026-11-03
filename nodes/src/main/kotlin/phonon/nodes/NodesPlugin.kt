@@ -72,6 +72,9 @@ import phonon.nodes.listeners.WarzoneBossBarListener
 import phonon.nodes.mining.MiningBoost
 import phonon.nodes.mining.MiningTowers
 import phonon.nodes.plot.Plots
+import phonon.nodes.ports.PortBeacons
+import phonon.nodes.ports.PortRequestMenuListener
+import phonon.nodes.ports.PortRequests
 import phonon.nodes.refinery.Refineries
 import phonon.nodes.refinery.RefineryGuiListener
 import phonon.nodes.stats.PlayerStats
@@ -168,6 +171,7 @@ public class NodesPlugin : JavaPlugin() {
         pluginManager.registerEvents(FortTreasuryListener(), this)
         pluginManager.registerEvents(BountyListener(), this)
         pluginManager.registerEvents(EconomyMenuListener(), this)
+        pluginManager.registerEvents(PortRequestMenuListener(), this)
 
         this.getCommand("town")?.setExecutor(TownCommand())
         this.getCommand("nation")?.setExecutor(NationCommand())
@@ -261,6 +265,9 @@ public class NodesPlugin : JavaPlugin() {
         Bounties.load()
         Economy.load()
         VoteHook.register(this)
+        PortRequests.load()
+        // beacon pillars are placed once the worlds are up
+        server.scheduler.runTaskLater(this, Runnable { PortBeacons.placeAll() }, 100L)
 
         // queued bounty rewards retry every 10s, economy settles loans, upkeep and routes
         server.scheduler.runTaskTimer(this, Runnable { Bounties.deliverPending(null) }, 200L, 200L)

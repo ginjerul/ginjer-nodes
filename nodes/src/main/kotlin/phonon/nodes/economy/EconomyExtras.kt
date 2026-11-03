@@ -282,6 +282,19 @@ object EconomyExtras {
     }
 
     // ===================================
+    // port warp fees (paid from the wallet into the port owner's town treasury)
+    // ===================================
+    fun canPay(player: Player, cents: Long): Boolean = Economy.balance(wallet(player.uniqueId)) >= cents
+
+    fun payPortFee(player: Player, owner: phonon.nodes.objects.Town, cents: Long, portName: String) {
+        val from = wallet(player.uniqueId)
+        Economy.transaction {
+            Economy.requireAvailable(from)
+            Economy.move(from, "town-${owner.uuid}", cents, "port-fee $portName")
+        }
+    }
+
+    // ===================================
     // leaderboards
     // ===================================
     fun topPlayers(limit: Int): List<String> {

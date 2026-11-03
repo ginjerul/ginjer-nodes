@@ -10,7 +10,11 @@ import phonon.nodes.Message
 import phonon.nodes.Nodes
 import phonon.nodes.commands.progressBar
 import phonon.nodes.commands.warpToPort
+import phonon.nodes.economy.Economy
+import phonon.nodes.economy.EconomyException
+import phonon.nodes.economy.EconomyExtras
 import phonon.nodes.objects.Port
+import phonon.nodes.objects.Town
 
 public class PortWarpTask(
     val player: Player,
@@ -20,6 +24,8 @@ public class PortWarpTask(
     val initialLoc: Location,
     val timeWarp: Double,
     val tick: Double,
+    val fee: Long = 0L,
+    val feeOwner: Town? = null,
 ) : BukkitRunnable() {
     private val locX = initialLoc.getBlockX()
     private val locY = initialLoc.getBlockY()
@@ -55,6 +61,17 @@ public class PortWarpTask(
                 object : Runnable {
                     public override fun run() {
                         Nodes.playerWarpTasks.remove(player.getUniqueId())
+
+                        // the fee is only charged when the warp actually happens
+                        if (fee > 0 && feeOwner !== null) {
+                            try {
+                                EconomyExtras.payPortFee(player, feeOwner, fee, destination.name)
+                            } catch (e: EconomyException) {
+                                Message.error(player, e.message ?: "Could not pay the port fee")
+                                return
+                            }
+                            Message.print(player, "Paid ${Economy.show(fee)} port fee to ${feeOwner.name}")
+                        }
 
                         warpToPort(
                             destination,

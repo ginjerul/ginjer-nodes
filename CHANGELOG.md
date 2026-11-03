@@ -11,6 +11,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Ore bounties (`/bounty`): players fund bounties on other players with real ores or items from their inventory. The killer's reward goes to their town income or their inventory. Options are under `bounties:` in the config.
 - Economy (`/economy`, `/economyadmin`): nation, town, personal and business accounts, recurring trade routes between nations, loans from a funded reserve and infrastructure upkeep. Options are under `economy:` in the config. Based on the NodesEconomy prototype, rewritten as part of Nodes with no extra dependencies.
 - Economy: sell items to the server (`/economy sell`, `/economy prices`), a player market (`/economy market`), richest lists (`/economy top`), a menu (`/economy menu`), vote rewards (NuVotifier/Votifier or `/economyadmin vote`), and optional transfer/market fees and a daily town tax.
+- Ports: owners control who may warp (`/port allow`) and set a money fee per group (`/port fee`) that is paid into the owner town's treasury. Warping without a ship takes `portNotInShipMultiplier` times longer, and optional beacon pillars mark ports (`portBeacon:`). Replaces the separate ports addon: do not run it next to Nodes.
+- Port requests: a town leader or officer files `/port request <name>` where the port should be. Admins use `/nda port requests` (a menu that teleports to each request, then `approve` or `deny`), `/nda port list` and `/nda port group add|remove`.
 - Bounties can be paid in money: `/bounty addmoney <player> <amount>`. The money is held in escrow until the target is killed.
 
 ## [0.1.0] – 2026-11-02

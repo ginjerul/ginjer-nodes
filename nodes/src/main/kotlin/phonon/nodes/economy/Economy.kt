@@ -156,6 +156,7 @@ object Economy {
     internal var marketEnabled = true
     internal var marketMaxListings = 10
     internal var marketMaxPrice = 100_000_000L
+    internal var portMaxFee = 100_000L
 
     internal var state = EcoState()
     private var failed = false
@@ -190,6 +191,8 @@ object Economy {
         marketMaxListings = sec.getInt("market.maxListingsPerPlayer", 10).coerceIn(1, 100)
         val maxPrice = optionalMoney(sec.get("market.maxPrice"), "market.maxPrice")
         marketMaxPrice = if (maxPrice > 0) maxPrice else 100_000_000L
+        val maxFee = optionalMoney(sec.get("ports.maxFee"), "ports.maxFee")
+        portMaxFee = if (maxFee > 0) maxFee else 100_000L
         val prices = LinkedHashMap<Material, Long>()
         val priceSec = sec.getConfigurationSection("sell.prices")
         if (priceSec != null) {

@@ -16,6 +16,16 @@ data class Port(
     val chunkX = Math.floorDiv(locX, 16)
     val chunkZ = Math.floorDiv(locZ, 16)
 
+    // who may warp here when the port is owned, and what they pay (cents, 0 = free).
+    // Owner town and nation members always warp free. Defaults match the old rule:
+    // allies only.
+    var allowAlly: Boolean = true
+    var allowNeutral: Boolean = false
+    var allowEnemy: Boolean = false
+    var costAlly: Long = 0L
+    var costNeutral: Long = 0L
+    var costEnemy: Long = 0L
+
     private var saveState: PortSaveState
 
     @Suppress("PropertyName")
@@ -31,6 +41,12 @@ data class Port(
         public val locZ = p.locZ
         public val groups = p.groups
         public val isPublic = p.isPublic
+        public val allowAlly = p.allowAlly
+        public val allowNeutral = p.allowNeutral
+        public val allowEnemy = p.allowEnemy
+        public val costAlly = p.costAlly
+        public val costNeutral = p.costNeutral
+        public val costEnemy = p.costEnemy
 
         public override var jsonString: String? = null
 
@@ -43,7 +59,13 @@ data class Port(
                     "\"x\":$locX," +
                     "\"z\":$locZ," +
                     "\"groups\":$groupsJson," +
-                    "\"isPublic\":$isPublic" +
+                    "\"isPublic\":$isPublic," +
+                    "\"allowAlly\":$allowAlly," +
+                    "\"allowNeutral\":$allowNeutral," +
+                    "\"allowEnemy\":$allowEnemy," +
+                    "\"costAlly\":$costAlly," +
+                    "\"costNeutral\":$costNeutral," +
+                    "\"costEnemy\":$costEnemy" +
                     "}"
                 )
 

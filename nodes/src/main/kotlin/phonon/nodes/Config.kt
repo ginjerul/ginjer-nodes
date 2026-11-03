@@ -17,6 +17,7 @@ import phonon.nodes.fortify.FortLevel
 import phonon.nodes.fortify.Fortifications
 import phonon.nodes.objects.OreDeposit
 import phonon.nodes.objects.TerritoryResources
+import phonon.nodes.ports.PortBeacons
 import java.nio.file.Paths
 import java.util.EnumMap
 import java.util.EnumSet
@@ -468,6 +469,7 @@ public object Config {
     public var seaLevel: Double = 62.0
     public var portWarpTime: Double = 5.0 * 20.0 // in ticks
     public var allowPortWarpWithoutBoat: Boolean = false
+    public var portNotInShipMultiplier: Double = 2.0
 
     // ===================================
     // Discord webhooks (empty = disabled)
@@ -764,6 +766,8 @@ public object Config {
         Config.seaLevel = config.getDouble("seaLevel", Config.seaLevel)
         Config.portWarpTime = config.getDouble("portWarpTime", Config.portWarpTime) * 20.0 // time is in seconds, convert to ticks
         Config.allowPortWarpWithoutBoat = config.getBoolean("allowPortWarpWithoutBoat", Config.allowPortWarpWithoutBoat)
+        Config.portNotInShipMultiplier = config.getDouble("portNotInShipMultiplier", Config.portNotInShipMultiplier).coerceIn(1.0, 20.0)
+        PortBeacons.loadConfig(config)
 
         Config.discordWebhookFlagWar = config.getString("discordWebhookFlagWar", Config.discordWebhookFlagWar)?.trim() ?: ""
         Config.discordWebhookWar = config.getString("discordWebhookWar", Config.discordWebhookWar)?.trim() ?: ""
