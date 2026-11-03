@@ -1016,10 +1016,26 @@ public object FlagWar {
                     "**[Flag]** ${attacker?.name} captured territory `${territory.id}` from ${defenderTown?.name}",
                 )
 
-                if (wasHome &&
-                    defenderTown != null &&
+                if (defenderTown != null && wasHome && attackerNation != null &&
+                    Config.capturedTownJoinsNation && townMayBeTakenOver(attackerTown, defenderTown)
+                ) {
+                    // the town survives: it gets its land back and joins the attacker's nation
+                    Nodes.releaseTerritory(territory)
+                    val oldNation = defenderTown.nation
+                    if (oldNation != null) {
+                        Nodes.removeTownFromNation(oldNation, defenderTown)
+                    }
+                    if (Nodes.addTownToNation(attackerNation, defenderTown).isSuccess) {
+                        Message.broadcast(
+                            "${ChatColor.DARK_RED}[War] ${defenderTown.name} was captured and joined the nation ${attackerNation.name}!",
+                        )
+                    }
+                } else if (defenderTown != null &&
+                    (wasHome || Config.instantAnnexOnCapture) &&
                     FlagWar.canAnnexTerritories &&
-                    !Config.annexDisabled
+                    !Config.annexDisabled &&
+                    townMayBeTakenOver(attackerTown, defenderTown) &&
+                    !phonon.nodes.war.Warzone.isEnabledWarzoneTown(defenderTown)
                 ) {
                     Nodes.annexTerritory(attackerTown, territory)
                 }
@@ -1087,6 +1103,17 @@ public object FlagWar {
             FlagWar.attackTickTask?.cancel()
             FlagWar.attackTickTask = null
         }
+    }
+
+    // blacklists and whitelists that also apply to annexing and taking over towns
+    internal fun townMayBeTakenOver(attacker: Town, defender: Town): Boolean {
+        if (Config.warUseBlacklist && Config.warBlacklist.contains(defender.uuid)) return false
+        if (Config.useAnnexBlacklist && Config.annexBlacklist.contains(defender.uuid)) return false
+        if (Config.warUseWhitelist) {
+            if (!Config.warWhitelist.contains(defender.uuid)) return false
+            if (Config.onlyWhitelistCanAnnex && !Config.warWhitelist.contains(attacker.uuid)) return false
+        }
+        return true
     }
 
     internal fun shouldShowBossBar(player: Player, flagBlock: Block): Boolean {

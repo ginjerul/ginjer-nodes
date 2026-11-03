@@ -407,6 +407,12 @@ public object Config {
 
     public var annexDisabled: Boolean = false
 
+    // annex every captured territory right away, not only a town's home
+    public var instantAnnexOnCapture: Boolean = false
+
+    // a captured town (home territory taken) joins the attacker's nation instead of being annexed
+    public var capturedTownJoinsNation: Boolean = false
+
     // use whitelist/blacklist for war (derived from list.size > 0 for lists below)
     public var warUseWhitelist: Boolean = false
     public var warUseBlacklist: Boolean = false
@@ -786,6 +792,8 @@ public object Config {
         Config.canDestroyTownDuringWar = config.getBoolean("canDestroyTownDuringWar", Config.canDestroyTownDuringWar)
         Config.canLeaveNationDuringWar = config.getBoolean("canLeaveNationDuringWar", Config.canLeaveNationDuringWar)
         Config.annexDisabled = config.getBoolean("annexDisabled", Config.annexDisabled)
+        Config.instantAnnexOnCapture = config.getBoolean("instantAnnexOnCapture", Config.instantAnnexOnCapture)
+        Config.capturedTownJoinsNation = config.getBoolean("capturedTownJoinsNation", Config.capturedTownJoinsNation)
 
         Config.warWhitelist = parseUUIDSet(config, "warWhitelist")
         Config.warUseWhitelist = Config.warWhitelist.size > 0
