@@ -436,12 +436,6 @@ public object Deserializer {
                     isPublic,
                 )
                 if (portObject !== null) {
-                    portObject.allowAlly = port.get("allowAlly")?.asBoolean ?: true
-                    portObject.allowNeutral = port.get("allowNeutral")?.asBoolean ?: false
-                    portObject.allowEnemy = port.get("allowEnemy")?.asBoolean ?: false
-                    portObject.costAlly = port.get("costAlly")?.asLong ?: 0L
-                    portObject.costNeutral = port.get("costNeutral")?.asLong ?: 0L
-                    portObject.costEnemy = port.get("costEnemy")?.asLong ?: 0L
                     portObject.beaconY = port.get("beaconY")?.asInt
                     portObject.needsUpdate()
                 }

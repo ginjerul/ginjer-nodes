@@ -73,6 +73,7 @@ import phonon.nodes.mining.MiningBoost
 import phonon.nodes.mining.MiningTowers
 import phonon.nodes.plot.Plots
 import phonon.nodes.ports.PortBeacons
+import phonon.nodes.ports.PortPolicies
 import phonon.nodes.ports.PortRequestMenuListener
 import phonon.nodes.ports.PortRequests
 import phonon.nodes.refinery.Refineries
@@ -266,6 +267,7 @@ public class NodesPlugin : JavaPlugin() {
         Economy.load()
         VoteHook.register(this)
         PortRequests.load()
+        PortPolicies.load()
         // beacon pillars are placed once the worlds are up
         server.scheduler.runTaskLater(this, Runnable { PortBeacons.placeAll() }, 100L)
 

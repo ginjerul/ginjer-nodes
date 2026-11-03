@@ -25,6 +25,8 @@ import phonon.nodes.fortify.Fortifications
 import phonon.nodes.mining.MiningTowers
 import phonon.nodes.objects.Territory
 import phonon.nodes.objects.Town
+import phonon.nodes.ports.PortPolicies
+import phonon.nodes.ports.PortPolicy
 import phonon.nodes.ports.PortRequests
 import phonon.nodes.refinery.Refineries
 import phonon.nodes.supply.SupplyDrops
@@ -327,9 +329,11 @@ public object MapExporter {
 
     private fun exportFeatures() {
         val ports = Nodes.ports.values.map { p ->
+            val owner = safe { Nodes.getPortOwner(p) }
+            val policy = owner?.let { PortPolicies.of(it) } ?: PortPolicy()
             PortInfo(
-                p.name, p.locX, p.locZ, p.groups.map { it.name }, p.isPublic, safe { Nodes.getPortOwner(p)?.name },
-                p.allowAlly, p.allowNeutral, p.allowEnemy, p.costAlly, p.costNeutral, p.costEnemy,
+                p.name, p.locX, p.locZ, p.groups.map { it.name }, p.isPublic, owner?.name,
+                policy.allowAlly, policy.allowNeutral, policy.allowEnemy, policy.costAlly, policy.costNeutral, policy.costEnemy,
             )
         }
         val portRequests = safe { PortRequests.all().map { PortRequestInfo(it.name, it.x, it.z, it.townName) } } ?: emptyList()
