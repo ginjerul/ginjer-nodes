@@ -1016,8 +1016,7 @@ public object FlagWar {
                     "**[Flag]** ${attacker?.name} captured territory `${territory.id}` from ${defenderTown?.name}",
                 )
 
-                val joinsNation = defenderTown != null && wasHome && attackerNation != null &&
-                    Config.capturedTownJoinsNation && townMayBeTakenOver(attackerTown, defenderTown)
+                val joinsNation = wasHome && defenderTown != null && joinsAttackerNation(attackerTown, defenderTown)
                 if (joinsNation && defenderTown != null && attackerNation != null) {
                     // the town survives: it gets its land back and joins the attacker's nation
                     plunderTown(attackerTown, defenderTown)
@@ -1040,16 +1039,8 @@ public object FlagWar {
                             Nodes.annexTerritory(attackerTown, other)
                         }
                     }
-                } else if (defenderTown != null &&
-                    wasHome && Config.instantAnnexOnCapture &&
-                    FlagWar.canAnnexTerritories &&
-                    !Config.annexDisabled &&
-                    townMayBeTakenOver(attackerTown, defenderTown) &&
-                    !phonon.nodes.war.Warzone.isEnabledWarzoneTown(defenderTown)
-                ) {
-                    if (wasHome) {
-                        plunderTown(attackerTown, defenderTown)
-                    }
+                } else if (wasHome && defenderTown != null && annexesAtOnce(attackerTown, defenderTown)) {
+                    plunderTown(attackerTown, defenderTown)
                     Nodes.annexTerritory(attackerTown, territory)
                 }
                 Nodes.renderMinimaps()
@@ -1116,6 +1107,19 @@ public object FlagWar {
             FlagWar.attackTickTask?.cancel()
             FlagWar.attackTickTask = null
         }
+    }
+
+    // capturedTownJoinsNation applies: the attacker has a nation and the defender may be taken over
+    private fun joinsAttackerNation(attacker: Town, defender: Town): Boolean {
+        if (!Config.capturedTownJoinsNation || attacker.nation == null) return false
+        return townMayBeTakenOver(attacker, defender)
+    }
+
+    // instantAnnexOnCapture applies: annexing is on and the defender may be annexed right now
+    private fun annexesAtOnce(attacker: Town, defender: Town): Boolean {
+        if (!Config.instantAnnexOnCapture || !FlagWar.canAnnexTerritories || Config.annexDisabled) return false
+        if (phonon.nodes.war.Warzone.isEnabledWarzoneTown(defender)) return false
+        return townMayBeTakenOver(attacker, defender)
     }
 
     // takes the plunder (economy.plunder) from a town whose home was just captured
