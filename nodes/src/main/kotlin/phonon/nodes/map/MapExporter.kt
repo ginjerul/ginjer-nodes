@@ -25,6 +25,7 @@ import phonon.nodes.fortify.Fortifications
 import phonon.nodes.mining.MiningTowers
 import phonon.nodes.objects.Territory
 import phonon.nodes.objects.Town
+import phonon.nodes.ports.PortRequests
 import phonon.nodes.refinery.Refineries
 import phonon.nodes.supply.SupplyDrops
 import phonon.nodes.supply.SupplyLines
@@ -306,8 +307,32 @@ public object MapExporter {
 
     private class Pt(val id: String, val x: Int, val y: Int, val z: Int)
 
+    // port details copied on the main thread; owner is null for public or unowned ports
+    private class PortInfo(
+        val name: String,
+        val x: Int,
+        val z: Int,
+        val groups: List<String>,
+        val isPublic: Boolean,
+        val owner: String?,
+        val allowAlly: Boolean,
+        val allowNeutral: Boolean,
+        val allowEnemy: Boolean,
+        val costAlly: Long,
+        val costNeutral: Long,
+        val costEnemy: Long,
+    )
+
+    private class PortRequestInfo(val name: String, val x: Int, val z: Int, val town: String)
+
     private fun exportFeatures() {
-        val ports = Nodes.ports.values.map { p -> Triple(p, p.groups.map { it.name }, p.isPublic) }
+        val ports = Nodes.ports.values.map { p ->
+            PortInfo(
+                p.name, p.locX, p.locZ, p.groups.map { it.name }, p.isPublic, safe { Nodes.getPortOwner(p)?.name },
+                p.allowAlly, p.allowNeutral, p.allowEnemy, p.costAlly, p.costNeutral, p.costEnemy,
+            )
+        }
+        val portRequests = safe { PortRequests.all().map { PortRequestInfo(it.name, it.x, it.z, it.townName) } } ?: emptyList()
         val towers = safe {
             MiningTowers.towers.values.map { t -> Pair(Pt(t.id, t.x, t.y, t.z), Pair(t.cooldownSeconds, t.rewards.map { it.material.name to it.amount })) }
         } ?: emptyList()
@@ -322,13 +347,30 @@ public object MapExporter {
             val j = Json(8 * 1024)
             j.obj {
                 key("ports").arr {
-                    for ((p, groups, pub) in ports) {
+                    for (p in ports) {
                         obj {
                             key("name").str(p.name)
-                            key("x").num(p.locX)
-                            key("z").num(p.locZ)
-                            key("groups").strs(groups)
-                            key("public").bool(pub)
+                            key("x").num(p.x)
+                            key("z").num(p.z)
+                            key("groups").strs(p.groups)
+                            key("public").bool(p.isPublic)
+                            key("owner").strOrNull(p.owner)
+                            key("allowAlly").bool(p.allowAlly)
+                            key("allowNeutral").bool(p.allowNeutral)
+                            key("allowEnemy").bool(p.allowEnemy)
+                            key("costAlly").num(p.costAlly)
+                            key("costNeutral").num(p.costNeutral)
+                            key("costEnemy").num(p.costEnemy)
+                        }
+                    }
+                }
+                key("portRequests").arr {
+                    for (r in portRequests) {
+                        obj {
+                            key("name").str(r.name)
+                            key("x").num(r.x)
+                            key("z").num(r.z)
+                            key("town").str(r.town)
                         }
                     }
                 }

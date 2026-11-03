@@ -86,7 +86,7 @@
     ["Resources", ["resources"]],
     ["Players", ["players"]],
     ["War", ["war", "warzones", "raids"]],
-    ["Buildings", ["forts", "outposts", "ports", "towers", "refineries", "drops"]],
+    ["Buildings", ["forts", "outposts", "ports", "portRequests", "towers", "refineries", "drops"]],
     ["Chunk grid", ["chunks"]],
     ["Server borders", ["shards"]],
   ];
@@ -105,6 +105,7 @@
     ["forts", "Fortifications", true],
     ["outposts", "Outposts", true],
     ["ports", "Ports", true],
+    ["portRequests", "Port requests", false],
     ["towers", "Mining towers", true],
     ["refineries", "Refineries", true],
     ["drops", "Supply drops", true],
@@ -143,7 +144,7 @@
   };
 
   const G = {}; // layer groups by name
-  for (const k of ["terr", "occ", "borders", "zones", "townLabels", "nationLabels", "terrLabels", "terrIds", "resources", "players", "flags", "raids", "forts", "outposts", "ports", "towers", "refineries", "drops", "grid", "shards"]) {
+  for (const k of ["terr", "occ", "borders", "zones", "townLabels", "nationLabels", "terrLabels", "terrIds", "resources", "players", "flags", "raids", "forts", "outposts", "ports", "portRequests", "towers", "refineries", "drops", "grid", "shards"]) {
     G[k] = L.layerGroup();
   }
   const terrPolys = new Map(); // id -> L.Polygon
@@ -682,11 +683,22 @@
   };
 
   function drawFeatures() {
-    G.ports.clearLayers(); G.towers.clearLayers(); G.refineries.clearLayers(); G.drops.clearLayers();
+    G.ports.clearLayers(); G.portRequests.clearLayers(); G.towers.clearLayers(); G.refineries.clearLayers(); G.drops.clearLayers();
     const f = S.features || {};
+    // cents -> "1.50"; free when 0
+    const fee = (c) => (c > 0 ? (c / 100).toFixed(2) : "free");
     for (const p of f.ports || []) {
-      G.ports.addLayer(pin("port", `<img src="icons/anchor.png" alt="">`, ll(p.x, p.z),
-        `<b>${esc(p.name)}</b><br>${p.public ? "Public port" : "Port"}${p.groups?.length ? " · " + esc(p.groups.join(", ")) : ""}`));
+      let tip = `<b>${esc(p.name)}</b><br>${p.public ? "Public port" : "Port"}${p.groups?.length ? " · " + esc(p.groups.join(", ")) : ""}`;
+      if (!p.public) {
+        tip += `<br>Owner: ${p.owner ? esc(p.owner) : "none"}`;
+        const rel = [["Allies", p.allowAlly, p.costAlly], ["Neutral", p.allowNeutral, p.costNeutral], ["Enemies", p.allowEnemy, p.costEnemy]];
+        tip += "<br>" + rel.map(([n, ok, c]) => `${n}: ${ok ? fee(c) : "no access"}`).join(" · ");
+      }
+      G.ports.addLayer(pin("port", `<img src="icons/anchor.png" alt="">`, ll(p.x, p.z), tip));
+    }
+    for (const r of f.portRequests || []) {
+      G.portRequests.addLayer(pin("port request", `<img src="icons/anchor.png" alt="">`, ll(r.x, r.z),
+        `<b>${esc(r.name)}</b><br>Port request · ${esc(r.town)}<br>Waiting for staff approval`));
     }
     for (const t of f.towers || []) {
       const rewards = (t.rewards || []).map((r) => `${r.amount}× ${esc(prettyMat(r.material))}`).join("<br>");
@@ -1283,6 +1295,7 @@
       forts: prefs.layers.forts && z >= -1,
       outposts: prefs.layers.outposts && z >= -1,
       ports: prefs.layers.ports && z >= -2,
+      portRequests: prefs.layers.portRequests && z >= -2,
       towers: prefs.layers.towers && z >= -2,
       refineries: prefs.layers.refineries && z >= -2,
       drops: prefs.layers.drops,

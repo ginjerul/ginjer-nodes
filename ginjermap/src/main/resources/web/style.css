@@ -195,6 +195,7 @@ body.sidebar-closed #sidebar { transform: translateX(calc(-100% - 20px)); opacit
 .pin.drop.active { background: var(--accent); color: #1a1406; animation: bob 1.2s ease-in-out infinite; }
 .pin.outpost { width: 20px; height: 20px; border-width: 2px; }
 .pin.port { border-color: #6fc3df; }
+.pin.port.request { border-style: dashed; opacity: 0.75; }
 .pin.fort { width: 22px; height: 22px; border-radius: 6px; font: 700 11px var(--mono); color: #fff; }
 @keyframes bob { 0%,100% { transform: translate(-50%, -50%) } 50% { transform: translate(-50%, -62%) } }
 .res-icon { width: 18px; height: 18px; image-rendering: pixelated; transform: translate(-50%, -50%); filter: drop-shadow(0 1px 2px rgba(0,0,0,0.7)); pointer-events: none; }
