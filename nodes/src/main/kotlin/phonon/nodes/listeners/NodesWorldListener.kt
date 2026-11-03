@@ -797,10 +797,8 @@ private fun sparePlayerStorage(blocks: MutableList<Block>) {
     if (Config.explodeChests) {
         return
     }
-    blocks.removeIf {
-        it.type == Material.CHEST || it.type == Material.TRAPPED_CHEST || it.type == Material.BARREL ||
-            Tag.SHULKER_BOXES.isTagged(it.type)
-    }
+    val storage = setOf(Material.CHEST, Material.TRAPPED_CHEST, Material.BARREL)
+    blocks.removeIf { storage.contains(it.type) || Tag.SHULKER_BOXES.isTagged(it.type) }
 }
 
 private fun handleHiddenOre(player: Player, block: Block) {

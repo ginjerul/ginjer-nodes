@@ -1016,9 +1016,9 @@ public object FlagWar {
                     "**[Flag]** ${attacker?.name} captured territory `${territory.id}` from ${defenderTown?.name}",
                 )
 
-                if (defenderTown != null && wasHome && attackerNation != null &&
+                val joinsNation = defenderTown != null && wasHome && attackerNation != null &&
                     Config.capturedTownJoinsNation && townMayBeTakenOver(attackerTown, defenderTown)
-                ) {
+                if (joinsNation && defenderTown != null && attackerNation != null) {
                     // the town survives: it gets its land back and joins the attacker's nation
                     plunderTown(attackerTown, defenderTown)
                     Nodes.releaseTerritory(territory)
