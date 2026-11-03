@@ -41,13 +41,37 @@ object EconomyExtras {
     }
 
     // ===================================
-    // selling to the server
+    // selling to the server. Items on the exchange sell at the live price and
+    // add to the server's stock; other items sell at the fixed sell.prices.
     // ===================================
-    private fun unitPrice(item: ItemStack?): Long? {
-        if (item == null || item.hasItemMeta()) {
-            return null
+    private fun buys(material: Material): Boolean = Exchange.has(material) || Economy.sellPrices.containsKey(material)
+
+    private fun buys(item: ItemStack?): Boolean = item != null && !item.hasItemMeta() && buys(item.type)
+
+    // pays out for the items; call inside a transaction. Exchange items move the server's stock.
+    private fun payout(counts: Map<Material, Int>): Long {
+        var total = 0L
+        for ((material, amount) in counts) {
+            val part = if (Exchange.has(material)) {
+                Exchange.sell(material, amount)
+            } else {
+                Math.multiplyExact(Economy.sellPrices[material] ?: 0L, amount.toLong())
+            }
+            total = Math.addExact(total, part)
         }
-        return Economy.sellPrices[item.type]
+        if (total <= 0) {
+            throw EconomyException("That is worth nothing right now")
+        }
+        return total
+    }
+
+    // counts and ledger entry shared by every way of selling
+    private fun settleSale(key: String, to: String, counts: Map<Material, Int>): Long = Economy.transaction {
+        val total = payout(counts)
+        addSold(key, total)
+        Economy.credit(to, total)
+        Economy.log("item-sale", "issuance", to, total)
+        total
     }
 
     // counts what a player or town sold today and refuses sales over the daily limit
@@ -68,21 +92,52 @@ object EconomyExtras {
         sold.cents += cents
     }
 
-    fun prices(): List<String> = Economy.sellPrices.entries
-        .sortedBy { it.key.name }
-        .map { "${it.key.name}: ${show(it.value)} each" }
+    private fun trendWord(material: Material): String = when (Exchange.trend(material)) {
+        1 -> "rising"
+        -1 -> "falling"
+        else -> "steady"
+    }
+
+    // one row per item the server buys or sells
+    class ShopEntry(
+        val material: Material,
+        val buyPrice: Long?,
+        val sellPrice: Long?,
+        val stock: Long?,
+        val target: Long?,
+        val trend: Int,
+    )
+
+    fun shopEntries(): List<ShopEntry> {
+        val materials = HashSet<Material>()
+        materials.addAll(Exchange.materials())
+        materials.addAll(Economy.shopPrices.keys)
+        materials.addAll(Economy.sellPrices.keys)
+        return materials.sortedBy { it.name }.map { material ->
+            if (Exchange.has(material)) {
+                ShopEntry(material, Exchange.nextBuy(material), Exchange.nextSell(material), Exchange.stock(material), Exchange.target(material), Exchange.trend(material))
+            } else {
+                ShopEntry(material, Economy.shopPrices[material], Economy.sellPrices[material], null, null, 0)
+            }
+        }
+    }
+
+    private fun describe(entry: ShopEntry): String {
+        val buy = entry.buyPrice?.let { "buy ${show(it)}" } ?: "not for sale"
+        val sell = entry.sellPrice?.let { "sell ${show(it)}" } ?: "not bought"
+        val stock = if (entry.stock != null) " (stock ${entry.stock}/${entry.target}, ${trendWord(entry.material)})" else ""
+        return "${entry.material.name}: $buy, $sell$stock"
+    }
+
+    fun prices(): List<String> = shopEntries().filter { it.sellPrice != null }.map { describe(it) }
 
     fun sellHand(player: Player): String {
         requirePlaying(player)
         val item = player.inventory.itemInMainHand
-        val unit = unitPrice(item) ?: throw EconomyException("The server does not buy that item. See /economy prices")
-        val total = Math.multiplyExact(unit, item.amount.toLong())
-        val to = wallet(player.uniqueId)
-        Economy.transaction {
-            addSold(player.uniqueId.toString(), total)
-            Economy.credit(to, total)
-            Economy.log("item-sale", "issuance", to, total)
+        if (!buys(item)) {
+            throw EconomyException("The server does not buy that item. See /economy prices")
         }
+        val total = settleSale(player.uniqueId.toString(), wallet(player.uniqueId), mapOf(item.type to item.amount))
         player.inventory.setItemInMainHand(null)
         return "Sold ${item.amount}x ${item.type.name} for ${show(total)} (paid to your wallet)"
     }
@@ -90,24 +145,18 @@ object EconomyExtras {
     fun sellAll(player: Player): String {
         requirePlaying(player)
         val contents = player.inventory.storageContents
-        var total = 0L
         val counts = EnumMap<Material, Int>(Material::class.java)
         for (item in contents) {
-            val unit = unitPrice(item) ?: continue
-            total = Math.addExact(total, Math.multiplyExact(unit, item!!.amount.toLong()))
-            counts[item.type] = (counts[item.type] ?: 0) + item.amount
+            if (buys(item)) {
+                counts[item!!.type] = (counts[item.type] ?: 0) + item.amount
+            }
         }
-        if (total <= 0) {
+        if (counts.isEmpty()) {
             throw EconomyException("You have nothing the server buys. See /economy prices")
         }
-        val to = wallet(player.uniqueId)
-        Economy.transaction {
-            addSold(player.uniqueId.toString(), total)
-            Economy.credit(to, total)
-            Economy.log("item-sale", "issuance", to, total)
-        }
+        val total = settleSale(player.uniqueId.toString(), wallet(player.uniqueId), counts)
         for (slot in contents.indices) {
-            if (unitPrice(contents[slot]) != null) {
+            if (buys(contents[slot])) {
                 contents[slot] = null
             }
         }
@@ -117,29 +166,58 @@ object EconomyExtras {
         return "Sold $parts for ${show(total)} (paid to your wallet)"
     }
 
+    // sells up to `amountText` of one item from the inventory
+    fun sellItem(player: Player, materialName: String, amountText: String): String {
+        requirePlaying(player)
+        val material = Material.matchMaterial(materialName) ?: throw EconomyException("Unknown material")
+        if (!buys(material)) {
+            throw EconomyException("The server does not buy that item. See /economy prices")
+        }
+        val wanted = amountText.toIntOrNull()
+        if (wanted == null || wanted < 1 || wanted > 2304) {
+            throw EconomyException("Amount must be 1-2304")
+        }
+        val contents = player.inventory.storageContents
+        var have = 0
+        for (item in contents) {
+            if (item != null && item.type == material && !item.hasItemMeta()) {
+                have += item.amount
+            }
+        }
+        val amount = minOf(wanted, have)
+        if (amount < 1) {
+            throw EconomyException("You have no plain ${material.name} to sell")
+        }
+        val total = settleSale(player.uniqueId.toString(), wallet(player.uniqueId), mapOf(material to amount))
+        var left = amount
+        for (slot in contents.indices) {
+            val item = contents[slot]
+            if (left > 0 && item != null && item.type == material && !item.hasItemMeta()) {
+                val take = minOf(left, item.amount)
+                left -= take
+                if (take == item.amount) contents[slot] = null else item.amount -= take
+            }
+        }
+        player.inventory.storageContents = contents
+        player.saveData()
+        return "Sold ${amount}x ${material.name} for ${show(total)} (paid to your wallet)"
+    }
+
     // sells the town's stored income into the town treasury
     fun sellTown(player: Player): String {
         val account = Economy.townAccount(player, true)
         val town = Nodes.getResident(player)?.town ?: throw EconomyException("Join a town first")
-        var total = 0L
-        val sold = EnumMap<Material, Int>(Material::class.java)
+        val counts = EnumMap<Material, Int>(Material::class.java)
         for ((material, amount) in town.income.storage) {
-            val unit = Economy.sellPrices[material] ?: continue
-            if (amount <= 0) {
-                continue
+            if (amount > 0 && buys(material)) {
+                counts[material] = amount
             }
-            total = Math.addExact(total, Math.multiplyExact(unit, amount.toLong()))
-            sold[material] = amount
         }
-        if (total <= 0) {
+        if (counts.isEmpty()) {
             throw EconomyException("Your town income has nothing the server buys")
         }
-        Economy.transaction {
-            addSold(account, total)
-            Economy.credit(account, total)
-            Economy.log("item-sale", "issuance", account, total)
-        }
-        for (material in sold.keys) {
+        val total = settleSale(account, account, counts)
+        for (material in counts.keys) {
             town.income.storage.remove(material)
         }
         town.needsUpdate()
@@ -149,46 +227,56 @@ object EconomyExtras {
 
     // what the server would pay now for everything sellable in the player's inventory
     fun sellableValue(player: Player): Long {
-        var total = 0L
+        val counts = EnumMap<Material, Int>(Material::class.java)
         for (item in player.inventory.storageContents) {
-            val unit = unitPrice(item) ?: continue
-            total += unit * item!!.amount
+            if (buys(item)) {
+                counts[item!!.type] = (counts[item.type] ?: 0) + item.amount
+            }
+        }
+        var total = 0L
+        for ((material, amount) in counts) {
+            total += if (Exchange.has(material)) Exchange.quoteSell(material, amount) else (Economy.sellPrices[material] ?: 0L) * amount
         }
         return total
     }
 
     // ===================================
-    // server shop: preset items the server sells at fixed prices. The money
-    // leaves circulation, which balances the money created by selling.
+    // server shop: items the server sells. Exchange items cost the live price
+    // and come out of the server's stock; the others have fixed shop.prices.
+    // The money leaves circulation, which balances the money created by selling.
     // ===================================
-    fun shopPrices(): List<Pair<Material, Long>> = Economy.shopPrices.entries
-        .sortedBy { it.key.name }
-        .map { Pair(it.key, it.value) }
-
     fun shopLines(page: Int): List<String> {
-        val all = shopPrices()
+        val all = shopEntries()
         val pages = maxOf(1, (all.size + 9) / 10)
         val p = page.coerceIn(1, pages)
-        val lines = all.drop((p - 1) * 10).take(10).map { "${it.first.name}: ${show(it.second)} each" }
-        return if (lines.isEmpty()) listOf("The server shop is empty") else lines + "Page $p/$pages. Buy with /economy shop buy <material> <amount>"
+        val lines = all.drop((p - 1) * 10).take(10).map { describe(it) }
+        if (lines.isEmpty()) {
+            return listOf("The server shop is empty")
+        }
+        val restock = if (Exchange.enabled) " Next restock in ${Exchange.minutesToRestock(System.currentTimeMillis())} min." else ""
+        return lines + "Page $p/$pages. Buy with /economy shop buy <material> <amount>, sell with /economy shop sell <material> <amount>.$restock"
     }
 
     fun shopBuy(player: Player, materialName: String, amountText: String): String {
         requirePlaying(player)
         val material = Material.matchMaterial(materialName) ?: throw EconomyException("Unknown material")
-        val unit = Economy.shopPrices[material] ?: throw EconomyException("The server shop does not sell that. See /economy shop list")
+        val fixed = Economy.shopPrices[material]
+        if (!Exchange.has(material) && fixed == null) {
+            throw EconomyException("The server shop does not sell that. See /economy shop list")
+        }
         val amount = amountText.toIntOrNull()
         if (amount == null || amount < 1 || amount > 2304) {
             throw EconomyException("Amount must be 1-2304")
         }
         val result = BountyItems.add(player.inventory.storageContents, BountyItems.stacks(material, amount), player.inventory.maxStackSize)
             ?: throw EconomyException("Make space in your inventory first")
-        val total = Math.multiplyExact(unit, amount.toLong())
         val from = wallet(player.uniqueId)
-        Economy.transaction {
+        val total = Economy.transaction {
+            val cost = if (Exchange.has(material)) Exchange.buy(material, amount) else Math.multiplyExact(fixed!!, amount.toLong())
             Economy.requireAvailable(from)
-            Economy.credit(from, -total)
-            Economy.log("shop-purchase", from, "issuance", total)
+            Economy.credit(from, -cost)
+            Economy.log("shop-purchase", from, "issuance", cost)
+            cost
         }
         player.inventory.storageContents = result
         player.saveData()

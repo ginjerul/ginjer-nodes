@@ -154,13 +154,24 @@ object EconomyMenu {
     private class Entry(val stack: ItemStack, val action: ((InventoryClickEvent) -> Unit)? = null)
 
     // a paged list screen; slots 45/49/53 are previous, back and next
-    private fun paged(p: Player, title: String, entries: List<Entry>, page: Int, rebuild: (Int) -> Unit, back: () -> Unit) {
+    private fun paged(
+        p: Player,
+        title: String,
+        entries: List<Entry>,
+        page: Int,
+        rebuild: (Int) -> Unit,
+        back: () -> Unit,
+        extras: Map<Int, Entry> = emptyMap(),
+    ) {
         val pages = maxOf(1, (entries.size + PAGE - 1) / PAGE)
         val current = page.coerceIn(0, pages - 1)
         val screen = Screen(p, "$title ${current + 1}/$pages", 6)
         entries.drop(current * PAGE).take(PAGE).forEachIndexed { slot, entry -> screen.set(slot, entry.stack, entry.action) }
         if (current > 0) {
             screen.set(45, item(Material.ARROW, "Previous page")) { rebuild(current - 1) }
+        }
+        for ((slot, extra) in extras) {
+            screen.set(slot, extra.stack, extra.action)
         }
         screen.set(49, item(Material.BARRIER, "Back")) { back() }
         if (current < pages - 1) {
@@ -191,7 +202,7 @@ object EconomyMenu {
         val s = Screen(p, "Economy", 3)
         s.set(4, item(Material.GOLD_NUGGET, "${ChatColor.GOLD}Your money", EconomyExtras.overview(p)))
         s.set(10, item(Material.GOLD_INGOT, "${ChatColor.GOLD}Accounts", listOf("Balances, deposit, withdraw, pay,", "history, loans, business accounts"))) { accounts(p) }
-        s.set(11, item(Material.CHEST, "${ChatColor.GREEN}Market", listOf("Player listings and the server shop"))) { market(p) }
+        s.set(11, item(Material.CHEST, "${ChatColor.GREEN}Market", listOf("Player listings and the server exchange"))) { market(p) }
         s.set(12, item(Material.EMERALD, "${ChatColor.GREEN}Sell to server", listOf("Sell items the server buys"))) { sell(p) }
         s.set(14, item(Material.WHITE_BANNER, "${ChatColor.AQUA}Nation economy", listOf("Stock, trade routes, infrastructure"))) { nation(p) }
         s.set(15, item(Material.DIAMOND, "${ChatColor.AQUA}Richest", listOf("Top players, nations and towns"))) { top(p) }
@@ -409,16 +420,9 @@ object EconomyMenu {
                 act(p, { sell(p) }) { EconomyExtras.sellTown(p) }
             }
         }
-        s.set(14, item(Material.BOOK, "${ChatColor.YELLOW}Prices", listOf("What the server pays"))) { prices(p, 0) }
+        s.set(14, item(Material.BOOK, "${ChatColor.YELLOW}Prices", listOf("Live prices and stock", "Click items to sell them"))) { shop(p, 0, true) }
         s.set(22, item(Material.BARRIER, "Back")) { openMain(p) }
         s.open()
-    }
-
-    private fun prices(p: Player, page: Int) {
-        val entries = Economy.sellPrices.entries.sortedBy { it.key.name }.map {
-            Entry(item(it.key, "${ChatColor.WHITE}${it.key.name}", listOf("Server pays ${Economy.show(it.value)} each")))
-        }
-        paged(p, "Server buys", entries.ifEmpty { listOf(Entry(item(Material.BARRIER, "The server buys nothing"))) }, page, { prices(p, it) }, { sell(p) })
     }
 
     // ===================================
@@ -427,7 +431,7 @@ object EconomyMenu {
     private fun market(p: Player) {
         val s = Screen(p, "Market", 3)
         s.set(10, item(Material.CHEST, "${ChatColor.GREEN}Player listings", listOf("Items other players sell"))) { players(p, 0) }
-        s.set(12, item(Material.EMERALD_BLOCK, "${ChatColor.GREEN}Server shop", listOf("Preset items sold by the server"))) { shop(p, 0) }
+        s.set(12, item(Material.EMERALD_BLOCK, "${ChatColor.GREEN}Server exchange", listOf("Buy and sell preset items.", "Prices follow the server's stock"))) { shop(p, 0, false) }
         s.set(14, item(Material.WRITABLE_BOOK, "${ChatColor.GREEN}Sell your item", listOf("List the item stack in your hand", "You type the price"))) {
             ask(p, "Hold the stack and type its price", { market(p) }) { EconomyExtras.marketSell(p, it) }
         }
@@ -465,24 +469,47 @@ object EconomyMenu {
         paged(p, "My listings", entries.ifEmpty { listOf(Entry(item(Material.BARRIER, "You have no listings"))) }, page, { mine(p, it) }, { market(p) })
     }
 
-    private fun shop(p: Player, page: Int) {
-        val entries = EconomyExtras.shopPrices().map { (material, price) ->
-            val lore = listOf(
-                "${ChatColor.GOLD}${Economy.show(price)} each",
-                "${ChatColor.GREEN}Left-click: buy 1",
-                "${ChatColor.GREEN}Right-click: buy 16",
-                "${ChatColor.GREEN}Shift-click: buy 64",
-            )
+    // the server exchange: buy mode takes items out of the server's stock, sell mode adds to it
+    private fun shop(p: Player, page: Int, sell: Boolean) {
+        val trendText = mapOf(1 to "${ChatColor.GREEN}Price rising", -1 to "${ChatColor.RED}Price falling", 0 to "Price steady")
+        val entries = EconomyExtras.shopEntries().filter { if (sell) it.sellPrice != null else it.buyPrice != null || it.stock != null }.map { entry ->
+            val material = entry.material
+            val lore = mutableListOf<String>()
+            if (entry.stock != null) {
+                lore.add("Server stock: ${entry.stock} of ${entry.target}")
+                lore.add(trendText[entry.trend] ?: "")
+            }
+            val price = if (sell) entry.sellPrice else entry.buyPrice
+            if (price == null) {
+                lore.add("${ChatColor.RED}${if (sell) "The server holds all it wants" else "Sold out"}")
+            } else if (sell) {
+                lore.addAll(listOf("${ChatColor.GOLD}Pays ${Economy.show(price)} each (next unit)", "${ChatColor.GREEN}Left-click: sell 1", "${ChatColor.GREEN}Right-click: sell 16", "${ChatColor.GREEN}Shift-click: sell 64"))
+            } else {
+                lore.addAll(listOf("${ChatColor.GOLD}${Economy.show(price)} each (next unit)", "${ChatColor.GREEN}Left-click: buy 1", "${ChatColor.GREEN}Right-click: buy 16", "${ChatColor.GREEN}Shift-click: buy 64"))
+            }
             Entry(item(material, "${ChatColor.WHITE}${material.name}", lore)) { e ->
                 val amount = when (e.click) {
                     ClickType.RIGHT -> 16
                     ClickType.SHIFT_LEFT, ClickType.SHIFT_RIGHT -> 64
                     else -> 1
                 }
-                act(p, { shop(p, page) }) { EconomyExtras.shopBuy(p, material.name, amount.toString()) }
+                act(p, { shop(p, page, sell) }) {
+                    if (sell) EconomyExtras.sellItem(p, material.name, amount.toString()) else EconomyExtras.shopBuy(p, material.name, amount.toString())
+                }
             }
         }
-        paged(p, "Server shop", entries.ifEmpty { listOf(Entry(item(Material.BARRIER, "The shop is empty"))) }, page, { shop(p, it) }, { market(p) })
+        val toggle = if (sell) {
+            item(Material.EMERALD, "${ChatColor.GREEN}Mode: SELL to the server", listOf("Click to switch to buying"))
+        } else {
+            item(Material.GOLD_INGOT, "${ChatColor.GOLD}Mode: BUY from the server", listOf("Click to switch to selling"))
+        }
+        val restock = if (Exchange.enabled) listOf("Next restock in ${Exchange.minutesToRestock(System.currentTimeMillis())} min") else emptyList()
+        val extras = mapOf(
+            47 to Entry(toggle) { shop(p, 0, !sell) },
+            51 to Entry(item(Material.CLOCK, "${ChatColor.YELLOW}How it works", listOf("Prices rise when the server's stock is low", "and fall when it is high.", "Stock refills over time.") + restock)),
+        )
+        val title = if (sell) "Sell to server" else "Server exchange"
+        paged(p, title, entries.ifEmpty { listOf(Entry(item(Material.BARRIER, "Nothing here yet"))) }, page, { shop(p, it, sell) }, { market(p) }, extras)
     }
 
     // ===================================
@@ -536,6 +563,14 @@ object EconomyMenu {
         }
         s.set(14, item(Material.TNT, "${ChatColor.GOLD}Retire infrastructure", listOf("Once its arrears are paid"))) {
             ask(p, "Type the infrastructure name", back) { Economy.retireInfra(it) }
+        }
+        if (Exchange.enabled) {
+            s.set(15, item(Material.CLOCK, "${ChatColor.GOLD}Reset exchange stock", listOf("Put every item back at its target stock"))) {
+                act(p, back) {
+                    Economy.transaction { Exchange.reset() }
+                    "Exchange stock reset to target"
+                }
+            }
         }
         s.set(22, item(Material.BARRIER, "Back")) { openMain(p) }
         s.open()

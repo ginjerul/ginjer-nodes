@@ -110,6 +110,10 @@ class EcoState(
     var routes: MutableMap<String, EcoRoute> = LinkedHashMap(),
     var loans: MutableMap<String, EcoLoan> = LinkedHashMap(),
     var infra: MutableMap<String, EcoInfra> = LinkedHashMap(),
+    // stock market: units the server holds per item, the price trends are measured from, last restock time
+    var exchangeStock: MutableMap<String, Long> = LinkedHashMap(),
+    var exchangeRef: MutableMap<String, Long> = LinkedHashMap(),
+    var exchangeLast: Long = 0L,
 )
 
 object Economy {
@@ -197,6 +201,7 @@ object Economy {
         portMaxFee = if (maxFee > 0) maxFee else 100_000L
         sellPrices = readPrices(sec.getConfigurationSection("sell.prices"), "sell.prices")
         shopPrices = readPrices(sec.getConfigurationSection("shop.prices"), "shop.prices")
+        Exchange.loadConfig(sec)
     }
 
     // MATERIAL: price pairs from a config section; invalid entries are skipped with a warning
@@ -220,7 +225,7 @@ object Economy {
     fun tradeResources(): Set<String> = resources
 
     // a money setting in config; 0, empty or missing means off
-    private fun optionalMoney(value: Any?, name: String): Long {
+    internal fun optionalMoney(value: Any?, name: String): Long {
         val text = value?.toString()?.trim()
         if (text.isNullOrEmpty()) {
             return 0L
@@ -752,6 +757,7 @@ object Economy {
                 settleInfrastructure(now)
                 settleRoutes(now)
                 settleTaxes(now)
+                Exchange.restock(now)
             }
         } catch (e: Exception) {
             Nodes.logger?.severe("[Economy] Scheduled settlement rolled back: ${e.message}")

@@ -660,6 +660,59 @@ economy:
       LAPIS_LAZULI: '1.00'
       BREAD: '2.00'
       COOKED_BEEF: '3.00'
+  # stock market (/economy shop and the Server exchange in /economy menu). Items listed
+  # here are bought AND sold by the server at a price that follows its stock: few units
+  # left = higher price, lots of units = lower price. Players sell into the stock and buy
+  # out of it. Every restockMinutes the stock moves restockPercent of the way back to its
+  # target, so shortages refill and gluts drain. An item listed here replaces its entry in
+  # sell.prices and shop.prices; items only in those lists keep their fixed prices.
+  #   price:  the middle price when the server holds exactly its target stock
+  #   target: the stock the market settles at
+  exchange:
+    enabled: true
+    restockMinutes: 30
+    restockPercent: 20
+    # how strongly stock moves the price (0 = never, 0.5 = gentle, 1 = strong)
+    sensitivity: 0.5
+    # the price never goes below minMultiplier x price or above maxMultiplier x price
+    minMultiplier: 0.25
+    maxMultiplier: 4.0
+    # buying costs half of this percent above the middle price, selling pays half below it,
+    # so buying and selling straight back always loses money
+    spreadPercent: 20
+    # the server stops buying an item once its stock reaches target x capMultiplier
+    capMultiplier: 4
+    items:
+      COAL:
+        price: '0.75'
+        target: 4000
+      IRON_INGOT:
+        price: '3.00'
+        target: 2000
+      COPPER_INGOT:
+        price: '1.50'
+        target: 3000
+      GOLD_INGOT:
+        price: '6.00'
+        target: 1000
+      DIAMOND:
+        price: '30.00'
+        target: 300
+      EMERALD:
+        price: '22.00'
+        target: 300
+      REDSTONE:
+        price: '0.40'
+        target: 4000
+      LAPIS_LAZULI:
+        price: '0.75'
+        target: 3000
+      BREAD:
+        price: '2.50'
+        target: 1000
+      COOKED_BEEF:
+        price: '3.50'
+        target: 1000
   # port warp fees (/port fee): fees are paid from the wallet into the port owner town's
   # treasury. maxFee is the highest fee an owner may set.
   ports:

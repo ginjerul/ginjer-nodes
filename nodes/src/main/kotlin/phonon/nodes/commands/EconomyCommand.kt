@@ -12,6 +12,7 @@ import phonon.nodes.economy.Economy
 import phonon.nodes.economy.EconomyException
 import phonon.nodes.economy.EconomyExtras
 import phonon.nodes.economy.EconomyMenu
+import phonon.nodes.economy.Exchange
 
 private fun guarded(sender: CommandSender, block: () -> Unit) {
     try {
@@ -65,7 +66,7 @@ class EconomyCommand :
         Message.print(sender, "/economy prices${ChatColor.WHITE}: What the server buys")
         Message.print(sender, "/economy sell hand|all|town${ChatColor.WHITE}: Sell items to the server (town: stored income, to the treasury)")
         Message.print(sender, "/economy market list|mine|sell|buy|cancel${ChatColor.WHITE}: Player market (sell uses the item in your hand)")
-        Message.print(sender, "/economy shop list [page]|buy <material> <amount>${ChatColor.WHITE}: Server shop with preset items")
+        Message.print(sender, "/economy shop list [page]|buy|sell <material> <amount>${ChatColor.WHITE}: Server exchange (prices follow the server's stock)")
         Message.print(sender, "/economy top [players|nations|towns]${ChatColor.WHITE}: Richest lists")
         Message.print(sender, "/economy stock${ChatColor.WHITE}: Your nation's trade resources")
         Message.print(sender, "/economy route list|offer|accept|cancel${ChatColor.WHITE}: Recurring trade routes")
@@ -198,7 +199,12 @@ class EconomyCommand :
                 Message.print(p, EconomyExtras.shopBuy(p, a[2], a[3]))
             }
 
-            else -> throw EconomyException("Usage: /economy shop list [page]|buy <material> <amount>")
+            "sell" -> {
+                need(a, 4, "/economy shop sell <material> <amount>")
+                Message.print(p, EconomyExtras.sellItem(p, a[2], a[3]))
+            }
+
+            else -> throw EconomyException("Usage: /economy shop list [page]|buy|sell <material> <amount>")
         }
     }
 
@@ -281,8 +287,8 @@ class EconomyCommand :
             args.size == 1 -> listOf("help", "balance", "deposit", "withdraw", "pay", "history", "business", "menu", "prices", "sell", "market", "shop", "top", "stock", "route", "loan", "infra")
             args.size == 2 && args[0].equals("sell", ignoreCase = true) -> listOf("hand", "all", "town")
             args.size == 2 && args[0].equals("market", ignoreCase = true) -> listOf("list", "mine", "sell", "buy", "cancel")
-            args.size == 2 && args[0].equals("shop", ignoreCase = true) -> listOf("list", "buy")
-            args.size == 3 && args[0].equals("shop", ignoreCase = true) && args[1].equals("buy", ignoreCase = true) -> EconomyExtras.shopPrices().map { it.first.name.lowercase() }
+            args.size == 2 && args[0].equals("shop", ignoreCase = true) -> listOf("list", "buy", "sell")
+            args.size == 3 && args[0].equals("shop", ignoreCase = true) && args[1].lowercase() in setOf("buy", "sell") -> EconomyExtras.shopEntries().map { it.material.name.lowercase() }
             args.size == 2 && args[0].equals("top", ignoreCase = true) -> listOf("players", "nations", "towns")
             args.size == 2 && args[0].lowercase() in setOf("balance", "deposit", "withdraw", "pay", "history") -> accounts
             args.size == 2 && args[0].equals("business", ignoreCase = true) -> listOf("create")
@@ -326,6 +332,7 @@ class EconomyAdminCommand :
         Message.print(sender, "/economyadmin stock <nation> <material> <quantity>${ChatColor.WHITE}: Issue trade resources")
         Message.print(sender, "/economyadmin loan approve|reject <id>${ChatColor.WHITE}: Decide a loan request")
         Message.print(sender, "/economyadmin infra <nation> <railway|port|road|power> <units> <name>${ChatColor.WHITE}: Register infrastructure")
+        Message.print(sender, "/economyadmin exchange reset${ChatColor.WHITE}: Put every exchange item back at its target stock")
         Message.print(sender, "/economyadmin retire <name>${ChatColor.WHITE}: Retire infrastructure once its arrears are paid")
     }
 
@@ -334,6 +341,15 @@ class EconomyAdminCommand :
             "issue" -> {
                 need(a, 3, "/economyadmin issue <player|reserve> <amount>")
                 Message.print(sender, Economy.issue(a[1], a[2], sender.name))
+            }
+
+            "exchange" -> {
+                need(a, 2, "/economyadmin exchange reset")
+                if (!a[1].equals("reset", ignoreCase = true)) {
+                    throw EconomyException("Usage: /economyadmin exchange reset")
+                }
+                Economy.transaction { Exchange.reset() }
+                Message.print(sender, "Exchange stock reset to target")
             }
 
             "menu" -> {
@@ -380,11 +396,12 @@ class EconomyAdminCommand :
 
     override fun onTabComplete(sender: CommandSender, command: Command, alias: String, args: Array<out String>): List<String> {
         val options: Collection<String> = when {
-            args.size == 1 -> listOf("menu", "issue", "vote", "stock", "loan", "infra", "retire")
+            args.size == 1 -> listOf("menu", "exchange", "issue", "vote", "stock", "loan", "infra", "retire")
             args.size == 2 && args[0].equals("vote", ignoreCase = true) -> Nodes.residents.values.map { it.name }
             args.size == 2 && args[0].equals("issue", ignoreCase = true) -> Nodes.residents.values.map { it.name } + "reserve"
             args.size == 2 && args[0].lowercase() in setOf("stock", "infra") -> Nodes.nations.values.map { it.name }
             args.size == 2 && args[0].equals("loan", ignoreCase = true) -> listOf("approve", "reject")
+            args.size == 2 && args[0].equals("exchange", ignoreCase = true) -> listOf("reset")
             args.size == 3 && args[0].equals("infra", ignoreCase = true) -> Economy.INFRA_TYPES
             else -> emptyList()
         }
