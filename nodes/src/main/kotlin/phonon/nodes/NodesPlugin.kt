@@ -159,6 +159,7 @@ public class NodesPlugin : JavaPlugin() {
         pluginManager.registerEvents(NodesNametagListener(), this)
         pluginManager.registerEvents(NodesWarFlagArmorStandListener(), this)
         pluginManager.registerEvents(NodesPlayerDamageListener(), this)
+        pluginManager.registerEvents(phonon.nodes.rules.TownRulesListener(), this)
         pluginManager.registerEvents(StatsListener(), this)
         pluginManager.registerEvents(RefineryListener(), this)
         pluginManager.registerEvents(RefineryGuiListener(), this)
@@ -192,6 +193,8 @@ public class NodesPlugin : JavaPlugin() {
         this.getCommand("townchat")?.setExecutor(TownChatCommand())
         this.getCommand("nationchat")?.setExecutor(NationChatCommand())
         this.getCommand("allychat")?.setExecutor(AllyChatCommand())
+        this.getCommand("localchat")?.setExecutor(phonon.nodes.commands.LocalChatCommand())
+        this.getCommand("rpchat")?.setExecutor(phonon.nodes.commands.RpChatCommand())
         this.getCommand("player")?.setExecutor(PlayerCommand())
         this.getCommand("territory")?.setExecutor(TerritoryCommand())
         this.getCommand("port")?.setExecutor(PortCommand())
@@ -268,6 +271,8 @@ public class NodesPlugin : JavaPlugin() {
         VoteHook.register(this)
         PortRequests.load()
         PortPolicies.load()
+        phonon.nodes.rules.TownFlags.load()
+        phonon.nodes.rules.TownRules.start(this)
         // beacon pillars are placed once the worlds are up
         server.scheduler.runTaskLater(this, Runnable { PortBeacons.placeAll() }, 100L)
 

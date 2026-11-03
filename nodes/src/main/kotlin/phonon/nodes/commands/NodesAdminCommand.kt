@@ -75,6 +75,8 @@ private val SUBCOMMANDS: List<String> = listOf(
     "miningboost",
     "stats",
     "socialspy",
+    "pvp",
+    "inactive",
     "rallycap",
     "announce",
     "plot",
@@ -302,6 +304,41 @@ public class NodesAdminCommand :
         val shown = if (n < 0) "unlimited" else n.toString()
         Message.print(sender, "${org.bukkit.ChatColor.GREEN}Rally cap for ${nation.name}: $shown")
     }
+    private fun adminTownPvp(sender: CommandSender, args: Array<String>) {
+        if (args.size < 3 || (!args[2].equals("on", true) && !args[2].equals("off", true))) {
+            Message.error(sender, "Usage: /nda pvp <town> <on|off>")
+            return
+        }
+        val town = Nodes.towns[args[1]]
+        if (town == null) {
+            Message.error(sender, "Town \"${args[1]}\" does not exist")
+            return
+        }
+        val on = args[2].equals("on", true)
+        phonon.nodes.rules.TownFlags.setPvp(town, on)
+        Message.print(sender, "${ChatColor.GREEN}PvP in ${town.name} is now ${if (on) "on" else "off"}${if (Config.togglePVPMechanic) "" else " (togglePVPMechanic is off in the config, so it has no effect yet)"}")
+    }
+
+    // residents who have not logged in for the given number of days
+    private fun adminInactive(sender: CommandSender, args: Array<String>) {
+        val days = args.getOrNull(1)?.toIntOrNull() ?: Config.maxDaysForInactivity
+        if (days <= 0) {
+            Message.error(sender, "Usage: /nda inactive <days> (or set maxDaysForInactivity in the config)")
+            return
+        }
+        val cutoff = System.currentTimeMillis() - days * 86_400_000L
+        val rows = Nodes.residents.values
+            .mapNotNull { r ->
+                val last = org.bukkit.Bukkit.getOfflinePlayer(r.uuid).lastPlayed
+                if (last in 1 until cutoff) Triple(r, last, (System.currentTimeMillis() - last) / 86_400_000L) else null
+            }
+            .sortedBy { it.second }
+        Message.print(sender, "${ChatColor.AQUA}${rows.size} resident(s) inactive for $days+ days${if (rows.size > 40) " (showing the longest 40)" else ""}")
+        for ((resident, _, away) in rows.take(40)) {
+            Message.print(sender, "- ${resident.name} (${resident.town?.name ?: "no town"}): ${away}d")
+        }
+    }
+
     private fun socialSpy(sender: CommandSender) {
         if (sender !is Player) {
             Message.error(sender, "Only players in game can use")
@@ -352,6 +389,8 @@ public class NodesAdminCommand :
             "miningboost" -> miningBoost(sender, args)
             "stats" -> adminStats(sender, args)
             "socialspy" -> socialSpy(sender)
+            "pvp" -> adminTownPvp(sender, args)
+            "inactive" -> adminInactive(sender, args)
             "announce" -> adminAnnounce(sender, args)
             "resident" -> manageResident(sender, args)
             "town" -> manageTown(sender, args)
@@ -679,6 +718,8 @@ public class NodesAdminCommand :
         Message.print(sender, "/nodesadmin runincome${ChatColor.WHITE}: Runs income for all towns")
         Message.print(sender, "/nodesadmin debug${ChatColor.WHITE}: World object debugger")
         Message.print(sender, "/nodesadmin miningboost${ChatColor.WHITE}: Mining rate/amount boosts")
+        Message.print(sender, "/nodesadmin pvp <town> <on|off>${ChatColor.WHITE}: Set a town's PvP switch")
+        Message.print(sender, "/nodesadmin inactive [days]${ChatColor.WHITE}: List residents who have not logged in for that long")
         Message.print(sender, "/nodesadmin socialspy${ChatColor.WHITE}: Toggle seeing town, nation and ally chat")
         Message.print(sender, "/nodesadmin stats reset <player|all confirm>${ChatColor.WHITE}: Reset K/D stats (all = everyone)")
         Message.print(sender, "/nodesadmin announce <message>${ChatColor.WHITE}: Announce for all players")

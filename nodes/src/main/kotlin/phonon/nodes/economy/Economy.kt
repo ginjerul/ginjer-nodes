@@ -14,6 +14,7 @@ import org.bukkit.Material
 import org.bukkit.configuration.ConfigurationSection
 import org.bukkit.configuration.file.FileConfiguration
 import org.bukkit.entity.Player
+import phonon.nodes.Message
 import phonon.nodes.Nodes
 import phonon.nodes.objects.Nation
 import phonon.nodes.objects.Town
@@ -100,6 +101,7 @@ class EcoSold(
 
 class EcoState(
     var lastTax: Long = 0L,
+    var lastUpkeep: Long = 0L,
     var listings: MutableMap<String, EcoListing> = LinkedHashMap(),
     var bountyMoney: MutableMap<String, EcoBountyMoney> = LinkedHashMap(),
     var sold: MutableMap<String, EcoSold> = LinkedHashMap(),
@@ -163,6 +165,10 @@ object Economy {
     internal var marketMaxListings = 10
     internal var marketMaxPrice = 100_000_000L
     internal var portMaxFee = 100_000L
+    internal var townCreationCost = 0L
+    internal var claimCostPerPower = 0L
+    internal var townUpkeepPerClaim = 0L
+    internal var nationUpkeepPerTown = 0L
 
     internal var state = EcoState()
     private var failed = false
@@ -199,6 +205,10 @@ object Economy {
         marketMaxPrice = if (maxPrice > 0) maxPrice else 100_000_000L
         val maxFee = optionalMoney(sec.get("ports.maxFee"), "ports.maxFee")
         portMaxFee = if (maxFee > 0) maxFee else 100_000L
+        townCreationCost = optionalMoney(sec.get("costs.townCreation"), "costs.townCreation")
+        claimCostPerPower = optionalMoney(sec.get("costs.territoryClaimPerPower"), "costs.territoryClaimPerPower")
+        townUpkeepPerClaim = optionalMoney(sec.get("upkeep.townPerClaimPerDay"), "upkeep.townPerClaimPerDay")
+        nationUpkeepPerTown = optionalMoney(sec.get("upkeep.nationPerTownPerDay"), "upkeep.nationPerTownPerDay")
         sellPrices = readPrices(sec.getConfigurationSection("sell.prices"), "sell.prices")
         shopPrices = readPrices(sec.getConfigurationSection("shop.prices"), "shop.prices")
         Exchange.loadConfig(sec)
@@ -757,10 +767,71 @@ object Economy {
                 settleInfrastructure(now)
                 settleRoutes(now)
                 settleTaxes(now)
+                settleUpkeep(now)
                 Exchange.restock(now)
             }
         } catch (e: Exception) {
             Nodes.logger?.severe("[Economy] Scheduled settlement rolled back: ${e.message}")
+        }
+    }
+
+    // true when a daily event is due. With dailyEventTime ("12:00", server time) it runs once
+    // after that time each day; without it, every 24 hours after the last run.
+    private fun dailyDue(last: Long, now: Long): Boolean {
+        val text = phonon.nodes.Config.dailyEventTime
+        if (text.isEmpty()) {
+            return now - last >= DAY_MS
+        }
+        val time = try {
+            java.time.LocalTime.parse(text)
+        } catch (_: Exception) {
+            return now - last >= DAY_MS
+        }
+        val zone = java.time.ZoneId.systemDefault()
+        var scheduled = java.time.ZonedDateTime.ofInstant(java.time.Instant.ofEpochMilli(now), zone).with(time)
+        if (scheduled.toInstant().toEpochMilli() > now) {
+            scheduled = scheduled.minusDays(1)
+        }
+        return last < scheduled.toInstant().toEpochMilli()
+    }
+
+    // once a day towns pay upkeep per claim power used and nations per town, from their treasuries.
+    // A treasury that cannot cover it pays nothing and its online members are told (nothing is deleted).
+    private fun settleUpkeep(now: Long) {
+        if (townUpkeepPerClaim <= 0 && nationUpkeepPerTown <= 0) {
+            return
+        }
+        if (state.lastUpkeep == 0L) {
+            state.lastUpkeep = now
+            return
+        }
+        if (!dailyDue(state.lastUpkeep, now)) {
+            return
+        }
+        state.lastUpkeep = now
+        if (townUpkeepPerClaim > 0) {
+            for (town in Nodes.towns.values) {
+                payUpkeep("town-${town.uuid}", Math.multiplyExact(townUpkeepPerClaim, town.claimsUsed.toLong()), town.name, town.playersOnline)
+            }
+        }
+        if (nationUpkeepPerTown > 0) {
+            for (nation in Nodes.nations.values) {
+                payUpkeep("nation-${nation.uuid}", Math.multiplyExact(nationUpkeepPerTown, nation.towns.size.toLong()), nation.name, nation.playersOnline)
+            }
+        }
+    }
+
+    private fun payUpkeep(account: String, due: Long, name: String, online: Collection<Player>) {
+        if (due <= 0) {
+            return
+        }
+        val inDefault = state.loans.values.any { it.borrower == account && it.status == "DEFAULT" }
+        if (balance(account) >= due && !inDefault) {
+            move(account, "upkeep", due, "upkeep")
+        } else {
+            for (player in online) {
+                Message.print(player, "${org.bukkit.ChatColor.RED}$name could not pay its daily upkeep of ${show(due)} from its treasury")
+            }
         }
     }
 
@@ -773,7 +844,7 @@ object Economy {
             state.lastTax = now
             return
         }
-        if (now - state.lastTax < DAY_MS) {
+        if (!dailyDue(state.lastTax, now)) {
             return
         }
         state.lastTax = now

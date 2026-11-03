@@ -11,6 +11,7 @@ import org.bukkit.command.CommandExecutor
 import org.bukkit.command.CommandSender
 import org.bukkit.command.TabCompleter
 import org.bukkit.entity.Player
+import phonon.nodes.Config
 import phonon.nodes.Message
 import phonon.nodes.Nodes
 import phonon.nodes.chat.Chat
@@ -26,6 +27,8 @@ private fun toggleChatMode(player: Player, resident: Resident, chatMode: ChatMod
         ChatMode.TOWN -> Message.print(player, "${ChatColor.DARK_AQUA}${ChatColor.BOLD}Now talking in town chat")
         ChatMode.NATION -> Message.print(player, "${ChatColor.GOLD}${ChatColor.BOLD}Now talking in nation chat")
         ChatMode.ALLY -> Message.print(player, "${ChatColor.GREEN}${ChatColor.BOLD}Now talking in ally chat")
+        ChatMode.LOCAL -> Message.print(player, "${ChatColor.YELLOW}${ChatColor.BOLD}Now talking in local chat (${Config.localChatDistance.toInt()} blocks)")
+        ChatMode.RP -> Message.print(player, "${ChatColor.LIGHT_PURPLE}${ChatColor.BOLD}Now talking in roleplay chat (${Config.rpChatDistance.toInt()} blocks)")
     }
 }
 
@@ -212,4 +215,40 @@ public class AllyChatCommand :
 
     private fun leaveChannel(player: Player) {
     }
+}
+
+/**
+ * @command /localchat (or /lc)
+ * Talk only to players within localChatDistance blocks.
+ */
+public class LocalChatCommand :
+    CommandExecutor,
+    TabCompleter {
+
+    override fun onCommand(sender: CommandSender, cmd: Command, commandLabel: String, args: Array<String>): Boolean {
+        val player = sender as? Player ?: return true
+        val resident = Nodes.getResident(player) ?: return true
+        toggleChatMode(player, resident, ChatMode.LOCAL)
+        return true
+    }
+
+    override fun onTabComplete(sender: CommandSender, command: Command, alias: String, args: Array<String>): List<String> = listOf()
+}
+
+/**
+ * @command /rpchat (or /rp)
+ * Roleplay chat: talk only to players within rpChatDistance blocks.
+ */
+public class RpChatCommand :
+    CommandExecutor,
+    TabCompleter {
+
+    override fun onCommand(sender: CommandSender, cmd: Command, commandLabel: String, args: Array<String>): Boolean {
+        val player = sender as? Player ?: return true
+        val resident = Nodes.getResident(player) ?: return true
+        toggleChatMode(player, resident, ChatMode.RP)
+        return true
+    }
+
+    override fun onTabComplete(sender: CommandSender, command: Command, alias: String, args: Array<String>): List<String> = listOf()
 }

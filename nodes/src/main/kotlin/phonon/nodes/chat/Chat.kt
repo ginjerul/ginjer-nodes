@@ -8,6 +8,7 @@ import org.bukkit.Bukkit
 import org.bukkit.ChatColor
 import org.bukkit.entity.Player
 import org.bukkit.event.player.AsyncPlayerChatEvent
+import phonon.nodes.Config
 import phonon.nodes.Nodes
 import phonon.nodes.objects.Resident
 import java.util.UUID
@@ -18,6 +19,8 @@ public enum class ChatMode {
     TOWN,
     NATION,
     ALLY,
+    LOCAL,
+    RP,
 }
 
 public object Chat {
@@ -113,6 +116,14 @@ public object Chat {
                 event.setFormat(formatMsgNation(resident))
                 spy(event, "Nation: ${nation.name}")
             }
+            ChatMode.LOCAL -> {
+                setNearbyRecipients(event, Config.localChatDistance)
+                event.setFormat("${ChatColor.YELLOW}[Local] ${formatResidentName(resident)}${ChatColor.YELLOW}: %2\$s")
+            }
+            ChatMode.RP -> {
+                setNearbyRecipients(event, Config.rpChatDistance)
+                event.setFormat("${ChatColor.LIGHT_PURPLE}(RP) ${formatResidentName(resident)}${ChatColor.LIGHT_PURPLE}: %2\$s")
+            }
             ChatMode.ALLY -> {
                 val town = resident.town
                 if (town == null) {
@@ -128,6 +139,16 @@ public object Chat {
                 spy(event, "Ally: ${town.name}")
             }
         }
+    }
+
+    // only players in the same world within `distance` blocks hear the message
+    private fun setNearbyRecipients(event: AsyncPlayerChatEvent, distance: Double) {
+        val from = event.player.location
+        val limit = distance * distance
+        val near = Bukkit.getOnlinePlayers().filter { it.world == from.world && it.location.distanceSquared(from) <= limit }
+        event.recipients.clear()
+        event.recipients.addAll(near)
+        event.recipients.add(event.player)
     }
 
     public fun enableGlobalChat(player: Player) {
@@ -177,7 +198,13 @@ public object Chat {
     public fun formatMsgGlobal(resident: Resident): String {
         val formattedResidentName = formatResidentName(resident)
 
-        val formattedResidentAllegience = if (resident.town != null && resident.nation != null) {
+        val formattedResidentAllegience = if (Config.chatPrefixMode == 2) {
+            ""
+        } else if (Config.chatPrefixMode == 1 && resident.town != null) {
+            "[${colorTown}${resident.town?.name}$colorDefault] "
+        } else if (Config.chatPrefixMode == 1) {
+            ""
+        } else if (resident.town != null && resident.nation != null) {
             "[${colorNation}${resident.nation?.name}$colorDefault|${colorTown}${resident.town?.name}$colorDefault] "
         } else if (resident.town != null) {
             "[${colorTown}${resident.town?.name}$colorDefault] "

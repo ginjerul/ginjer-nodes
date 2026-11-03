@@ -29,10 +29,12 @@ import phonon.nodes.constants.ErrorTownExists
 import phonon.nodes.constants.NODES_SOUND_CHEST_PROTECT
 import phonon.nodes.constants.PermissionsGroup
 import phonon.nodes.constants.TownPermissions
+import phonon.nodes.economy.EconomyCosts
 import phonon.nodes.fortify.Fortifications
 import phonon.nodes.objects.Coord
 import phonon.nodes.objects.Resident
 import phonon.nodes.objects.Town
+import phonon.nodes.rules.TownFlags
 import phonon.nodes.supply.SupplyLines
 import phonon.nodes.utils.sanitizeString
 import phonon.nodes.utils.string.filterByStart
@@ -73,6 +75,7 @@ private val SUBCOMMANDS: List<String> = listOf(
     "prefix",
     "suffix",
     "rename",
+    "pvp",
     "map",
     "minimap",
     "permissions",
@@ -201,6 +204,7 @@ public class TownCommand :
             "prefix" -> prefix(player, args)
             "suffix" -> suffix(player, args)
             "rename" -> renameTown(player, args)
+            "pvp" -> togglePvp(player, args)
             "map" -> printMap(player, args)
             "minimap" -> minimap(player, args)
             "perms",
@@ -275,6 +279,12 @@ public class TownCommand :
                         if (town != null) {
                             return filterTownResident(town, args[1])
                         }
+                    }
+                }
+
+                "pvp" -> {
+                    if (args.size == 2) {
+                        return filterByStart(listOf("on", "off"), args[1])
                     }
                 }
 
@@ -353,6 +363,7 @@ public class TownCommand :
         Message.print(sender, "/town prefix${ChatColor.WHITE}: Set player name prefix")
         Message.print(sender, "/town suffix${ChatColor.WHITE}: Set player name suffix")
         Message.print(sender, "/town rename${ChatColor.WHITE}: Rename town")
+        Message.print(sender, "/town pvp [on|off]${ChatColor.WHITE}: Show or switch your town's PvP (needs togglePVPMechanic)")
         Message.print(sender, "/town map${ChatColor.WHITE}: View world map")
         Message.print(sender, "/town minimap${ChatColor.WHITE}: Toggle sidebar world minimap")
         Message.print(sender, "/town permissions${ChatColor.WHITE}: Set town protection permissions")
@@ -418,8 +429,22 @@ public class TownCommand :
             return
         }
 
+        val creationCost = EconomyCosts.townCreationCost()
+        if (!EconomyCosts.walletCovers(player, creationCost)) {
+            Message.error(player, "Creating a town costs ${EconomyCosts.show(creationCost)} from your wallet. See /economy balance player")
+            return
+        }
+
         val result = Nodes.createTown(sanitizeString(name), territory, resident)
         if (result.isSuccess) {
+            try {
+                EconomyCosts.chargeWallet(player, creationCost, "town-creation")
+                if (creationCost > 0) {
+                    Message.print(player, "Paid ${EconomyCosts.show(creationCost)} to found the town")
+                }
+            } catch (e: Exception) {
+                Nodes.logger?.warning("[Economy] Town creation fee for ${player.name} was not charged: ${e.message}")
+            }
             Message.broadcast("${ChatColor.BOLD}${player.name} has created the town \"${name}\"")
 
             val overClaimsPenalty: Int = Math.max(0, Config.initialOverClaimsAmountScale * (territory.cost - Config.townInitialClaims))
@@ -1352,8 +1377,27 @@ public class TownCommand :
             return
         }
 
+        if (Config.maxClaimsPerTown > 0 && town.territories.size >= Config.maxClaimsPerTown) {
+            Message.error(player, "A town can hold at most ${Config.maxClaimsPerTown} territories")
+            return
+        }
+
+        val claimCost = EconomyCosts.claimCost(territory.cost)
+        if (!EconomyCosts.townCovers(town, claimCost)) {
+            Message.error(player, "Claiming this territory costs ${EconomyCosts.show(claimCost)} from the town treasury. See /economy balance town")
+            return
+        }
+
         val result = Nodes.claimTerritory(town, territory)
         if (result.isSuccess) {
+            try {
+                EconomyCosts.chargeTown(town, claimCost, "territory-claim")
+                if (claimCost > 0) {
+                    Message.print(player, "Paid ${EconomyCosts.show(claimCost)} from the town treasury")
+                }
+            } catch (e: Exception) {
+                Nodes.logger?.warning("[Economy] Claim fee for ${town.name} was not charged: ${e.message}")
+            }
             Message.print(player, "Territory(id=${territory.id}) claimed")
         } else {
             when (result.exceptionOrNull()) {
@@ -1616,8 +1660,69 @@ public class TownCommand :
             return
         }
 
+        val cooldownLeft = TownFlags.renameCooldownLeft(town)
+        if (cooldownLeft > 0) {
+            Message.error(player, "Your town can be renamed again in ${TownFlags.durationText(cooldownLeft)}")
+            return
+        }
+
         Nodes.renameTown(town, name)
+        TownFlags.markRenamed(town)
         Message.print(player, "Town renamed to ${town.name}!")
+    }
+
+    /**
+     * @command /town pvp [on|off]
+     * Shows or switches PvP on your town's land (leader or officers, with a cooldown).
+     */
+    private fun togglePvp(player: Player?, args: Array<String>) {
+        if (player == null) {
+            return
+        }
+        if (!Config.togglePVPMechanic) {
+            Message.error(player, "Town PvP switching is not enabled on this server")
+            return
+        }
+        val resident = Nodes.getResident(player)
+        val town = resident?.town
+        if (resident == null || town == null) {
+            Message.error(player, "You do not belong to a town")
+            return
+        }
+        val state = if (TownFlags.pvpEnabled(town)) "on" else "off"
+        if (args.size < 2) {
+            Message.print(player, "PvP in ${town.name} is $state. Use /town pvp on|off to change it")
+            return
+        }
+        if (!Config.canToggleTownPVP) {
+            Message.error(player, "Only admins can change town PvP on this server")
+            return
+        }
+        if (resident !== town.leader && !town.officers.contains(resident)) {
+            Message.error(player, "Only the town leader or an officer can change PvP")
+            return
+        }
+        val want = when (args[1].lowercase()) {
+            "on" -> true
+            "off" -> false
+            else -> {
+                Message.error(player, "Usage: /town pvp on|off")
+                return
+            }
+        }
+        if (want == TownFlags.pvpEnabled(town)) {
+            Message.print(player, "PvP in ${town.name} is already $state")
+            return
+        }
+        val left = TownFlags.pvpCooldownLeft(town)
+        if (left > 0) {
+            Message.error(player, "PvP can be changed again in ${TownFlags.durationText(left)}")
+            return
+        }
+        TownFlags.setPvp(town, want)
+        for (member in town.playersOnline) {
+            Message.print(member, "PvP in ${town.name} is now ${if (want) "on" else "off"}")
+        }
     }
 
     /**

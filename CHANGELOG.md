@@ -20,6 +20,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Ports: the beacon pillar of an approved port request starts at the height the request was made at.
 - Economy: stock market (`economy.exchange` in the config). Listed items are bought and sold by the server at a price that follows its stock: low stock raises the price, high stock lowers it. Players sell into the stock and buy out of it, big trades move the price as they go, and the stock moves back toward its target on a timer. `/economy shop list|buy|sell`, a buy/sell mode in the menu, and `/economyadmin exchange reset`.
 - Bounties can be paid in money: `/bounty addmoney <player> <amount>`. The money is held in escrow until the target is killed.
+- Town rules (all off by default, see the "Town rules" block in the config): a town PvP toggle (`/town pvp on|off`, `togglePVPMechanic`, `canToggleTownPVP`, `pvpToggleCooldown`, admin `/nda pvp <town> <on|off>`), mob protection (`mobProtection`, `protectedMobs`, `protectedMobsIfPVPOff`), `invulnerabilityTowns`, and war sickness (`warSickness`).
+- War safeguards: `hoursRequiredToJoinWars` keeps new players out of flag attacks until they have played that long.
+- Economy: optional costs paid in the economy (`economy.costs`: `townCreation` from the wallet, `territoryClaimPerPower` from the town treasury) and daily upkeep (`economy.upkeep`: `townPerClaimPerDay`, `nationPerTownPerDay`). An account that cannot pay is skipped and nothing is deleted.
+- Chat: `/localchat` (`/lc`) and `/rpchat` (`/rp`) channels limited by `localChatDistance` and `rpChatDistance`, and `chatPrefixMode` to choose the global chat prefix.
+- Small options: `townRenameCooldown`, `maxClaimsPerTown`, `maxDaysForInactivity` with `/nda inactive [days]`, and `dailyEventTime` to run daily tax and upkeep at a set time.
 
 ## [0.1.0] – 2026-11-02
 

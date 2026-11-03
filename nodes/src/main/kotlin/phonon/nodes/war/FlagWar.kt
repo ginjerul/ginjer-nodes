@@ -356,6 +356,13 @@ public object FlagWar {
         chunk: TerritoryChunk,
         flagBase: Block,
     ): Result<Attack> {
+        // players need a minimum playtime before they can place war flags
+        if (Config.hoursRequiredToJoinWars > 0) {
+            val ticks = org.bukkit.Bukkit.getOfflinePlayer(attacker).getStatistic(org.bukkit.Statistic.PLAY_ONE_MINUTE)
+            if (ticks < Config.hoursRequiredToJoinWars * 72_000L) {
+                return Result.failure(phonon.nodes.constants.ErrorNotEnoughPlaytime)
+            }
+        }
         val world = flagBase.world
         val flagBaseX = flagBase.x
         val flagBaseY = flagBase.y

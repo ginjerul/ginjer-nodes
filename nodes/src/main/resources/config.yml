@@ -278,6 +278,63 @@ warBossBarMaxDistanceChunks: 6
 maxConcurrentAttacks: 0
 maxAttacksPerTown: 0
 
+# ===========================================
+# Town rules
+# ===========================================
+# Town PvP switch: towns turn PvP on or off on their own land with /town pvp on|off
+# (admins: /nda pvp <town> on|off). While a town has it off, players cannot hurt each
+# other on that town's land, except enemies during a war. Off by default.
+togglePVPMechanic: false
+# false = only admins can change it
+canToggleTownPVP: true
+# time between changes: milliseconds or a duration like 3d, 12h, 30m
+pvpToggleCooldown: 3d
+
+# Mob protection: the listed animals inside a town can only be hurt by that town's own
+# members and nation. protectedMobsIfPVPOff are only protected while the town's PvP is off
+# (needs togglePVPMechanic).
+mobProtection: false
+protectedMobs:
+  - COW
+  - SHEEP
+protectedMobsIfPVPOff:
+  - HORSE
+  - SKELETON_HORSE
+  - DONKEY
+  - MULE
+
+# Town UUIDs whose players take no damage at all
+# invulnerabilityTowns:
+# - caffd0a0-042e-4022-910f-608be7fd277e
+
+# Hours of playtime needed before a player can place war flags (0 = no limit)
+hoursRequiredToJoinWars: 0
+
+# While a war is on, survival players standing on land of a town they are neutral to
+# (not own, nation, ally or enemy) get weakness and slowness
+warSickness: false
+
+# Cooldown between town renames (milliseconds or 10s, 30m, 1d), 0 = none
+townRenameCooldown: 0
+
+# Most territories a town can hold (0 = no limit)
+maxClaimsPerTown: 0
+
+# /nda inactive lists residents who have not logged in for this many days (0 = give the days yourself)
+maxDaysForInactivity: 30
+
+# Time of day (server time, HH:mm) when the economy's daily tax and upkeep run.
+# Empty = every 24 hours after the last run.
+dailyEventTime: ""
+
+# Local chat (/localchat or /lc) and roleplay chat (/rpchat or /rp): only players within
+# this many blocks hear you
+localChatDistance: 100
+rpChatDistance: 100
+
+# Global chat prefix: 0 = [Nation|Town], 1 = [Town], 2 = none
+chatPrefixMode: 0
+
 # Proximity alliances: you cannot ally a town or nation that is too far away. The distance
 # is measured in blocks between the closest pair of town homes (a nation counts all of
 # its towns). Applies to offering and accepting. Players with nodes.ally.proximity.bypass
@@ -721,6 +778,17 @@ economy:
       COOKED_BEEF:
         price: '3.50'
         target: 1000
+  # one-off costs (0 = free). townCreation is paid from the founder's wallet; claiming a
+  # territory costs territoryClaimPerPower x its claim power, paid from the town treasury.
+  # The money leaves circulation.
+  costs:
+    townCreation: '0'
+    territoryClaimPerPower: '0'
+  # daily upkeep taken from treasuries (0 = off): towns pay per claim power used, nations
+  # per town. A treasury that cannot pay is skipped and its members are told; nothing is deleted.
+  upkeep:
+    townPerClaimPerDay: '0'
+    nationPerTownPerDay: '0'
   # port warp fees (/port fee): fees are paid from the wallet into the port owner town's
   # treasury. maxFee is the highest fee an owner may set.
   ports:

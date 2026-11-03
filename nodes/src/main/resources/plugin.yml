@@ -65,6 +65,16 @@ commands:
     aliases: [ac]
     permission: nodes.command.chat.ally
     usage: /allychat or /ac
+  localchat:
+    description: Set player chat to local (nearby players only)
+    aliases: [lc]
+    permission: nodes.command.chat.local
+    usage: /localchat or /lc
+  rpchat:
+    description: Set player chat to roleplay (nearby players only)
+    aliases: [rp]
+    permission: nodes.command.chat.rp
+    usage: /rpchat or /rp
   player:
     description: View player info
     permission: nodes.command.player
@@ -171,6 +181,10 @@ permissions:
   nodes.command.chat.nation:
     default: true
   nodes.command.chat.ally:
+    default: true
+  nodes.command.chat.local:
+    default: true
+  nodes.command.chat.rp:
     default: true
   nodes.command.player:
     default: true

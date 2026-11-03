@@ -337,6 +337,24 @@ public object Config {
      */
     public var noFriendlyFire: Boolean = false
 
+    // --- Fork: town rules (all off or neutral by default) ---
+    public var togglePVPMechanic: Boolean = false
+    public var canToggleTownPVP: Boolean = true
+    public var pvpToggleCooldown: Long = 259_200_000L
+    public var mobProtection: Boolean = false
+    public var protectedMobs: Set<EntityType> = emptySet()
+    public var protectedMobsIfPVPOff: Set<EntityType> = emptySet()
+    public var invulnerabilityTowns: HashSet<UUID> = hashSetOf()
+    public var hoursRequiredToJoinWars: Int = 0
+    public var warSickness: Boolean = false
+    public var townRenameCooldown: Long = 0L
+    public var maxClaimsPerTown: Int = 0
+    public var maxDaysForInactivity: Int = 0
+    public var dailyEventTime: String = ""
+    public var localChatDistance: Double = 100.0
+    public var rpChatDistance: Double = 100.0
+    public var chatPrefixMode: Int = 0
+
     // alliances can only be offered or accepted when the two sides' closest towns are within this many blocks
     public var allyProximity: Boolean = false
     public var allyProximityDistance: Double = 1500.0
@@ -624,6 +642,22 @@ public object Config {
         Config.playersInChunkMultiplierMin = config.getDouble("playersInChunkMultiplierMin", Config.playersInChunkMultiplierMin)
 
         Config.noFriendlyFire = config.getBoolean("noFriendlyFire", Config.noFriendlyFire)
+        Config.togglePVPMechanic = config.getBoolean("togglePVPMechanic", Config.togglePVPMechanic)
+        Config.canToggleTownPVP = config.getBoolean("canToggleTownPVP", Config.canToggleTownPVP)
+        Config.pvpToggleCooldown = readDuration(config, "pvpToggleCooldown", 259_200_000L)
+        Config.mobProtection = config.getBoolean("mobProtection", Config.mobProtection)
+        Config.protectedMobs = readEntityTypes(config, "protectedMobs")
+        Config.protectedMobsIfPVPOff = readEntityTypes(config, "protectedMobsIfPVPOff")
+        Config.invulnerabilityTowns = parseUUIDSet(config, "invulnerabilityTowns")
+        Config.hoursRequiredToJoinWars = config.getInt("hoursRequiredToJoinWars", 0).coerceAtLeast(0)
+        Config.warSickness = config.getBoolean("warSickness", Config.warSickness)
+        Config.townRenameCooldown = readDuration(config, "townRenameCooldown", 0L)
+        Config.maxClaimsPerTown = config.getInt("maxClaimsPerTown", 0).coerceAtLeast(0)
+        Config.maxDaysForInactivity = config.getInt("maxDaysForInactivity", 0).coerceAtLeast(0)
+        Config.dailyEventTime = config.getString("dailyEventTime", "")?.trim() ?: ""
+        Config.localChatDistance = config.getDouble("localChatDistance", Config.localChatDistance).coerceAtLeast(1.0)
+        Config.rpChatDistance = config.getDouble("rpChatDistance", Config.rpChatDistance).coerceAtLeast(1.0)
+        Config.chatPrefixMode = config.getInt("chatPrefixMode", 0).coerceIn(0, 2)
         Config.allyProximity = config.getBoolean("allyProximity", Config.allyProximity)
         Config.allyProximityDistance = config.getDouble("allyProximityDistance", Config.allyProximityDistance).coerceIn(1.0, 10000000.0)
 
@@ -891,6 +925,35 @@ private fun teleportCostToString(materials: EnumMap<Material, Int>): String {
     }
 
     return s
+}
+
+// a duration written as milliseconds (86400000) or with units (3d, 12h, 30m, 10s)
+private fun readDuration(config: ConfigurationSection, key: String, fallback: Long): Long {
+    if (!config.contains(key)) {
+        return fallback
+    }
+    val raw = config.get(key)
+    if (raw is Number) {
+        return raw.toLong().coerceAtLeast(0L)
+    }
+    val parsed = phonon.nodes.war.Warzone.parseDurationMs(raw.toString())
+    if (parsed == null) {
+        System.err.println("[Config] $key '$raw' is not a duration (use milliseconds or e.g. 3d, 12h, 30m). Using the default.")
+        return fallback
+    }
+    return parsed.coerceAtLeast(0L)
+}
+
+private fun readEntityTypes(config: ConfigurationSection, key: String): Set<EntityType> {
+    val types = HashSet<EntityType>()
+    for (name in config.getStringList(key)) {
+        try {
+            types.add(EntityType.valueOf(name.trim().uppercase()))
+        } catch (_: IllegalArgumentException) {
+            System.err.println("[Config] $key: unknown entity type '$name'")
+        }
+    }
+    return types
 }
 
 private fun parseUUIDSet(config: ConfigurationSection, listName: String): HashSet<UUID> {
