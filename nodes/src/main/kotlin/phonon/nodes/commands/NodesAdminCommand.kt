@@ -306,13 +306,22 @@ public class NodesAdminCommand :
             Message.error(sender, "No permission")
             return
         }
+        if (args.size >= 3 && args[1].equals("reset", ignoreCase = true) && args[2].equals("all", ignoreCase = true)) {
+            if (args.size < 4 || !args[3].equals("confirm", ignoreCase = true)) {
+                Message.error(sender, "This wipes the kills and deaths of EVERY player. Type /nda stats reset all confirm to do it (a backup of player-stats.json is kept)")
+                return
+            }
+            val count = phonon.nodes.stats.PlayerStats.resetAll()
+            Message.print(sender, "Reset stats for everyone ($count players)")
+            return
+        }
         if (args.size >= 3 && args[1].equals("reset", ignoreCase = true)) {
             val offline = org.bukkit.Bukkit.getOfflinePlayer(args[2])
             phonon.nodes.stats.PlayerStats.reset(offline.uniqueId)
             Message.print(sender, "Reset stats for ${args[2]}")
             return
         }
-        Message.print(sender, "Usage: /nda stats reset <player>")
+        Message.print(sender, "Usage: /nda stats reset <player|all confirm>")
     }
 
     override fun onCommand(sender: CommandSender, cmd: Command, commandLabel: String, args: Array<String>): Boolean {
@@ -370,6 +379,12 @@ public class NodesAdminCommand :
                 "stats" -> {
                     if (args.size == 2) {
                         return filterByStart(listOf("reset"), args[1])
+                    }
+                    if (args.size == 3 && args[1].equals("reset", ignoreCase = true)) {
+                        return filterByStart(listOf("all") + Bukkit.getOnlinePlayers().map { it.name }, args[2])
+                    }
+                    if (args.size == 4 && args[2].equals("all", ignoreCase = true)) {
+                        return filterByStart(listOf("confirm"), args[3])
                     }
                 }
 
@@ -650,7 +665,7 @@ public class NodesAdminCommand :
         Message.print(sender, "/nodesadmin runincome${ChatColor.WHITE}: Runs income for all towns")
         Message.print(sender, "/nodesadmin debug${ChatColor.WHITE}: World object debugger")
         Message.print(sender, "/nodesadmin miningboost${ChatColor.WHITE}: Mining rate/amount boosts")
-        Message.print(sender, "/nodesadmin stats reset <player>${ChatColor.WHITE}: Reset K/D stats")
+        Message.print(sender, "/nodesadmin stats reset <player|all confirm>${ChatColor.WHITE}: Reset K/D stats (all = everyone)")
         Message.print(sender, "/nodesadmin announce <message>${ChatColor.WHITE}: Announce for all players")
         Message.print(sender, "/nodesadmin plot list|delete <name>${ChatColor.WHITE}: Manage plots")
         Message.print(sender, "/nodesadmin rallycap <nation> <n|-1>${ChatColor.WHITE}: Manage rallycaps")

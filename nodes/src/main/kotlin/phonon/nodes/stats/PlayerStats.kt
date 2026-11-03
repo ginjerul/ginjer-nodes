@@ -62,6 +62,23 @@ object PlayerStats {
         save()
     }
 
+    // wipes every player's kills and deaths. The old file is copied to
+    // player-stats.backup-<time>.json first. Returns how many records were cleared.
+    fun resetAll(): Int {
+        val count = records.size
+        try {
+            if (Files.exists(path)) {
+                Files.copy(path, path.resolveSibling("player-stats.backup-${System.currentTimeMillis()}.json"))
+            }
+        } catch (e: Exception) {
+            Nodes.logger?.warning("[Stats] Could not back up player-stats.json before reset: ${e.message}")
+        }
+        records.clear()
+        needsSave = true
+        save()
+        return count
+    }
+
     fun formatLine(name: String, rec: KillDeathRecord): String = "${ChatColor.YELLOW}$name ${ChatColor.WHITE}${rec.kills}K / ${rec.deaths}D ${ChatColor.GRAY}(KDR ${rec.kdrString()})"
 
     fun topKills(n: Int = 10): List<Pair<String, KillDeathRecord>> = topBy(n) { it.kills.toDouble() }
