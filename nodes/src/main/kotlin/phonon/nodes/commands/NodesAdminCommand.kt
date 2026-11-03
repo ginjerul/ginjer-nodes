@@ -57,7 +57,6 @@ private val SUBCOMMANDS: List<String> = listOf(
     "war",
     "surrender",
     "port",
-    "portgroup",
     "resident",
     "town",
     "nation",
@@ -103,11 +102,6 @@ private val PORT_SUBCOMMANDS: List<String> = listOf(
     "group",
     "list",
     "requests",
-)
-
-private val PORTGROUP_SUBCOMMANDS: List<String> = listOf(
-    "create",
-    "delete",
 )
 
 private val RESIDENT_SUBCOMMANDS: List<String> = listOf(
@@ -339,7 +333,6 @@ public class NodesAdminCommand :
             "resident" -> manageResident(sender, args)
             "town" -> manageTown(sender, args)
             "port" -> managePort(sender, args)
-            "portgroup" -> managePortGroup(sender, args)
             "nation" -> manageNation(sender, args)
             "enemy" -> setEnemy(sender, args)
             "peace" -> setPeace(sender, args)
@@ -451,17 +444,6 @@ public class NodesAdminCommand :
                             }
                             "group" -> if (args[2].equals("remove", ignoreCase = true)) return filterPortGroup(args[3])
                             "requests" -> return filterByStart(listOf("approve", "deny"), args[3])
-                        }
-                    }
-                }
-
-                "portgroup" -> {
-                    if (args.size == 2) {
-                        return filterByStart(PORTGROUP_SUBCOMMANDS, args[1])
-                    }
-                    when (args[1].lowercase()) {
-                        "delete" -> {
-                            return filterPortGroup(args[2])
                         }
                     }
                 }
@@ -656,7 +638,6 @@ public class NodesAdminCommand :
         Message.print(sender, "/nodesadmin surrender reset <town>${ChatColor.WHITE}: Clear a town's surrender cooldown")
         Message.print(sender, "/nodesadmin town${ChatColor.WHITE}: Manage towns (see \"/nodesadmin town help\")")
         Message.print(sender, "/nodesadmin nation${ChatColor.WHITE}: Manage nations (see \"/nodesadmin nation help\")")
-        Message.print(sender, "/nodesadmin portgroup${ChatColor.WHITE}: Manage port groups (see \"/nodesadmin portgroup help\")")
         Message.print(sender, "/nodesadmin port${ChatColor.WHITE}: Manage ports (see \"/nodesadmin port help\")")
         Message.print(sender, "/nodesadmin enemy${ChatColor.WHITE}: Make two towns/nations enemies")
         Message.print(sender, "/nodesadmin peace${ChatColor.WHITE}: Sets peace between two towns/nations")
@@ -937,7 +918,7 @@ public class NodesAdminCommand :
         Message.print(sender, "${ChatColor.AQUA}/nodesadmin port delete [name]${ChatColor.WHITE}: Delete a port")
         Message.print(sender, "${ChatColor.AQUA}/nodesadmin port addgroup [port] [group]${ChatColor.WHITE}: Add a port to a group")
         Message.print(sender, "${ChatColor.AQUA}/nodesadmin port removegroup [port] [group]${ChatColor.WHITE}: Remove a port from a group")
-        Message.print(sender, "${ChatColor.AQUA}/nodesadmin port group add|remove [group]${ChatColor.WHITE}: Create or delete a port group (same as portgroup create / delete)")
+        Message.print(sender, "${ChatColor.AQUA}/nodesadmin port group add|remove [group]${ChatColor.WHITE}: Create or delete a port group that ports can join")
         Message.print(sender, "${ChatColor.AQUA}/nodesadmin port list${ChatColor.WHITE}: List all ports with owner and groups")
         Message.print(sender, "${ChatColor.AQUA}/nodesadmin port requests${ChatColor.WHITE}: Menu of port requests, click one to teleport there")
         Message.print(sender, "${ChatColor.AQUA}/nodesadmin port requests [name] approve|deny [reason]${ChatColor.WHITE}: Decide a request")
@@ -960,8 +941,7 @@ public class NodesAdminCommand :
             Message.error(sender, "Usage: /nodesadmin port group add|remove [group]")
             return
         }
-        val mapped = arrayOf("portgroup", if (action == "add") "create" else "delete", args[3])
-        if (action == "add") createPortGroup(sender, mapped) else deletePortGroup(sender, mapped)
+        if (action == "add") createPortGroup(sender, args[3]) else deletePortGroup(sender, args[3])
     }
 
     private fun portRequests(sender: CommandSender, args: Array<String>) {
@@ -1144,39 +1124,15 @@ public class NodesAdminCommand :
     }
 
     // =============================================================
-    // port group management commands
-    // - create/delete port groups
+    // port group management (/nodesadmin port group add|remove)
     // =============================================================
 
-    private fun managePortGroup(sender: CommandSender, args: Array<String>) {
-        if (args.size < 2) {
-            printPortGroupHelp(sender)
-        } else {
-            when (args[1].lowercase()) {
-                "create" -> createPortGroup(sender, args)
-                "delete" -> deletePortGroup(sender, args)
-                else -> printPortGroupHelp(sender)
-            }
-        }
-    }
-
-    private fun printPortGroupHelp(sender: CommandSender) {
-        Message.print(sender, "${ChatColor.AQUA}/nodesadmin portgroup create [name]${ChatColor.WHITE}: Create a new port group")
-        Message.print(sender, "${ChatColor.AQUA}/nodesadmin portgroup delete [name]${ChatColor.WHITE}: Delete a port group")
-    }
-
     /**
-     * @command /nodesadmin portgroup create [name]
+     * @command /nodesadmin port group add [name]
      * Creates a port group.
      */
-    private fun createPortGroup(sender: CommandSender, args: Array<String>) {
-        if (args.size < 3) {
-            Message.error(sender, "Usage: /nodesadmin portgroup create [name]")
-            Message.error(sender, "Example: /nodesadmin portgroup create atlantic")
-            return
-        }
-
-        val portGroupName = args[2].lowercase()
+    private fun createPortGroup(sender: CommandSender, name: String) {
+        val portGroupName = name.lowercase()
 
         Nodes.createPortGroup(
             portGroupName,
@@ -1189,17 +1145,11 @@ public class NodesAdminCommand :
     }
 
     /**
-     * @command /nodesadmin portgroup delete [name]
+     * @command /nodesadmin port group remove [name]
      * Deletes a port group.
      */
-    private fun deletePortGroup(sender: CommandSender, args: Array<String>) {
-        if (args.size < 3) {
-            Message.error(sender, "Usage: /nodesadmin portgroup delete [name]")
-            Message.error(sender, "Example: /nodesadmin portgroup delete atlantic")
-            return
-        }
-
-        val portGroupName = args[2].lowercase()
+    private fun deletePortGroup(sender: CommandSender, name: String) {
+        val portGroupName = name.lowercase()
         val portGroup = Nodes.getPortGroupFromName(portGroupName)
 
         if (portGroup === null) {
