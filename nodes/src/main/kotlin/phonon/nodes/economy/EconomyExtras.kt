@@ -147,6 +147,59 @@ object EconomyExtras {
         return "Sold stored income for ${show(total)}, paid into the town treasury"
     }
 
+    // what the server would pay now for everything sellable in the player's inventory
+    fun sellableValue(player: Player): Long {
+        var total = 0L
+        for (item in player.inventory.storageContents) {
+            val unit = unitPrice(item) ?: continue
+            total += unit * item!!.amount
+        }
+        return total
+    }
+
+    // ===================================
+    // server shop: preset items the server sells at fixed prices. The money
+    // leaves circulation, which balances the money created by selling.
+    // ===================================
+    fun shopPrices(): List<Pair<Material, Long>> = Economy.shopPrices.entries
+        .sortedBy { it.key.name }
+        .map { Pair(it.key, it.value) }
+
+    fun shopLines(page: Int): List<String> {
+        val all = shopPrices()
+        val pages = maxOf(1, (all.size + 9) / 10)
+        val p = page.coerceIn(1, pages)
+        val lines = all.drop((p - 1) * 10).take(10).map { "${it.first.name}: ${show(it.second)} each" }
+        return if (lines.isEmpty()) listOf("The server shop is empty") else lines + "Page $p/$pages. Buy with /economy shop buy <material> <amount>"
+    }
+
+    fun shopBuy(player: Player, materialName: String, amountText: String): String {
+        requirePlaying(player)
+        val material = Material.matchMaterial(materialName) ?: throw EconomyException("Unknown material")
+        val unit = Economy.shopPrices[material] ?: throw EconomyException("The server shop does not sell that. See /economy shop list")
+        val amount = amountText.toIntOrNull()
+        if (amount == null || amount < 1 || amount > 2304) {
+            throw EconomyException("Amount must be 1-2304")
+        }
+        val result = BountyItems.add(player.inventory.storageContents, BountyItems.stacks(material, amount), player.inventory.maxStackSize)
+            ?: throw EconomyException("Make space in your inventory first")
+        val total = Math.multiplyExact(unit, amount.toLong())
+        val from = wallet(player.uniqueId)
+        Economy.transaction {
+            Economy.requireAvailable(from)
+            Economy.credit(from, -total)
+            Economy.log("shop-purchase", from, "issuance", total)
+        }
+        player.inventory.storageContents = result
+        player.saveData()
+        return "Bought ${amount}x ${material.name} for ${show(total)}"
+    }
+
+    // loan requests waiting for staff: id, borrower and amount
+    fun pendingLoans(): List<Triple<String, String, Long>> = Economy.state.loans.entries
+        .filter { it.value.status == "REQUESTED" }
+        .map { Triple(it.key, Economy.label(it.value.borrower), it.value.owed) }
+
     // ===================================
     // vote rewards
     // ===================================

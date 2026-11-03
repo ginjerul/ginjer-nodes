@@ -11,6 +11,7 @@ package phonon.nodes.economy
 
 import com.google.gson.GsonBuilder
 import org.bukkit.Material
+import org.bukkit.configuration.ConfigurationSection
 import org.bukkit.configuration.file.FileConfiguration
 import org.bukkit.entity.Player
 import phonon.nodes.Nodes
@@ -151,6 +152,7 @@ object Economy {
     internal var marketFeePercent = 0.0
     internal var townTaxPercent = 0.0
     internal var sellPrices: Map<Material, Long> = emptyMap()
+    internal var shopPrices: Map<Material, Long> = emptyMap()
     internal var sellDailyLimit = 0L
     internal var voteReward = 0L
     internal var marketEnabled = true
@@ -193,21 +195,29 @@ object Economy {
         marketMaxPrice = if (maxPrice > 0) maxPrice else 100_000_000L
         val maxFee = optionalMoney(sec.get("ports.maxFee"), "ports.maxFee")
         portMaxFee = if (maxFee > 0) maxFee else 100_000L
-        val prices = LinkedHashMap<Material, Long>()
-        val priceSec = sec.getConfigurationSection("sell.prices")
-        if (priceSec != null) {
-            for (key in priceSec.getKeys(false)) {
-                val mat = Material.matchMaterial(key)
-                val cents = optionalMoney(priceSec.get(key), "sell.prices.$key")
-                if (mat == null || !mat.isItem || mat.isAir || cents <= 0) {
-                    Nodes.logger?.warning("[Economy] Ignoring sell price for '$key'")
-                    continue
-                }
-                prices[mat] = cents
-            }
-        }
-        sellPrices = prices
+        sellPrices = readPrices(sec.getConfigurationSection("sell.prices"), "sell.prices")
+        shopPrices = readPrices(sec.getConfigurationSection("shop.prices"), "shop.prices")
     }
+
+    // MATERIAL: price pairs from a config section; invalid entries are skipped with a warning
+    private fun readPrices(section: ConfigurationSection?, name: String): Map<Material, Long> {
+        val prices = LinkedHashMap<Material, Long>()
+        if (section == null) {
+            return prices
+        }
+        for (key in section.getKeys(false)) {
+            val mat = Material.matchMaterial(key)
+            val cents = optionalMoney(section.get(key), "$name.$key")
+            if (mat == null || !mat.isItem || mat.isAir || cents <= 0) {
+                Nodes.logger?.warning("[Economy] Ignoring price for '$key' in $name")
+                continue
+            }
+            prices[mat] = cents
+        }
+        return prices
+    }
+
+    fun tradeResources(): Set<String> = resources
 
     // a money setting in config; 0, empty or missing means off
     private fun optionalMoney(value: Any?, name: String): Long {

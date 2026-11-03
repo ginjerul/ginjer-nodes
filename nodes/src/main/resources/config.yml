@@ -645,6 +645,21 @@ economy:
     enabled: true
     maxListingsPerPlayer: 10
     maxPrice: '1000000'
+  # server shop (/economy shop, and the Server shop in /economy menu): preset items the
+  # server SELLS at a fixed price each. The money leaves circulation. Keep these prices
+  # above the sell prices so nobody can buy from the shop and sell straight back for profit.
+  shop:
+    prices:
+      COAL: '1.00'
+      IRON_INGOT: '4.00'
+      COPPER_INGOT: '2.00'
+      GOLD_INGOT: '8.00'
+      DIAMOND: '40.00'
+      EMERALD: '30.00'
+      REDSTONE: '0.50'
+      LAPIS_LAZULI: '1.00'
+      BREAD: '2.00'
+      COOKED_BEEF: '3.00'
   # port warp fees (/port fee): fees are paid from the wallet into the port owner town's
   # treasury. maxFee is the highest fee an owner may set.
   ports:

@@ -449,11 +449,9 @@ public class NodesAdminCommand :
                             -> {
                                 return filterPortGroup(args[3])
                             }
-                            "group" -> return filterPort(args[3])
+                            "group" -> if (args[2].equals("remove", ignoreCase = true)) return filterPortGroup(args[3])
                             "requests" -> return filterByStart(listOf("approve", "deny"), args[3])
                         }
-                    } else if (args.size == 5 && args[1].lowercase() == "group") {
-                        return filterPortGroup(args[4])
                     }
                 }
 
@@ -939,7 +937,7 @@ public class NodesAdminCommand :
         Message.print(sender, "${ChatColor.AQUA}/nodesadmin port delete [name]${ChatColor.WHITE}: Delete a port")
         Message.print(sender, "${ChatColor.AQUA}/nodesadmin port addgroup [port] [group]${ChatColor.WHITE}: Add a port to a group")
         Message.print(sender, "${ChatColor.AQUA}/nodesadmin port removegroup [port] [group]${ChatColor.WHITE}: Remove a port from a group")
-        Message.print(sender, "${ChatColor.AQUA}/nodesadmin port group add|remove [port] [group]${ChatColor.WHITE}: Same as addgroup / removegroup")
+        Message.print(sender, "${ChatColor.AQUA}/nodesadmin port group add|remove [group]${ChatColor.WHITE}: Create or delete a port group (same as portgroup create / delete)")
         Message.print(sender, "${ChatColor.AQUA}/nodesadmin port list${ChatColor.WHITE}: List all ports with owner and groups")
         Message.print(sender, "${ChatColor.AQUA}/nodesadmin port requests${ChatColor.WHITE}: Menu of port requests, click one to teleport there")
         Message.print(sender, "${ChatColor.AQUA}/nodesadmin port requests [name] approve|deny [reason]${ChatColor.WHITE}: Decide a request")
@@ -955,15 +953,15 @@ public class NodesAdminCommand :
         }
     }
 
-    // /nodesadmin port group add|remove [port] [group] runs addgroup / removegroup
+    // /nodesadmin port group add|remove [group] creates or deletes a port group that ports can join
     private fun portGroupAlias(sender: CommandSender, args: Array<String>) {
         val action = args.getOrNull(2)?.lowercase()
-        if (args.size < 5 || (action != "add" && action != "remove")) {
-            Message.error(sender, "Usage: /nodesadmin port group add|remove [port] [group]")
+        if (args.size < 4 || (action != "add" && action != "remove")) {
+            Message.error(sender, "Usage: /nodesadmin port group add|remove [group]")
             return
         }
-        val mapped = arrayOf("port", if (action == "add") "addgroup" else "removegroup", args[3], args[4])
-        if (action == "add") addPortGroup(sender, mapped) else removePortGroup(sender, mapped)
+        val mapped = arrayOf("portgroup", if (action == "add") "create" else "delete", args[3])
+        if (action == "add") createPortGroup(sender, mapped) else deletePortGroup(sender, mapped)
     }
 
     private fun portRequests(sender: CommandSender, args: Array<String>) {
