@@ -401,9 +401,10 @@ canLeaveNationDuringWar: false
 # global disable annexing
 annexDisabled: false
 
-# annex every territory the moment its core is captured (needs annexing enabled during war).
-# false = only capturing a town's home annexes it, other territories need /town annex
-instantAnnexOnCapture: false
+# capturing a town's home annexes the whole town right away (needs annexing enabled during war).
+# false = the home is only occupied and the attacker uses /town annex, like any other territory.
+# Normal (non-home) territories always need /town annex.
+instantAnnexOnCapture: true
 
 # when a town's home territory is captured, the town is kept and joins the attacker's nation
 # (it leaves its old nation first). Does nothing if the attacker has no nation.

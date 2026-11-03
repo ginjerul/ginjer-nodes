@@ -407,8 +407,8 @@ public object Config {
 
     public var annexDisabled: Boolean = false
 
-    // annex every captured territory right away, not only a town's home
-    public var instantAnnexOnCapture: Boolean = false
+    // capturing a town's home annexes the whole town right away (other territories always need /town annex)
+    public var instantAnnexOnCapture: Boolean = true
 
     // a captured town (home territory taken) joins the attacker's nation instead of being annexed
     public var capturedTownJoinsNation: Boolean = false

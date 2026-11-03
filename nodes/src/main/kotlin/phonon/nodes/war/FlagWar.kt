@@ -1031,7 +1031,7 @@ public object FlagWar {
                         )
                     }
                 } else if (defenderTown != null &&
-                    (wasHome || Config.instantAnnexOnCapture) &&
+                    wasHome && Config.instantAnnexOnCapture &&
                     FlagWar.canAnnexTerritories &&
                     !Config.annexDisabled &&
                     townMayBeTakenOver(attackerTown, defenderTown) &&
