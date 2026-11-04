@@ -81,6 +81,7 @@ private val SUBCOMMANDS: List<String> = listOf(
     "rallycap",
     "announce",
     "plot",
+    "calendar",
 )
 
 private val RELOAD_SUBCOMMANDS: List<String> = listOf(
@@ -411,6 +412,7 @@ public class NodesAdminCommand :
             "runincome" -> Nodes.runIncome()
             "playersonline" -> Nodes.refreshPlayersOnline()
             "plot" -> adminPlot(sender, args)
+            "calendar" -> phonon.nodes.calendar.CalendarAdmin.handle(sender, args)
             "rallycap" -> adminRallyCap(sender, args)
             "debug" -> debugger(sender, args)
             else -> {
@@ -429,6 +431,8 @@ public class NodesAdminCommand :
             return filterByStart(SUBCOMMANDS.filter { AdminPerms.canSee(sender, it) }, args[0])
         } else if (args.size > 1) {
             when (args[0].lowercase()) {
+                "calendar" -> return phonon.nodes.calendar.CalendarAdmin.complete(args)
+
                 "reload" -> {
                     if (args.size == 2) {
                         return filterByStart(RELOAD_SUBCOMMANDS, args[1])
@@ -735,6 +739,7 @@ public class NodesAdminCommand :
         helpLine(sender, "socialspy", "/nodesadmin socialspy${ChatColor.WHITE}: Toggle seeing town, nation and ally chat")
         helpLine(sender, "stats", "/nodesadmin stats reset <player|all confirm>${ChatColor.WHITE}: Reset K/D stats (all = everyone)")
         helpLine(sender, "announce", "/nodesadmin announce <message>${ChatColor.WHITE}: Announce for all players")
+        helpLine(sender, "calendar", "/nodesadmin calendar${ChatColor.WHITE}: Add, edit and remove calendar events, send announcements (see \"/nodesadmin calendar\")")
         helpLine(sender, "plot", "/nodesadmin plot list|delete <name>${ChatColor.WHITE}: Manage plots")
         helpLine(sender, "rallycap", "/nodesadmin rallycap <nation> <n|-1>${ChatColor.WHITE}: Manage rallycaps")
         if (org.bukkit.Bukkit.getPluginManager().getPlugin("GinjerMap") != null) {

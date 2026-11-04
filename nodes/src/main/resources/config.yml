@@ -477,6 +477,23 @@ tabList:
   maxPlayersPerSection: 15
   showPlayerPing: false
 
+# Server calendar: /calendar shows a month with the day's events, admins manage it with
+# /nda calendar. Events can repeat and can start a war or the mining boost at their time.
+calendar:
+  enabled: true
+  # time zone for event times, e.g. Europe/London. Empty = the server's
+  timezone: ""
+  # broadcast the day's events at this time (HH:mm). Empty = no daily broadcast
+  dailyAnnounceTime: "12:00"
+  # show today's events and active announcements to players when they join
+  showOnJoin: true
+  # minutes before an event's time to remind everyone (0 = off)
+  remindMinutes: 10
+  # an event whose time passed while the server was down still starts if it is this recent
+  catchUpMinutes: 30
+  # how long /nda calendar announce stays on the calendar (0 = until removed)
+  announcementHours: 24
+
 # chat: lines starting with > turn green, and text put in front of every player's name (& colors)
 greenText: true
 chatPrefix: ""

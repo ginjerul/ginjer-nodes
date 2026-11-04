@@ -194,6 +194,7 @@ public class NodesPlugin : JavaPlugin() {
         this.getCommand("nationchat")?.setExecutor(NationChatCommand())
         this.getCommand("allychat")?.setExecutor(AllyChatCommand())
         this.getCommand("localchat")?.setExecutor(phonon.nodes.commands.LocalChatCommand())
+        this.getCommand("calendar")?.setExecutor(phonon.nodes.commands.CalendarCommand())
         this.getCommand("rpchat")?.setExecutor(phonon.nodes.commands.RpChatCommand())
         this.getCommand("player")?.setExecutor(PlayerCommand())
         this.getCommand("territory")?.setExecutor(TerritoryCommand())
@@ -274,6 +275,7 @@ public class NodesPlugin : JavaPlugin() {
         phonon.nodes.rules.TownFlags.load()
         phonon.nodes.rules.TownRules.start(this)
         phonon.nodes.tab.TabList.start(this)
+        phonon.nodes.calendar.Calendar.start(this)
         // beacon pillars are placed once the worlds are up
         server.scheduler.runTaskLater(this, Runnable { PortBeacons.placeAll() }, 100L)
 

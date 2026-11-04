@@ -64,6 +64,10 @@ commands:
     aliases: [ac]
     permission: nodes.command.chat.ally
     usage: /allychat or /ac
+  calendar:
+    description: Server calendar with the daily events
+    permission: nodes.command.calendar
+    usage: /calendar [today|upcoming]
   localchat:
     description: Set player chat to local (nearby players only)
     aliases: [lc]
@@ -185,6 +189,7 @@ permissions:
       nodes.admin.rallycap: true
       nodes.admin.announce: true
       nodes.admin.plot: true
+      nodes.admin.calendar: true
   nodes.command.town:
     default: true
   nodes.command.nation:
@@ -208,6 +213,8 @@ permissions:
   nodes.command.chat.nation:
     default: true
   nodes.command.chat.ally:
+    default: true
+  nodes.command.calendar:
     default: true
   nodes.command.chat.local:
     default: true
@@ -313,6 +320,9 @@ permissions:
     default: false
   nodes.admin.plot:
     description: /nodesadmin plot (grant nodes.admin.plot.<action> for a single action)
+    default: false
+  nodes.admin.calendar:
+    description: /nodesadmin calendar (grant nodes.admin.calendar.<add|edit|remove|list|show|announce|announcements|unannounce> for single actions)
     default: false
   nodes.stats.admin:
     description: Reset stats
