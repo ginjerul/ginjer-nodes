@@ -147,9 +147,7 @@ object CalendarData {
 
     fun get(id: Int): CalendarEvent? = file.events.firstOrNull { it.id == id }
 
-    fun eventsOn(date: LocalDate): List<CalendarEvent> {
-        return file.events.filter { it.occursOn(date) }.sortedWith(compareBy({ it.localTime() ?: LocalTime.MIN }, { it.id }))
-    }
+    fun eventsOn(date: LocalDate): List<CalendarEvent> = file.events.filter { it.occursOn(date) }.sortedWith(compareBy({ it.localTime() ?: LocalTime.MIN }, { it.id }))
 
     fun add(event: CalendarEvent): CalendarEvent {
         event.id = file.nextId++
