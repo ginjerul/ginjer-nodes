@@ -323,6 +323,7 @@ public class NodesPlugin : JavaPlugin() {
         Fortifications.save()
 
         Nodes.enabled = false
+        phonon.nodes.shardsync.ShardSync.stop()
 
         Nodes.cleanup()
         // Don't save if loading failed, or empty data overwrites the save

@@ -10,5 +10,5 @@ G=$(ls $L/gson-*.jar | head -1)
 OUT=$(mktemp -d)
 HERE=$(cd "$(dirname "$0")" && pwd)
 java -cp "$CP" org.jetbrains.kotlin.cli.jvm.K2JVMCompiler -no-stdlib -no-reflect -cp $L/kotlin-stdlib-$V.jar:$G -d $OUT \
-  $HERE/../../src/main/kotlin/phonon/nodes/shardsync/*.kt $HERE/MergeTest.kt
+  $HERE/../../src/main/kotlin/phonon/nodes/shardsync/StateMerge.kt $HERE/../../src/main/kotlin/phonon/nodes/shardsync/SyncStore.kt $HERE/../../src/main/kotlin/phonon/nodes/shardsync/SyncEngine.kt $HERE/MergeTest.kt
 java -cp $OUT:$L/kotlin-stdlib-$V.jar:$G MergeTestKt

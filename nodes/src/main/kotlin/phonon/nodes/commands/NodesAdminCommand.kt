@@ -81,6 +81,7 @@ private val SUBCOMMANDS: List<String> = listOf(
     "rallycap",
     "announce",
     "plot",
+    "shardsync",
 )
 
 private val RELOAD_SUBCOMMANDS: List<String> = listOf(
@@ -408,6 +409,7 @@ public class NodesAdminCommand :
             "treaty" -> manageTreaty(sender, args)
             "save" -> saveWorld(sender, args)
             "load" -> loadWorld(sender)
+            "shardsync" -> shardSyncStatus(sender)
             "runincome" -> Nodes.runIncome()
             "playersonline" -> Nodes.refreshPlayersOnline()
             "plot" -> adminPlot(sender, args)
@@ -725,6 +727,7 @@ public class NodesAdminCommand :
         helpLine(sender, "allyremove", "/nodesadmin allyremove${ChatColor.WHITE}: Removes alliance between two towns/nations")
         helpLine(sender, "truce", "/nodesadmin truce${ChatColor.WHITE}: Sets truce between two towns/nations")
         helpLine(sender, "truceremove", "/nodesadmin truceremove${ChatColor.WHITE}: Removes truce between two towns/nations")
+        helpLine(sender, "shardsync", "/nodesadmin shardsync${ChatColor.WHITE}: Show shard sync status")
         helpLine(sender, "save", "/nodesadmin save${ChatColor.WHITE}: Force save world")
         helpLine(sender, "load", "/nodesadmin load${ChatColor.WHITE}: Force load world")
         helpLine(sender, "runincome", "/nodesadmin runincome${ChatColor.WHITE}: Runs income for all towns")
@@ -2762,6 +2765,12 @@ public class NodesAdminCommand :
         } else {
             Message.print(sender, "[Nodes] Saving world (async)")
             Nodes.saveWorld(checkIfNeedsSave = false, async = true)
+        }
+    }
+
+    private fun shardSyncStatus(sender: CommandSender) {
+        for (line in phonon.nodes.shardsync.ShardSync.statusLines()) {
+            Message.print(sender, line)
         }
     }
 

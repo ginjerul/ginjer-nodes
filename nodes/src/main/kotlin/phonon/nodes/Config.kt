@@ -46,6 +46,11 @@ public object Config {
 
     public var savePeriod: Long = 600L
 
+    // Shard sync: share Nodes state between Reef shards through a common folder
+    public var shardSyncEnabled: Boolean = false
+    public var shardSyncFolder: String = ""
+    public var shardSyncIntervalSeconds: Long = 3L
+
     public var backupPeriod: Long = 3600000L // 1 hour
 
     // main tick period check for backup, income, town + resident cooldown counters
@@ -541,6 +546,10 @@ public object Config {
     public fun load(config: FileConfiguration) {
         Config.disableWorldWhenLoadFails = config.getBoolean("disableWorldWhenLoadFails", Config.disableWorldWhenLoadFails)
         Config.savePeriod = config.getLong("savePeriod", Config.savePeriod)
+        Config.shardSyncEnabled = config.getBoolean("shardSync.enabled", Config.shardSyncEnabled)
+        Config.shardSyncFolder = config.getString("shardSync.folder", Config.shardSyncFolder) ?: ""
+        Config.shardSyncIntervalSeconds =
+            config.getLong("shardSync.intervalSeconds", Config.shardSyncIntervalSeconds).coerceIn(1L, 300L)
         Config.backupPeriod = config.getLong("backupPeriod", Config.backupPeriod)
         Config.mainPeriodicTick = config.getLong("mainPeriodicTick", Config.mainPeriodicTick)
         Config.overMaxClaimsReminderPeriod = config.getLong("overMaxClaimsReminderPeriod", Config.overMaxClaimsReminderPeriod)

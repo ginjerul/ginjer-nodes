@@ -207,6 +207,7 @@ public object Nodes {
 
     internal fun reloadManagers() {
         SaveManager.stop()
+        phonon.nodes.shardsync.ShardSync.stop()
         PeriodicTickManager.stop()
         OverMaxClaimsReminder.stop()
         Nametag.stop()
@@ -217,6 +218,7 @@ public object Nodes {
         }
 
         SaveManager.start(plugin, Config.savePeriod)
+        phonon.nodes.shardsync.ShardSync.start(plugin)
         PeriodicTickManager.start(plugin, Config.mainPeriodicTick)
         OverMaxClaimsReminder.start(plugin, Config.overMaxClaimsReminderPeriod)
         Nametag.start(plugin, Config.nametagUpdatePeriod)

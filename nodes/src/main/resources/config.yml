@@ -365,6 +365,14 @@ antiBlockGlitchDurationTicks: 60
 warPlayerWhiteList: false
 whitelistDenyCommand: "kick %player% Not on the war whitelist"
 
+# Share Nodes state between Reef shards (one world split across servers).
+# Every shard needs the same folder (use the folder all shards can reach, e.g. next to shared-playerdata)
+# and the same 'regions' in reef.yml. Check progress with /nda shardsync.
+shardSync:
+  enabled: false
+  folder: ""
+  intervalSeconds: 3
+
 # How long a player must wait after leaving (or being kicked from) a town in a nation
 # before joining a town in a different nation. Examples: 30m, 2h, 2d, 1d12h.
 # -1 = no cooldown. Admin commands ignore it.

@@ -185,6 +185,7 @@ permissions:
       nodes.admin.rallycap: true
       nodes.admin.announce: true
       nodes.admin.plot: true
+      nodes.admin.shardsync: true
   nodes.command.town:
     default: true
   nodes.command.nation:

@@ -1,6 +1,9 @@
 import com.google.gson.JsonParser
 import phonon.nodes.shardsync.FolderSyncStore
 import phonon.nodes.shardsync.StateMerge
+import phonon.nodes.shardsync.SyncEngine
+import phonon.nodes.shardsync.SyncStore
+import phonon.nodes.shardsync.Snapshot
 import java.nio.file.Files
 
 var failed = 0
@@ -112,6 +115,63 @@ fun main() {
         ts.forEach { it.join() }
         wins = results.count { it != null }
         check("exactly one racing writer wins", wins == 1)
+    }
+
+
+    // two shards syncing through one store
+    run {
+        val dir = Files.createTempDirectory("engines")
+        val tA = """{"leader":"u1","residents":["u1"],"territories":[1]}"""
+        val tB = """{"leader":"u2","residents":["u2"],"territories":[2]}"""
+        val a = SyncEngine(FolderSyncStore(dir))
+        val b = SyncEngine(FolderSyncStore(dir))
+
+        val aState = world("""{"u1":{"town":"A","nation":null}}""", """{"A":$tA}""")
+        val o1 = a.sync(aState.toString())
+        check("A publishes first", o1.wrote && o1.version == 1L)
+
+        val bState = world("""{"u2":{"town":"B","nation":null}}""", """{"B":$tB}""")
+        val o2 = b.sync(bState.toString())
+        check("B publishes and merges A in", o2.wrote && o2.version == 2L)
+        check("B sees A's entities as pending", o2.pendingFromOthers.toSet() == setOf("residents/u1", "towns/A"))
+
+        val o3 = a.sync(aState.toString())
+        check("A writes nothing, sees B pending", !o3.wrote && o3.pendingFromOthers.toSet() == setOf("residents/u2", "towns/B"))
+        check("A needs no more rounds", !a.needsRound(aState.toString(), aState.toString()))
+
+        // both change different things at the same time
+        val aState2 = world("""{"u1":{"town":"A","nation":null,"claims":[5,0]}}""", """{"A":$tA}""")
+        val bState2 = world("""{"u2":{"town":"B","nation":null}}""",
+            """{"B":{"leader":"u2","residents":["u2"],"territories":[2,3]}}""")
+        a.sync(aState2.toString())
+        b.sync(bState2.toString())
+        val finalWorld = JsonParser.parseString(FolderSyncStore(dir).read()!!.json).asJsonObject
+        check("both changes survive", finalWorld["residents"].asJsonObject["u1"].asJsonObject["claims"].asJsonArray[0].asInt == 5
+            && finalWorld["towns"].asJsonObject["B"].asJsonObject["territories"].asJsonArray.size() == 2)
+
+        // a write sneaks in between our read and our write: engine reads again and still publishes
+        val real = FolderSyncStore(dir)
+        var injected = false
+        val sneaky = object : SyncStore {
+            override fun read(): Snapshot? = real.read()
+            override fun version(): Long = real.version()
+            override fun writeIfUnchanged(expectedVersion: Long, json: String): Long? {
+                if (!injected) {
+                    injected = true
+                    val w = JsonParser.parseString(real.read()!!.json).asJsonObject
+                    w["residents"].asJsonObject.add("u7", j("""{"town":null,"nation":null}"""))
+                    real.writeIfUnchanged(real.version(), w.toString())
+                }
+                return real.writeIfUnchanged(expectedVersion, json)
+            }
+        }
+        val c = SyncEngine(sneaky, a.base, a.baseVersion)
+        val cState = world("""{"u1":{"town":"A","nation":null,"claims":[9,0]}}""", """{"A":$tA}""")
+        val o4 = c.sync(cState.toString())
+        val after = JsonParser.parseString(real.read()!!.json).asJsonObject
+        check("retry after concurrent write", o4.wrote && injected)
+        check("concurrent writer's resident kept, ours too", after["residents"].asJsonObject.has("u7")
+            && after["residents"].asJsonObject["u1"].asJsonObject["claims"].asJsonArray[0].asInt == 9)
     }
 
     println(if (failed == 0) "ALL PASSED" else "$failed FAILED")
