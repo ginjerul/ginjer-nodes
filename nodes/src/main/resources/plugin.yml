@@ -86,6 +86,10 @@ commands:
     description: View territory info
     permission: nodes.command.territory
     usage: /territory or /territory [id]
+  captimes:
+    description: Time to capture a chunk of a node
+    permission: nodes.command.captimes
+    usage: /captimes or /captimes [node id]
   port:
     description: Port warps
     permission: nodes.command.port
@@ -213,6 +217,8 @@ permissions:
   nodes.command.chat.nation:
     default: true
   nodes.command.chat.ally:
+    default: true
+  nodes.command.captimes:
     default: true
   nodes.command.calendar:
     default: true

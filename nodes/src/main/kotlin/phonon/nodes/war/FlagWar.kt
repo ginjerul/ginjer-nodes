@@ -471,6 +471,38 @@ public object FlagWar {
         return Result.success(attack)
     }
 
+    /**
+     * Ticks needed to capture a chunk of [territory], before the players-in-chunk factor.
+     * [hostile] true = an enemy attacking, false = the owner or its allies liberating.
+     * [attacker] is the attacking town, null for a generic enemy (used by /captimes).
+     */
+    internal fun captureTicks(territory: Territory, attacker: Town?, hostile: Boolean): Double {
+        var attackTime = Config.chunkAttackTime.toDouble()
+        if (territory.bordersWilderness) {
+            attackTime *= Config.chunkAttackFromWastelandMultiplier
+        }
+        val terrTown = territory.town
+        if (terrTown !== null) {
+            if (territory.id == terrTown.home) {
+                attackTime *= Config.chunkAttackHomeMultiplier
+            }
+            if (!hostile) {
+                attackTime *= territory.defenderTimeMultiplier
+            } else {
+                attackTime *= territory.attackerTimeMultiplier
+                if (attacker == null || !SupplyLines.isFriendly(terrTown, attacker)) {
+                    // supply-cut speedup only for land the owner still holds: an occupied
+                    // territory counts as cut off, but taking it shouldn't get faster for that
+                    if (territory.occupier == null && SupplyLines.isCutOff(terrTown, territory.id)) {
+                        attackTime *= SupplyLines.captureTimeMultiplier()
+                    }
+                    attackTime *= Fortifications.captureMultiplier(territory)
+                }
+            }
+        }
+        return attackTime
+    }
+
     internal fun createAttack(
         attacker: UUID,
         attackingTown: Town,
@@ -489,29 +521,9 @@ public object FlagWar {
         val flagBlock = world.getBlockAt(flagBaseX, flagBaseY + 1, flagBaseZ)
         val flagTorch = world.getBlockAt(flagBaseX, flagBaseY + 2, flagBaseZ)
 
-        var attackTime = Config.chunkAttackTime.toDouble()
-        if (territory.bordersWilderness) {
-            attackTime *= Config.chunkAttackFromWastelandMultiplier
-        }
         val terrTown = territory.town
-        if (terrTown !== null) {
-            if (territory.id == terrTown.home) {
-                attackTime *= Config.chunkAttackHomeMultiplier
-            }
-            if (terrTown.uuid == attackingTown.uuid || terrTown.allies.contains(attackingTown)) {
-                attackTime *= territory.defenderTimeMultiplier
-            } else {
-                attackTime *= territory.attackerTimeMultiplier
-                if (!SupplyLines.isFriendly(terrTown, attackingTown)) {
-                    // supply-cut speedup only for land the owner still holds: an occupied
-                    // territory counts as cut off, but taking it shouldn't get faster for that
-                    if (territory.occupier == null && SupplyLines.isCutOff(terrTown, territory.id)) {
-                        attackTime *= SupplyLines.captureTimeMultiplier()
-                    }
-                    attackTime *= Fortifications.captureMultiplier(territory)
-                }
-            }
-        }
+        val defenderSide = terrTown !== null && (terrTown.uuid == attackingTown.uuid || terrTown.allies.contains(attackingTown))
+        var attackTime = captureTicks(territory, attackingTown, !defenderSide)
 
         if (Config.playersInChunkMultiplier) {
             val bukkitChunk = flagBase.chunk

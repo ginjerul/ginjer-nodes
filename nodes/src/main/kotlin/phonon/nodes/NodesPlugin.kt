@@ -198,6 +198,7 @@ public class NodesPlugin : JavaPlugin() {
         this.getCommand("rpchat")?.setExecutor(phonon.nodes.commands.RpChatCommand())
         this.getCommand("player")?.setExecutor(PlayerCommand())
         this.getCommand("territory")?.setExecutor(TerritoryCommand())
+        this.getCommand("captimes")?.setExecutor(phonon.nodes.commands.CapTimesCommand())
         this.getCommand("port")?.setExecutor(PortCommand())
         this.getCommand("miningtower")?.setExecutor(MiningTowerCommand())
         this.getCommand("miningtower")?.setTabCompleter(MiningTowerCommand())
