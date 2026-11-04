@@ -39,6 +39,7 @@ class CalendarCommand :
         return true
     }
 
-    override fun onTabComplete(sender: CommandSender, command: Command, alias: String, args: Array<String>): List<String> =
-        if (args.size == 1) listOf("today", "upcoming").filter { it.startsWith(args[0], ignoreCase = true) } else emptyList()
+    override fun onTabComplete(sender: CommandSender, command: Command, alias: String, args: Array<String>): List<String> {
+        return if (args.size == 1) listOf("today", "upcoming").filter { it.startsWith(args[0], ignoreCase = true) } else emptyList()
+    }
 }
