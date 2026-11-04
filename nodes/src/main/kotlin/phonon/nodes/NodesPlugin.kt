@@ -199,6 +199,7 @@ public class NodesPlugin : JavaPlugin() {
         this.getCommand("player")?.setExecutor(PlayerCommand())
         this.getCommand("territory")?.setExecutor(TerritoryCommand())
         this.getCommand("captimes")?.setExecutor(phonon.nodes.commands.CapTimesCommand())
+        this.getCommand("map")?.setExecutor(phonon.nodes.commands.MapCommand())
         this.getCommand("port")?.setExecutor(PortCommand())
         this.getCommand("miningtower")?.setExecutor(MiningTowerCommand())
         this.getCommand("miningtower")?.setTabCompleter(MiningTowerCommand())
@@ -277,6 +278,8 @@ public class NodesPlugin : JavaPlugin() {
         phonon.nodes.rules.TownRules.start(this)
         phonon.nodes.tab.TabList.start(this)
         phonon.nodes.calendar.Calendar.start(this)
+        phonon.nodes.poi.Pois.start(this)
+        pluginManager.registerEvents(phonon.nodes.poi.PoiMenuListener(), this)
         // beacon pillars are placed once the worlds are up
         server.scheduler.runTaskLater(this, Runnable { PortBeacons.placeAll() }, 100L)
 

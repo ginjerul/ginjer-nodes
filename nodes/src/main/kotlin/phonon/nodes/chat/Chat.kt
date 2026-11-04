@@ -166,7 +166,9 @@ public object Chat {
 
     public fun formatResidentName(resident: Resident): String {
         // chatPrefix goes in front of every name; '%' is escaped because the result is a chat format string
-        return Config.chatPrefix.replace("%", "%%") + formatResidentNameBase(resident)
+        val title = phonon.nodes.poi.PoiData.selectedTitle(resident.uuid.toString())
+        val titleText = if (title == null) "" else "${ChatColor.GRAY}[${phonon.nodes.poi.Pois.colour(title)}${ChatColor.GRAY}] ".replace("%", "%%")
+        return Config.chatPrefix.replace("%", "%%") + titleText + formatResidentNameBase(resident)
     }
 
     private fun formatResidentNameBase(resident: Resident): String {

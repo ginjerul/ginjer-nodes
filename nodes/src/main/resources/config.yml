@@ -494,6 +494,34 @@ calendar:
   # how long /nda calendar announce stays on the calendar (0 = until removed)
   announcementHours: 24
 
+# Exploration: admins place points of interest with /nda poi add, players find them by
+# walking close. /map lists what a player found; nothing is shown before it is discovered.
+poi:
+  enabled: true
+  # how often (ticks) players are checked against the POIs
+  checkTicks: 40
+  # discovery radius given to a new POI, in blocks (3D, so deep caves work)
+  defaultRadius: 12
+  # tell everyone when a POI is found for the first time
+  announceFirstDiscovery: true
+  # show "found/total" in the /map title
+  showTotal: true
+  # money paid for the first find of a new POI of each type (set when the POI is created)
+  defaultMoney:
+    village: '5'
+    ruin: '5'
+    cave: '5'
+    shrine: '10'
+    shipwreck: '5'
+    dungeon: '15'
+    camp: '10'
+  # titles earned by number of POIs found (players pick one with /map title)
+  milestones:
+    5: "&7Wanderer"
+    10: "&aExplorer"
+    25: "&bPathfinder"
+    50: "&6Cartographer"
+
 # chat: lines starting with > turn green, and text put in front of every player's name (& colors)
 greenText: true
 chatPrefix: ""

@@ -821,6 +821,7 @@ public object Config {
         Config.onlyKeepCapital = config.getBoolean("onlyKeepCapital", Config.onlyKeepCapital)
         phonon.nodes.tab.TabList.loadConfig(config)
         phonon.nodes.calendar.Calendar.loadConfig(config)
+        phonon.nodes.poi.Pois.loadConfig(config)
         Config.warProximity = config.getBoolean("warProximity", Config.warProximity)
         Config.warProximityDistance = config.getDouble("warProximityDistance", Config.warProximityDistance).coerceAtLeast(0.0)
         Config.minimumDistanceForNewTown = config.getBoolean("minimumDistanceForNewTown", Config.minimumDistanceForNewTown)
