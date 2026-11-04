@@ -522,6 +522,68 @@ poi:
     25: "&bPathfinder"
     50: "&6Cartographer"
 
+# Skills: mining, farming, woodcutting and hunting level up as players do them (/skills).
+# Each level gives a small chance of one extra drop from that activity. Blocks a player
+# placed give no xp, crops must be fully grown, and animals bred or spawned by spawners and
+# eggs give none. Set levels earn titles (picked with /map title).
+skills:
+  enabled: true
+  # multiplies all xp gained (2.0 = double xp weekend)
+  xpMultiplier: 1.0
+  maxLevel: 50
+  # xp from level L to L+1 is baseXp x L ^ levelExponent
+  baseXp: 50
+  levelExponent: 1.5
+  # chance of an extra drop = (level - 1) x this, up to extraDropPercentMax
+  extraDropPercentPerLevel: 0.5
+  extraDropPercentMax: 25
+  showActionBar: true
+  mining:
+    xp:
+      COAL_ORE: 2
+      COPPER_ORE: 2
+      IRON_ORE: 3
+      GOLD_ORE: 4
+      LAPIS_ORE: 3
+      REDSTONE_ORE: 3
+      EMERALD_ORE: 8
+      DIAMOND_ORE: 10
+      NETHER_QUARTZ_ORE: 3
+      NETHER_GOLD_ORE: 2
+      ANCIENT_DEBRIS: 15
+  farming:
+    xp:
+      WHEAT: 2
+      CARROTS: 2
+      POTATOES: 2
+      BEETROOTS: 2
+      NETHER_WART: 3
+      MELON: 3
+      PUMPKIN: 3
+  woodcutting:
+    xpPerLog: 2
+  hunting:
+    animalXp: 1
+    monsterXp: 2
+    # per mob overrides
+    xp:
+      ENDERMAN: 5
+      WITCH: 6
+  # titles earned at a skill level (picked with /map title)
+  titles:
+    mining:
+      10: "&7Prospector"
+      25: "&6Master Miner"
+    farming:
+      10: "&aFarmhand"
+      25: "&2Master Farmer"
+    woodcutting:
+      10: "&eLumberjack"
+      25: "&6Master Woodsman"
+    hunting:
+      10: "&cHunter"
+      25: "&4Master Hunter"
+
 # chat: lines starting with > turn green, and text put in front of every player's name (& colors)
 greenText: true
 chatPrefix: ""

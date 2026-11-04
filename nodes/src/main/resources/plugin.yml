@@ -86,6 +86,10 @@ commands:
     description: View territory info
     permission: nodes.command.territory
     usage: /territory or /territory [id]
+  skills:
+    description: Your mining, farming, woodcutting and hunting levels
+    permission: nodes.command.skills
+    usage: /skills or /skills top <skill>
   map:
     description: Places you have discovered
     permission: nodes.command.map
@@ -199,6 +203,7 @@ permissions:
       nodes.admin.plot: true
       nodes.admin.calendar: true
       nodes.admin.poi: true
+      nodes.admin.skills: true
   nodes.command.town:
     default: true
   nodes.command.nation:
@@ -222,6 +227,8 @@ permissions:
   nodes.command.chat.nation:
     default: true
   nodes.command.chat.ally:
+    default: true
+  nodes.command.skills:
     default: true
   nodes.command.map:
     default: true
@@ -339,6 +346,9 @@ permissions:
     default: false
   nodes.admin.poi:
     description: /nodesadmin poi (grant nodes.admin.poi.<add|list|show|remove|tp|move|name|type|desc|radius|reward|reset> for single actions)
+    default: false
+  nodes.admin.skills:
+    description: /nodesadmin skills (grant nodes.admin.skills.<show|set|addxp|reset> for single actions)
     default: false
   nodes.stats.admin:
     description: Reset stats

@@ -83,6 +83,7 @@ private val SUBCOMMANDS: List<String> = listOf(
     "plot",
     "calendar",
     "poi",
+    "skills",
 )
 
 private val RELOAD_SUBCOMMANDS: List<String> = listOf(
@@ -415,6 +416,7 @@ public class NodesAdminCommand :
             "plot" -> adminPlot(sender, args)
             "calendar" -> phonon.nodes.calendar.CalendarAdmin.handle(sender, args)
             "poi" -> phonon.nodes.poi.PoiAdmin.handle(sender, args)
+            "skills" -> phonon.nodes.skills.SkillsAdmin.handle(sender, args)
             "rallycap" -> adminRallyCap(sender, args)
             "debug" -> debugger(sender, args)
             else -> {
@@ -436,6 +438,8 @@ public class NodesAdminCommand :
                 "calendar" -> return phonon.nodes.calendar.CalendarAdmin.complete(args)
 
                 "poi" -> return phonon.nodes.poi.PoiAdmin.complete(args)
+
+                "skills" -> return phonon.nodes.skills.SkillsAdmin.complete(args)
 
                 "reload" -> {
                     if (args.size == 2) {
@@ -745,6 +749,7 @@ public class NodesAdminCommand :
         helpLine(sender, "announce", "/nodesadmin announce <message>${ChatColor.WHITE}: Announce for all players")
         helpLine(sender, "calendar", "/nodesadmin calendar${ChatColor.WHITE}: Add, edit and remove calendar events, send announcements (see \"/nodesadmin calendar\")")
         helpLine(sender, "poi", "/nodesadmin poi${ChatColor.WHITE}: Place and manage points of interest (see \"/nodesadmin poi\")")
+        helpLine(sender, "skills", "/nodesadmin skills${ChatColor.WHITE}: Show, set or reset a player's skill levels")
         helpLine(sender, "plot", "/nodesadmin plot list|delete <name>${ChatColor.WHITE}: Manage plots")
         helpLine(sender, "rallycap", "/nodesadmin rallycap <nation> <n|-1>${ChatColor.WHITE}: Manage rallycaps")
         if (org.bukkit.Bukkit.getPluginManager().getPlugin("GinjerMap") != null) {
