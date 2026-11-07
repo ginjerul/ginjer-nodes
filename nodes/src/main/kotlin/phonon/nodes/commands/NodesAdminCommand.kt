@@ -84,6 +84,7 @@ private val SUBCOMMANDS: List<String> = listOf(
     "calendar",
     "poi",
     "skills",
+    "duel",
 )
 
 private val RELOAD_SUBCOMMANDS: List<String> = listOf(
@@ -417,6 +418,7 @@ public class NodesAdminCommand :
             "calendar" -> phonon.nodes.calendar.CalendarAdmin.handle(sender, args)
             "poi" -> phonon.nodes.poi.PoiAdmin.handle(sender, args)
             "skills" -> phonon.nodes.skills.SkillsAdmin.handle(sender, args)
+            "duel" -> phonon.nodes.duel.DuelAdmin.handle(sender, args)
             "rallycap" -> adminRallyCap(sender, args)
             "debug" -> debugger(sender, args)
             else -> {
@@ -440,6 +442,8 @@ public class NodesAdminCommand :
                 "poi" -> return phonon.nodes.poi.PoiAdmin.complete(args)
 
                 "skills" -> return phonon.nodes.skills.SkillsAdmin.complete(args)
+
+                "duel" -> return phonon.nodes.duel.DuelAdmin.complete(args)
 
                 "reload" -> {
                     if (args.size == 2) {
@@ -750,6 +754,7 @@ public class NodesAdminCommand :
         helpLine(sender, "calendar", "/nodesadmin calendar${ChatColor.WHITE}: Add, edit and remove calendar events, send announcements (see \"/nodesadmin calendar\")")
         helpLine(sender, "poi", "/nodesadmin poi${ChatColor.WHITE}: Place and manage points of interest (see \"/nodesadmin poi\")")
         helpLine(sender, "skills", "/nodesadmin skills${ChatColor.WHITE}: Show, set or reset a player's skill levels")
+        helpLine(sender, "duel", "/nodesadmin duel${ChatColor.WHITE}: Set up duel arenas and kits, end duels (see \"/nodesadmin duel\")")
         helpLine(sender, "plot", "/nodesadmin plot list|delete <name>${ChatColor.WHITE}: Manage plots")
         helpLine(sender, "rallycap", "/nodesadmin rallycap <nation> <n|-1>${ChatColor.WHITE}: Manage rallycaps")
         if (org.bukkit.Bukkit.getPluginManager().getPlugin("GinjerMap") != null) {

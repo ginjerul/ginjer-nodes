@@ -86,6 +86,10 @@ commands:
     description: View territory info
     permission: nodes.command.territory
     usage: /territory or /territory [id]
+  duel:
+    description: Challenge a player to a duel
+    permission: nodes.command.duel
+    usage: /duel <player> [kit|own] [wager], /duel accept|deny|spectate|leave|top|stats
   skills:
     description: Your mining, farming, woodcutting and hunting levels
     permission: nodes.command.skills
@@ -204,6 +208,7 @@ permissions:
       nodes.admin.calendar: true
       nodes.admin.poi: true
       nodes.admin.skills: true
+      nodes.admin.duel: true
   nodes.command.town:
     default: true
   nodes.command.nation:
@@ -228,6 +233,11 @@ permissions:
     default: true
   nodes.command.chat.ally:
     default: true
+  nodes.command.duel:
+    default: true
+  nodes.duel.bypass:
+    description: Use any command during a duel
+    default: false
   nodes.command.skills:
     default: true
   nodes.command.map:
@@ -346,6 +356,9 @@ permissions:
     default: false
   nodes.admin.poi:
     description: /nodesadmin poi (grant nodes.admin.poi.<add|list|show|remove|tp|move|name|type|desc|radius|reward|reset> for single actions)
+    default: false
+  nodes.admin.duel:
+    description: /nodesadmin duel (grant nodes.admin.duel.<arena|kit|end|resetstats> for single actions)
     default: false
   nodes.admin.skills:
     description: /nodesadmin skills (grant nodes.admin.skills.<show|set|addxp|reset> for single actions)

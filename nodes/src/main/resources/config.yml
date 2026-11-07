@@ -584,6 +584,34 @@ skills:
       10: "&cHunter"
       25: "&4Master Hunter"
 
+# Duels (/duel): two players fight in an admin-made arena, nobody really dies and both are put
+# back exactly as before. Set up with /nda duel arena add <name>, then spawn1, spawn2 and spectate
+# while standing in place. /nda duel kit save <name> copies your inventory as a kit.
+# Duelists can only hurt each other, which overrides town PvP and friendly fire rules.
+duel:
+  enabled: true
+  # how long a challenge waits to be accepted
+  requestSeconds: 60
+  countdownSeconds: 5
+  # a duel that is still going after this is a draw
+  maxSeconds: 300
+  # money wagers are held until the duel ends; the winner gets both
+  allowWager: true
+  # largest wager, 0 for no limit
+  maxWager: 0
+  # true = a kit must always be picked; defaultKit is used when none is named ("" = own gear)
+  kitOnly: false
+  defaultKit: ""
+  # announce results in public chat
+  announce: true
+  # commands usable during a duel (duel is always allowed)
+  allowedCommands:
+    - msg
+    - tell
+    - w
+    - r
+    - reply
+
 # chat: lines starting with > turn green, and text put in front of every player's name (& colors)
 greenText: true
 chatPrefix: ""

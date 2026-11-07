@@ -201,6 +201,7 @@ public class NodesPlugin : JavaPlugin() {
         this.getCommand("captimes")?.setExecutor(phonon.nodes.commands.CapTimesCommand())
         this.getCommand("map")?.setExecutor(phonon.nodes.commands.MapCommand())
         this.getCommand("skills")?.setExecutor(phonon.nodes.commands.SkillsCommand())
+        this.getCommand("duel")?.setExecutor(phonon.nodes.commands.DuelCommand())
         this.getCommand("port")?.setExecutor(PortCommand())
         this.getCommand("miningtower")?.setExecutor(MiningTowerCommand())
         this.getCommand("miningtower")?.setTabCompleter(MiningTowerCommand())
@@ -281,6 +282,7 @@ public class NodesPlugin : JavaPlugin() {
         phonon.nodes.calendar.Calendar.start(this)
         phonon.nodes.poi.Pois.start(this)
         phonon.nodes.skills.Skills.start(this)
+        phonon.nodes.duel.Duels.start(this)
         pluginManager.registerEvents(phonon.nodes.poi.PoiMenuListener(), this)
         // beacon pillars are placed once the worlds are up
         server.scheduler.runTaskLater(this, Runnable { PortBeacons.placeAll() }, 100L)
@@ -312,6 +314,7 @@ public class NodesPlugin : JavaPlugin() {
         logger.info("ginjer is the goat but disabled")
         phonon.nodes.map.MapExporter.stop()
         phonon.nodes.skills.Skills.shutdown()
+        phonon.nodes.duel.Duels.shutdown()
         Warzone.shutdown()
         Raid.shutdown()
         MiningBoost.shutdown()
