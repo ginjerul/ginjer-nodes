@@ -106,7 +106,10 @@ class WebServer(
         val size = Files.size(file)
         val mtime = Files.getLastModifiedTime(file).toMillis()
         val etag = "\"${mtime.toString(36)}-${size.toString(36)}\""
-        if (notModified(ex, etag)) return
+        // map tiles change rarely and the viewer busts the URL when one is redrawn, so the browser
+        // may reuse them briefly instead of asking again for every tile on every pan
+        val cache = if (path.startsWith("/tiles/")) "public, max-age=30" else "no-cache"
+        if (notModified(ex, etag, cache)) return
 
         val type = contentType(file)
         val compressible = type.startsWith("text/") || type.contains("json") || type.contains("javascript") || type.contains("svg")
@@ -117,9 +120,9 @@ class WebServer(
             } else {
                 gzip(Files.readAllBytes(file)).also { gzCache[file] = etag to it }
             }
-            send(ex, 200, type, gz, etag, "gzip")
+            send(ex, 200, type, gz, etag, "gzip", cache)
         } else {
-            send(ex, 200, type, Files.readAllBytes(file), etag, null)
+            send(ex, 200, type, Files.readAllBytes(file), etag, null, cache)
         }
     }
 
@@ -189,22 +192,22 @@ class WebServer(
         if (out.isNotEmpty()) ex.responseBody.use { it.write(out) }
     }
 
-    private fun notModified(ex: HttpExchange, etag: String): Boolean {
+    private fun notModified(ex: HttpExchange, etag: String, cache: String = "no-cache"): Boolean {
         val inm = ex.requestHeaders.getFirst("If-None-Match") ?: return false
         if (inm != etag) return false
         ex.responseHeaders.add("ETag", etag)
-        ex.responseHeaders.add("Cache-Control", "no-cache")
+        ex.responseHeaders.add("Cache-Control", cache)
         ex.sendResponseHeaders(304, -1)
         return true
     }
 
     private fun acceptsGzip(ex: HttpExchange): Boolean = ex.requestHeaders.getFirst("Accept-Encoding")?.contains("gzip") == true
 
-    private fun send(ex: HttpExchange, code: Int, type: String, body: ByteArray, etag: String?, encoding: String?) {
+    private fun send(ex: HttpExchange, code: Int, type: String, body: ByteArray, etag: String?, encoding: String?, cache: String = "no-cache") {
         val h = ex.responseHeaders
         h.add("Content-Type", type)
-        // always revalidate; the ETag makes that a cheap 304
-        h.add("Cache-Control", "no-cache")
+        // revalidate by default; the ETag makes that a cheap 304
+        h.add("Cache-Control", cache)
         h.add("Access-Control-Allow-Origin", "*")
         if (etag != null) h.add("ETag", etag)
         if (encoding != null) h.add("Content-Encoding", encoding)
