@@ -101,6 +101,66 @@ Browsers poll one tiny `version.json` and only download the layers whose hash ch
 
 `plugins/nodes/config.yml` → `mapExport:`: export path and refresh rates for the Nodes layer (`statePeriodTicks`, `livePeriodTicks`), and whether to include supply lines. Supply connectivity is computed one town per tick to spread the cost out.
 
+### Using your own domain or port
+
+GinjerMap's built-in web server is plain HTTP and has no domain or HTTPS setting of its own. To use a domain like `map.myserver.net`, put a reverse proxy (Caddy or nginx) in front of it. To use a different port, change `web.port`. Both need a server where you can install software; hosts that only allow panel-assigned ports are covered at the end.
+
+**1. Set the port and public address** in `plugins/GinjerMap/config.yml`, then restart (web changes are not picked up by `/ginjermap reload`):
+
+```yaml
+web:
+  bind: "127.0.0.1"   # only the proxy can reach it; use "0.0.0.0" while testing
+  port: 8200          # any free port
+  public-url: "https://map.myserver.net"   # used by /ginjermap link and editor links
+```
+
+**2. Point the domain at your server:** add a DNS **A record** (`map` for `map.myserver.net`) with your server's public IP.
+
+**3. Open ports 80 and 443** (TCP) in your firewall and hosting panel. Port 8200 does not need to be open when the proxy is on the same machine and `bind` is `127.0.0.1`.
+
+**4. Install a proxy.**
+
+Caddy (gets and renews HTTPS certificates by itself), `/etc/caddy/Caddyfile`:
+
+```
+map.myserver.net {
+    reverse_proxy 127.0.0.1:8200
+}
+```
+
+then `sudo systemctl reload caddy`.
+
+nginx:
+
+```nginx
+server {
+    listen 80;
+    server_name map.myserver.net;
+
+    location / {
+        proxy_pass http://127.0.0.1:8200;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+then `sudo nginx -t && sudo systemctl reload nginx` and `sudo certbot --nginx -d map.myserver.net` for HTTPS.
+
+**5. Test:** open `https://map.myserver.net`, then run `/ginjermap link` and `/ginjermap editor` in game. Both should show your domain.
+
+Troubleshooting:
+
+- Page does not load: run `curl http://127.0.0.1:8200` on the server. If that fails, GinjerMap is not listening there; check `web.port` and restart.
+- 502 or bad gateway: the proxy points at the wrong port, or GinjerMap is not running.
+- Certificate fails: DNS has not updated yet, or port 80 or 443 is blocked.
+- Editor link shows the old address: `public-url` is empty or has a typo. Include `https://` and leave off a trailing slash.
+- Cloudflare: use a proxied DNS record and SSL mode "Full" or "Full (strict)"; "Flexible" can cause redirect loops.
+
+If your host only lets you use ports from its panel: set `web.port` to the assigned port with `bind: "0.0.0.0"`, add the DNS A record, and set `public-url` to `http://map.myserver.net:<port>`. For a URL without a port, or for HTTPS, use Cloudflare or ask your host about subdomains. Over plain HTTP the editor login token is not encrypted, so avoid the editor on public networks.
+
 ### Serving with nginx instead
 
 Set `web.enabled: false`, then serve `plugins/GinjerMap/web/` as static files. GinjerMap still writes `data/players.json` and `data/tiles.json` there.
