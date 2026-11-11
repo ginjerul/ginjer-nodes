@@ -24,6 +24,10 @@ class SkillsCommand :
             Message.error(sender, "Skills are turned off")
             return true
         }
+        if (args.isNotEmpty() && args[0].equals("help", ignoreCase = true)) {
+            help(sender)
+            return true
+        }
         if (args.isNotEmpty() && args[0].equals("top", ignoreCase = true)) {
             val skill = args.getOrNull(1)?.let { Skill.parse(it) }
             if (skill == null) {
@@ -48,9 +52,15 @@ class SkillsCommand :
         return true
     }
 
+    private fun help(sender: CommandSender) {
+        Message.print(sender, "${ChatColor.BOLD}[Nodes] Skills commands:")
+        Message.print(sender, "/skills${ChatColor.WHITE}: Open your skills menu (mining, farming, woodcutting, hunting)")
+        Message.print(sender, "/skills top <skill>${ChatColor.WHITE}: The ten highest players in a skill")
+    }
+
     override fun onTabComplete(sender: CommandSender, command: Command, alias: String, args: Array<String>): List<String> {
         if (args.size == 1) {
-            return listOf("top").filter { it.startsWith(args[0], ignoreCase = true) }
+            return listOf("top", "help").filter { it.startsWith(args[0], ignoreCase = true) }
         }
         if (args.size == 2 && args[0].equals("top", ignoreCase = true)) {
             return Skill.values().map { it.name.lowercase() }.filter { it.startsWith(args[1], ignoreCase = true) }

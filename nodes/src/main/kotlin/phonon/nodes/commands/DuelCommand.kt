@@ -36,13 +36,13 @@ class DuelCommand :
             Duels.showStats(sender, name)
             return true
         }
+        if (sub == null || sub == "help") {
+            help(sender)
+            return true
+        }
         val player = sender as? Player
         if (player == null) {
             Message.error(sender, "Only players can duel")
-            return true
-        }
-        if (sub == null || sub == "help") {
-            help(player)
             return true
         }
         when (sub) {
@@ -81,12 +81,17 @@ class DuelCommand :
         Duels.challenge(player, target, kit, wager)
     }
 
-    private fun help(player: Player) {
-        Message.print(player, "${ChatColor.GOLD}${ChatColor.BOLD}Duels")
-        Message.print(player, "${ChatColor.WHITE}/duel <player> [kit|own] [wager]${ChatColor.GRAY}: Challenge someone")
-        Message.print(player, "${ChatColor.WHITE}/duel accept [player] | deny | cancel${ChatColor.GRAY}: Answer or withdraw a challenge")
-        Message.print(player, "${ChatColor.WHITE}/duel spectate <player> | leave${ChatColor.GRAY}: Watch a duel, or go back (leaving your own duel forfeits)")
-        Message.print(player, "${ChatColor.WHITE}/duel top | stats [player] | kits${ChatColor.GRAY}: Records and kits")
+    private fun help(sender: CommandSender) {
+        Message.print(sender, "${ChatColor.BOLD}[Nodes] Duel commands:")
+        Message.print(sender, "/duel <player> [kit|own] [wager]${ChatColor.WHITE}: Challenge a player (own = your own gear)")
+        Message.print(sender, "/duel accept [player]${ChatColor.WHITE}: Accept a challenge")
+        Message.print(sender, "/duel deny${ChatColor.WHITE}: Decline a challenge")
+        Message.print(sender, "/duel cancel${ChatColor.WHITE}: Withdraw your challenge")
+        Message.print(sender, "/duel spectate <player>${ChatColor.WHITE}: Watch a duel")
+        Message.print(sender, "/duel leave${ChatColor.WHITE}: Stop watching, or forfeit your own duel")
+        Message.print(sender, "/duel top${ChatColor.WHITE}: Best duelists")
+        Message.print(sender, "/duel stats [player]${ChatColor.WHITE}: Win and loss record")
+        Message.print(sender, "/duel kits${ChatColor.WHITE}: List kits")
     }
 
     override fun onTabComplete(sender: CommandSender, command: Command, alias: String, args: Array<String>): List<String> {

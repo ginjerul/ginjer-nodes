@@ -22,6 +22,12 @@ class CapTimesCommand :
     CommandExecutor,
     TabCompleter {
     override fun onCommand(sender: CommandSender, cmd: Command, label: String, args: Array<String>): Boolean {
+        if (args.isNotEmpty() && args[0].equals("help", ignoreCase = true)) {
+            Message.print(sender, "${ChatColor.BOLD}[Nodes] Capture time commands:")
+            Message.print(sender, "/captimes${ChatColor.WHITE}: Time to capture a chunk in the node you stand in")
+            Message.print(sender, "/captimes <node id>${ChatColor.WHITE}: Time to capture a chunk in that node")
+            return true
+        }
         val territory: Territory? = if (args.isEmpty()) {
             if (sender !is Player) {
                 Message.error(sender, "Usage: /captimes <node id>")

@@ -33,10 +33,21 @@ object DuelAdmin {
         }
     }
 
+    private fun help(sender: CommandSender) {
+        Message.print(sender, "${ChatColor.BOLD}[Nodes] Duel admin commands:")
+        Message.print(sender, "/nda duel arena add <name>${ChatColor.WHITE}: Create an arena")
+        Message.print(sender, "/nda duel arena spawn1|spawn2|spectate <name>${ChatColor.WHITE}: Set that spot to where you stand")
+        Message.print(sender, "/nda duel arena list | tp <name> | remove <name>${ChatColor.WHITE}: Manage arenas")
+        Message.print(sender, "/nda duel kit save <name>${ChatColor.WHITE}: Save your inventory, armor and offhand as a kit")
+        Message.print(sender, "/nda duel kit list | remove <name>${ChatColor.WHITE}: Manage kits")
+        Message.print(sender, "/nda duel end <player>${ChatColor.WHITE}: End a duel as a draw (wagers refunded)")
+        Message.print(sender, "/nda duel resetstats <player>${ChatColor.WHITE}: Clear a player's duel record")
+    }
+
     fun handle(sender: CommandSender, args: Array<String>) {
         val action = args.getOrNull(1)?.lowercase()
         if (action == null || action !in ACTIONS) {
-            Message.print(sender, "/nda duel arena <add|remove|list|spawn1|spawn2|spectate|tp> [name] | kit <save|remove|list> [name] | end <player> | resetstats <player>")
+            help(sender)
             return
         }
         if (!AdminPerms.has(sender, "duel", action)) {

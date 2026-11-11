@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed
+- Help lists for duels, skills, calendar, map, capture times and the `/nda` duel, skills, calendar and POI sections now use the same `[Nodes] <feature> commands:` style as the other features.
+
 ### Added
 
 - Ore bounties (`/bounty`): players fund bounties on other players with real ores or items from their inventory. The killer's reward goes to their town income or their inventory. Options are under `bounties:` in the config.

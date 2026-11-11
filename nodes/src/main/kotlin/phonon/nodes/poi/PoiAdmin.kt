@@ -87,12 +87,16 @@ object PoiAdmin {
     }
 
     private fun help(sender: CommandSender) {
-        Message.print(sender, "${ChatColor.BOLD}[POI] Admin commands:")
-        Message.print(sender, "/nda poi add <type> <name...>   (at your position, types: ${PoiType.values().joinToString(", ") { it.name.lowercase() }})")
-        Message.print(sender, "/nda poi list | show <id> | remove <id> | tp <id> | move <id>")
-        Message.print(sender, "/nda poi name|desc|type|radius <id> <value...>")
-        Message.print(sender, "/nda poi reward <id> money <amount> | item <MATERIAL> [amount] | title <text|none> | clearitems")
-        Message.print(sender, "/nda poi reset <player> [id]")
+        Message.print(sender, "${ChatColor.BOLD}[Nodes] POI admin commands:")
+        Message.print(sender, "/nda poi add <type> <name...>${ChatColor.WHITE}: Create a place at your position (types: ${PoiType.values().joinToString(", ") { it.name.lowercase() }})")
+        Message.print(sender, "/nda poi list${ChatColor.WHITE}: List places")
+        Message.print(sender, "/nda poi show <id>${ChatColor.WHITE}: Show one place")
+        Message.print(sender, "/nda poi remove <id>${ChatColor.WHITE}: Delete a place")
+        Message.print(sender, "/nda poi tp <id>${ChatColor.WHITE}: Teleport to a place")
+        Message.print(sender, "/nda poi move <id>${ChatColor.WHITE}: Move a place to your position")
+        Message.print(sender, "/nda poi name|desc|type|radius <id> <value...>${ChatColor.WHITE}: Edit a place")
+        Message.print(sender, "/nda poi reward <id> money <amount> | item <MATERIAL> [amount] | title <text|none> | clearitems${ChatColor.WHITE}: Set the discovery reward")
+        Message.print(sender, "/nda poi reset <player> [id]${ChatColor.WHITE}: Clear a player's discoveries")
     }
 
     private fun find(sender: CommandSender, args: Array<String>): Poi? {

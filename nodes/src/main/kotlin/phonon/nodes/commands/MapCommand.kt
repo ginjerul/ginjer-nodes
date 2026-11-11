@@ -33,7 +33,10 @@ class MapCommand :
             return true
         }
         if (!args[0].equals("title", ignoreCase = true)) {
-            Message.print(sender, "Usage: /map | /map title <name|none>")
+            Message.print(sender, "${ChatColor.BOLD}[Nodes] Map commands:")
+            Message.print(sender, "/map${ChatColor.WHITE}: Places you have discovered and what is left to find")
+            Message.print(sender, "/map title <name>${ChatColor.WHITE}: Show an earned title in chat")
+            Message.print(sender, "/map title none${ChatColor.WHITE}: Remove your title")
             return true
         }
         val progress = PoiData.progress(sender.uniqueId.toString())

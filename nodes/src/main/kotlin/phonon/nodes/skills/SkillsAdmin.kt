@@ -24,10 +24,18 @@ object SkillsAdmin {
         }
     }
 
+    private fun help(sender: CommandSender) {
+        Message.print(sender, "${ChatColor.BOLD}[Nodes] Skills admin commands:")
+        Message.print(sender, "/nda skills show <player>${ChatColor.WHITE}: Show a player's skill levels")
+        Message.print(sender, "/nda skills set <player> <skill> <level>${ChatColor.WHITE}: Set a skill level")
+        Message.print(sender, "/nda skills addxp <player> <skill> <xp>${ChatColor.WHITE}: Give skill xp")
+        Message.print(sender, "/nda skills reset <player>${ChatColor.WHITE}: Reset all skills of a player")
+    }
+
     fun handle(sender: CommandSender, args: Array<String>) {
         val sub = args.getOrNull(1)?.lowercase()
         if (sub == null || sub !in ACTIONS) {
-            Message.print(sender, "/nda skills show <player> | set <player> <skill> <level> | addxp <player> <skill> <xp> | reset <player>")
+            help(sender)
             return
         }
         if (!AdminPerms.has(sender, "skills", sub)) {

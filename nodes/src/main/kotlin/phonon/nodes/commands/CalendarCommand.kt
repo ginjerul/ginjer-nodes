@@ -5,6 +5,7 @@
 
 package phonon.nodes.commands
 
+import org.bukkit.ChatColor
 import org.bukkit.command.Command
 import org.bukkit.command.CommandExecutor
 import org.bukkit.command.CommandSender
@@ -23,6 +24,7 @@ class CalendarCommand :
             return true
         }
         when (args.getOrNull(0)?.lowercase()) {
+            "help" -> help(sender)
             "today" -> {
                 Calendar.printDay(sender, Calendar.today())
                 Calendar.printAnnouncements(sender)
@@ -39,5 +41,12 @@ class CalendarCommand :
         return true
     }
 
-    override fun onTabComplete(sender: CommandSender, command: Command, alias: String, args: Array<String>): List<String> = if (args.size == 1) listOf("today", "upcoming").filter { it.startsWith(args[0], ignoreCase = true) } else emptyList()
+    private fun help(sender: CommandSender) {
+        Message.print(sender, "${ChatColor.BOLD}[Nodes] Calendar commands:")
+        Message.print(sender, "/calendar${ChatColor.WHITE}: Open the server calendar")
+        Message.print(sender, "/calendar today${ChatColor.WHITE}: Today's events and announcements")
+        Message.print(sender, "/calendar upcoming${ChatColor.WHITE}: Events in the next 7 days")
+    }
+
+    override fun onTabComplete(sender: CommandSender, command: Command, alias: String, args: Array<String>): List<String> = if (args.size == 1) listOf("today", "upcoming", "help").filter { it.startsWith(args[0], ignoreCase = true) } else emptyList()
 }

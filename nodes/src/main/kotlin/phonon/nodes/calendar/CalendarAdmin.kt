@@ -53,15 +53,18 @@ object CalendarAdmin {
     }
 
     private fun help(sender: CommandSender) {
-        Message.print(sender, "${ChatColor.BOLD}[Calendar] Admin commands:")
-        Message.print(sender, "/nda calendar add <date|daily|weekly:FRIDAY|monthly:15> [HH:mm] <type> <title...>")
+        Message.print(sender, "${ChatColor.BOLD}[Nodes] Calendar admin commands:")
+        Message.print(sender, "/nda calendar add <date|daily|weekly:FRIDAY|monthly:15> [HH:mm] <type> <title...>${ChatColor.WHITE}: Schedule an event")
         Message.print(sender, "  date: 2026-11-07, today, tomorrow. types: ${EventType.values().joinToString(", ") { it.name.lowercase() }}")
-        Message.print(sender, "/nda calendar edit <id> title|desc|date|time|type|action <value...>")
+        Message.print(sender, "/nda calendar edit <id> title|desc|date|time|type|action <value...>${ChatColor.WHITE}: Change an event")
         Message.print(sender, "  time none removes the time, action none removes the action.")
         Message.print(sender, "  action war:2h starts a war, boost:1h[:tier] starts the mining boost (needs a time)")
-        Message.print(sender, "/nda calendar remove <id> | show <id> | list [all]")
-        Message.print(sender, "/nda calendar announce [hours=N] <text...>   (hours=0: until removed)")
-        Message.print(sender, "/nda calendar announcements | unannounce <number>")
+        Message.print(sender, "/nda calendar remove <id>${ChatColor.WHITE}: Delete an event")
+        Message.print(sender, "/nda calendar show <id>${ChatColor.WHITE}: Show one event")
+        Message.print(sender, "/nda calendar list [all]${ChatColor.WHITE}: List upcoming (or all) events")
+        Message.print(sender, "/nda calendar announce [hours=N] <text...>${ChatColor.WHITE}: Post an announcement (hours=0: until removed)")
+        Message.print(sender, "/nda calendar announcements${ChatColor.WHITE}: List announcements")
+        Message.print(sender, "/nda calendar unannounce <number>${ChatColor.WHITE}: Remove an announcement")
     }
 
     private fun idOf(sender: CommandSender, text: String?): CalendarEvent? {
