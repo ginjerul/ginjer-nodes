@@ -209,6 +209,7 @@ permissions:
       nodes.admin.poi: true
       nodes.admin.skills: true
       nodes.admin.duel: true
+      nodes.admin.shards: true
   nodes.command.town:
     default: true
   nodes.command.nation:
@@ -359,6 +360,9 @@ permissions:
     default: false
   nodes.admin.duel:
     description: /nodesadmin duel (grant nodes.admin.duel.<arena|kit|end|resetstats> for single actions)
+    default: false
+  nodes.admin.shards:
+    description: /nodesadmin shards
     default: false
   nodes.admin.skills:
     description: /nodesadmin skills (grant nodes.admin.skills.<show|set|addxp|reset> for single actions)

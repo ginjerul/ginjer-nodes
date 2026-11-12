@@ -112,6 +112,10 @@ public class NodesPlugin : JavaPlugin() {
 
         Nodes.reloadConfig()
 
+        // a follower shard fetches the leader's towns and claims before the world is loaded
+        ensureDefaultFiles()
+        phonon.nodes.shard.Shards.start(this)
+
         Nodes.war.initialize(Config.flagMaterials)
 
         val pluginPath = Config.pathPlugin
@@ -288,8 +292,10 @@ public class NodesPlugin : JavaPlugin() {
         server.scheduler.runTaskLater(this, Runnable { PortBeacons.placeAll() }, 100L)
 
         // queued bounty rewards retry every 10s, economy settles loans, upkeep and routes
-        server.scheduler.runTaskTimer(this, Runnable { Bounties.deliverPending(null) }, 200L, 200L)
-        server.scheduler.runTaskTimer(this, Runnable { Economy.tick() }, 200L, 200L)
+        if (!phonon.nodes.shard.Shards.follower) {
+            server.scheduler.runTaskTimer(this, Runnable { Bounties.deliverPending(null) }, 200L, 200L)
+            server.scheduler.runTaskTimer(this, Runnable { Economy.tick() }, 200L, 200L)
+        }
 
         // web map export (after every system above has loaded its state)
         phonon.nodes.map.MapExporter.start(this)
@@ -340,8 +346,11 @@ public class NodesPlugin : JavaPlugin() {
         // Don't save if loading failed, or empty data overwrites the save
         if (Nodes.initialized) {
             Nodes.saveWorld(checkIfNeedsSave = false, async = false)
-            Nodes.saveTruce(async = false)
+            if (!phonon.nodes.shard.Shards.follower) {
+                Nodes.saveTruce(async = false)
+            }
         }
+        phonon.nodes.shard.Shards.stop()
     }
 
     /** First start: write a default world.json (empty map, a basic resource node) and an empty towns.json, so the editor and map have something to open. */

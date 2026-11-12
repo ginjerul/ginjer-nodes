@@ -85,6 +85,7 @@ private val SUBCOMMANDS: List<String> = listOf(
     "poi",
     "skills",
     "duel",
+    "shards",
 )
 
 private val RELOAD_SUBCOMMANDS: List<String> = listOf(
@@ -419,6 +420,7 @@ public class NodesAdminCommand :
             "poi" -> phonon.nodes.poi.PoiAdmin.handle(sender, args)
             "skills" -> phonon.nodes.skills.SkillsAdmin.handle(sender, args)
             "duel" -> phonon.nodes.duel.DuelAdmin.handle(sender, args)
+            "shards" -> phonon.nodes.shard.Shards.status(sender)
             "rallycap" -> adminRallyCap(sender, args)
             "debug" -> debugger(sender, args)
             else -> {
@@ -754,6 +756,7 @@ public class NodesAdminCommand :
         helpLine(sender, "calendar", "/nodesadmin calendar${ChatColor.WHITE}: Add, edit and remove calendar events, send announcements (see \"/nodesadmin calendar\")")
         helpLine(sender, "poi", "/nodesadmin poi${ChatColor.WHITE}: Place and manage points of interest (see \"/nodesadmin poi\")")
         helpLine(sender, "skills", "/nodesadmin skills${ChatColor.WHITE}: Show, set or reset a player's skill levels")
+        helpLine(sender, "shards", "/nodesadmin shards${ChatColor.WHITE}: Show this server's shard role and the other shards")
         helpLine(sender, "duel", "/nodesadmin duel${ChatColor.WHITE}: Set up duel arenas and kits, end duels (see \"/nodesadmin duel\")")
         helpLine(sender, "plot", "/nodesadmin plot list|delete <name>${ChatColor.WHITE}: Manage plots")
         helpLine(sender, "rallycap", "/nodesadmin rallycap <nation> <n|-1>${ChatColor.WHITE}: Manage rallycaps")

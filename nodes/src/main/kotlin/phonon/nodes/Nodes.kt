@@ -247,8 +247,11 @@ public object Nodes {
             return
         }
 
-        SaveManager.start(plugin, Config.savePeriod)
-        PeriodicTickManager.start(plugin, Config.mainPeriodicTick)
+        // saving and timed logic (income, cooldowns) belong to the leader shard only
+        if (!phonon.nodes.shard.Shards.follower) {
+            SaveManager.start(plugin, Config.savePeriod)
+            PeriodicTickManager.start(plugin, Config.mainPeriodicTick)
+        }
         OverMaxClaimsReminder.start(plugin, Config.overMaxClaimsReminderPeriod)
         Nametag.start(plugin, Config.nametagUpdatePeriod)
     }
@@ -567,6 +570,10 @@ public object Nodes {
         // if we reached backup time interval, generate a backup millis
         // timestamp for save task, which will be used to create a
         // timestamped backup file
+        // a follower shard mirrors the leader and must never write the shared state
+        if (phonon.nodes.shard.Shards.follower) {
+            return
+        }
         val currTime = System.currentTimeMillis()
         val backup = currTime > Nodes.lastBackupTime + Config.backupPeriod
         val backupTimestamp = if (backup) {

@@ -356,6 +356,10 @@ public object FlagWar {
         chunk: TerritoryChunk,
         flagBase: Block,
     ): Result<Attack> {
+        // attacks are not shared between shards yet, so they only start on the leader
+        if (phonon.nodes.shard.Shards.follower) {
+            return Result.failure(phonon.nodes.constants.ErrorNotOnLeaderShard)
+        }
         // players need a minimum playtime before they can place war flags
         if (Config.hoursRequiredToJoinWars > 0) {
             val ticks = org.bukkit.Bukkit.getOfflinePlayer(attacker).getStatistic(org.bukkit.Statistic.PLAY_ONE_MINUTE)

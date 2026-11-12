@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Sharding, phase 1 (experimental, off by default, `sharding:` in the config): Nodes can run on several servers that share one world (Reef sharding). One server is the leader; followers copy its towns, nations, claims, ports and war state through Redis, so protection and info work on every shard. Commands that change things, and starting war attacks, only work on the leader for now. `/nda shards` shows the role and the other shards. See `nodes/SHARDING-DESIGN.md`.
+
 ## [0.1.1] – 2026-11-12
 
 ### Added

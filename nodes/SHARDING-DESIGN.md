@@ -1,6 +1,6 @@
 # Nodes on Reef shards: design
 
-Status: **design only, nothing implemented yet.** Decisions so far: one leader shard owns all Nodes state and logic, the other shards keep a mirror of it, and the shards talk over Redis (besides Velocity moving players).
+Status: **phases 0 and 1 are implemented (experimental, untested on a real network).** See "What phase 1 does" below. Decisions so far: one leader shard owns all Nodes state and logic, the other shards keep a mirror of it, and the shards talk over Redis (besides Velocity moving players).
 
 Reef (see its `SHARDING.md`) splits one world across servers: each shard simulates only its own regions and players are handed over at borders. Reef shares player data and nothing else. Nodes keeps everything (towns, nations, territory ownership, wars, economy, skills, duels, POIs, ports) in one server's memory and in local files, so on shards it would diverge. This document says how to fix that.
 
@@ -65,6 +65,18 @@ These are the parts that decide the effort:
 | 4 | Failover, load tests with 500 bots on a war weekend, docs. | medium |
 
 Phases 0 and 1 are usable on their own: a player on any shard can be protected and see the right nation tags while all commands still run on the leader shard. They deliver value early and prove the event stream before the large rewrite.
+
+## What phase 1 does
+
+- `sharding:` in config.yml sets the role (`leader` or `follower`), this server's name and the Redis address. No extra library is needed; Nodes talks to Redis itself.
+- The leader works as before. Every `syncSeconds` it checks its saved files (`world.json`, `towns.json`, `ports.json`, `war.json`) and, when they changed, publishes them to Redis. So a change reaches followers after the leader's next save (`savePeriod`) plus up to `syncSeconds`.
+- A follower fetches those files before it loads the world, and again whenever the leader publishes. It then reloads its towns and claims. It never saves the shared state and does not run income, cooldowns, the economy tick or bounty payouts.
+- On a follower, Nodes commands that change things are refused with a message, and war flags cannot be placed. Info commands, chat and protection work.
+- `/nda shards` shows this shard's role, the last sync and every shard seen in Redis.
+
+Not shared yet (each shard still keeps its own copy): skills xp, POI discoveries, kill and death stats, duels, the economy, bounties, truces, calendar, supply drops, refineries, chat and the tab list. Do not rely on those on follower shards until phases 2 and 3.
+
+Known cost: a follower reloads all towns and territories each time the leader publishes. On a large map that can cause a short hitch; this goes away when phase 2 replaces full reloads with small events.
 
 ## Open questions
 

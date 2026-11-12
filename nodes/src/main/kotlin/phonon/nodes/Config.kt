@@ -824,6 +824,7 @@ public object Config {
         phonon.nodes.poi.Pois.loadConfig(config)
         phonon.nodes.skills.Skills.loadConfig(config)
         phonon.nodes.duel.Duels.loadConfig(config)
+        phonon.nodes.shard.Shards.loadConfig(config)
         Config.warProximity = config.getBoolean("warProximity", Config.warProximity)
         Config.warProximityDistance = config.getDouble("warProximityDistance", Config.warProximityDistance).coerceAtLeast(0.0)
         Config.minimumDistanceForNewTown = config.getBoolean("minimumDistanceForNewTown", Config.minimumDistanceForNewTown)

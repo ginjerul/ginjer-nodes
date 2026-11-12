@@ -47,6 +47,10 @@ public object WarSerializer {
 
     // pre-process war objects
     public fun save(async: Boolean) {
+        // a follower shard mirrors the leader's war state and never writes it
+        if (phonon.nodes.shard.Shards.follower) {
+            return
+        }
         // val timePreprocess = measureNanoTime {
 
         // convert occupiedChunks to json string

@@ -587,6 +587,27 @@ skills:
       10: "&cHunter"
       25: "&4Master Hunter"
 
+# Sharding (experimental): run Nodes on several servers that share one world behind Velocity
+# (Reef sharding). One server is the leader and owns all towns, nations, claims and wars. The
+# others are followers: they copy the leader's state through Redis so protection and info work
+# there, but commands that change things only work on the leader for now. Every server needs
+# the same world.json to start with. See SHARDING-DESIGN.md. /nda shards shows the status.
+sharding:
+  enabled: false
+  # leader (exactly one server) or follower
+  role: leader
+  # this server's name, as in velocity.toml
+  name: main
+  redis:
+    host: 127.0.0.1
+    port: 6379
+    password: ""
+    database: 0
+  # change this if two separate Nodes networks share one Redis
+  keyPrefix: nodes
+  # how often the leader checks for changes to publish, and followers check they missed none
+  syncSeconds: 5
+
 # Duels (/duel): two players fight in an admin-made arena, nobody really dies and both are put
 # back exactly as before. Set up with /nda duel arena add <name>, then spawn1, spawn2 and spectate
 # while standing in place. /nda duel kit save <name> copies your inventory as a kit.
