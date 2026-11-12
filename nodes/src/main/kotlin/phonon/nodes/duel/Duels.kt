@@ -87,7 +87,9 @@ object Duels {
         task?.cancel()
         DuelData.load()
         refundLeftovers()
-        plugin.server.pluginManager.registerEvents(DuelListener(plugin), plugin)
+        val listener = DuelListener(plugin)
+        plugin.server.pluginManager.registerEvents(listener, plugin)
+        listener.registerXc()
         task = plugin.server.scheduler.runTaskTimer(plugin, Runnable { tick() }, 20L, 20L)
     }
 

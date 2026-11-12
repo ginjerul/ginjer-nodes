@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+- Duels: XC gun hits (muskets etc.) are now handled too, so a killing shot ends the duel like a melee one instead of killing the player. Anyone who still dies in a duel is put back on respawn.
+
 ### Changed
 - Help lists for duels, skills, calendar, map, capture times and the `/nda` duel, skills, calendar and POI sections now use the same `[Nodes] <feature> commands:` style as the other features.
 

@@ -17,7 +17,9 @@ import org.bukkit.event.entity.PlayerDeathEvent
 import org.bukkit.event.player.PlayerCommandPreprocessEvent
 import org.bukkit.event.player.PlayerDropItemEvent
 import org.bukkit.event.player.PlayerJoinEvent
+import org.bukkit.event.Event
 import org.bukkit.event.player.PlayerMoveEvent
+import org.bukkit.event.player.PlayerRespawnEvent
 import org.bukkit.event.player.PlayerQuitEvent
 import org.bukkit.event.player.PlayerTeleportEvent
 import org.bukkit.plugin.Plugin
@@ -67,6 +69,76 @@ class DuelListener(private val plugin: Plugin) : Listener {
             event.isCancelled = true
             Duels.end(victimDuel, victimDuel.opponent(victim.uniqueId), "knockout")
         }
+    }
+
+    // XC guns (muskets etc.) do not go through Bukkit damage events, so their hits are handled
+    // here through XC's own event, with the same rules as onDamage
+    fun registerXc() {
+        val eventClass = try {
+            Class.forName("phonon.xc.event.XCProjectileDamageEvent")
+        } catch (_: ClassNotFoundException) {
+            return
+        }
+        @Suppress("UNCHECKED_CAST")
+        val clazz = eventClass as Class<out Event>
+        plugin.server.pluginManager.registerEvent(
+            clazz,
+            object : Listener {},
+            EventPriority.HIGHEST,
+            { _, event -> onXcHit(event) },
+            plugin,
+            false,
+        )
+    }
+
+    private fun xcCall(event: Event, name: String): Any? = try {
+        event.javaClass.methods.firstOrNull { it.name == name && it.parameterCount == 0 }?.invoke(event)
+    } catch (_: Exception) {
+        null
+    }
+
+    private fun onXcHit(event: Event) {
+        try {
+            val victim = xcCall(event, "getTarget") as? Player ?: return
+            val attacker = xcCall(event, "getSource") as? Player
+            val victimDuel = Duels.duels[victim.uniqueId]
+            val attackerDuel = attacker?.let { Duels.duels[it.uniqueId] }
+            var cancel = false
+            var knockout = false
+            if (victimDuel == null) {
+                cancel = attackerDuel != null
+            } else if (attacker == null || !victimDuel.has(attacker.uniqueId) || victimDuel.counting) {
+                cancel = true
+            } else {
+                val damage = (xcCall(event, "getDamage") as? Number)?.toDouble()
+                // when XC does not tell the damage, treat a hit on a badly hurt player as the killing blow
+                val lethal = if (damage != null) damage >= victim.health + victim.absorptionAmount else victim.health <= 10.0
+                if (lethal) {
+                    cancel = true
+                    knockout = true
+                } else {
+                    event.javaClass.methods.firstOrNull { it.name == "setCancelled" && it.parameterCount == 1 }?.invoke(event, false)
+                }
+            }
+            if (cancel) {
+                event.javaClass.methods.firstOrNull { it.name == "setCancelled" && it.parameterCount == 1 }?.invoke(event, true)
+            }
+            if (knockout && victimDuel != null) {
+                Duels.end(victimDuel, victimDuel.opponent(victim.uniqueId), "knockout")
+            }
+        } catch (e: Exception) {
+            plugin.logger.warning("[Duels] XC hook error: ${e.message}")
+        }
+    }
+
+    // if a duelist still died (the restore could not run while dead), put them back on respawn
+    @EventHandler
+    fun onRespawn(event: PlayerRespawnEvent) {
+        val id = event.player.uniqueId
+        if (DuelData.pending(id.toString()) == null || Duels.duels.containsKey(id)) {
+            return
+        }
+        plugin.server.scheduler.runTaskLater(plugin, Runnable { if (!Duels.busy(event.player)) Duels.restore(id, null) }, 2L)
     }
 
     // safety net if a duelist dies anyway (another plugin, /kill): the duel ends and nothing drops
