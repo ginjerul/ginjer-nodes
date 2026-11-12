@@ -337,7 +337,7 @@ object Duels {
             val loser = duel.opponent(winner)
             val points = DuelData.recordResult(winner.toString(), nameOf(winner), loser.toString(), nameOf(loser), eloStart, eloK)
             val prize = if (duel.wager > 0) " and wins ${Economy.show(duel.wager * 2)}" else ""
-            text = "${ChatColor.GOLD}${nameOf(winner)} defeated ${nameOf(loser)} in a duel$prize ${ChatColor.GRAY}($reason, +$points/-$points rating)"
+            text = "${ChatColor.GOLD}${nameOf(winner)} ${ChatColor.YELLOW}${DuelData.rating(winner.toString(), eloStart)} (+$points) ${ChatColor.GOLD}defeated ${nameOf(loser)} ${ChatColor.YELLOW}${DuelData.rating(loser.toString(), eloStart)} (-$points) ${ChatColor.GOLD}in a duel$prize ${ChatColor.GRAY}($reason)"
         } else {
             text = "${ChatColor.GRAY}The duel between ${nameOf(duel.first)} and ${nameOf(duel.second)} ended in a draw ($reason)"
         }
