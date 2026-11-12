@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- POI: a new or moved POI cannot be found for `poi.activationDelaySeconds` (default 120), so the admin placing it no longer discovers it by standing there. `/nda poi activate <id>` skips the wait, and `/nda poi add <type> radius=N <name>` sets the discovery radius on creation.
 - Duels: XC gun hits (muskets etc.) are now handled too, so a killing shot ends the duel like a melee one instead of killing the player. Anyone who still dies in a duel is put back on respawn.
 
 ### Changed

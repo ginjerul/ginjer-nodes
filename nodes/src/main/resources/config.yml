@@ -502,6 +502,9 @@ poi:
   checkTicks: 40
   # discovery radius given to a new POI, in blocks (3D, so deep caves work)
   defaultRadius: 12
+  # a new or moved POI cannot be found for this many seconds, so the admin placing it does not
+  # discover it by standing there (/nda poi activate <id> skips the wait)
+  activationDelaySeconds: 120
   # tell everyone when a POI is found for the first time
   announceFirstDiscovery: true
   # show "found/total" in the /map title

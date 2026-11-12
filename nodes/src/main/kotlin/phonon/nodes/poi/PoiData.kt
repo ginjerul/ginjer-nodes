@@ -48,6 +48,8 @@ class Poi(
     var firstBy: String? = null,
     var firstByName: String? = null,
     var firstAt: Long = 0L,
+    // players cannot find it before this time (ms), so the admin who places it does not discover it
+    var activeAt: Long = 0L,
 ) {
     fun poiType(): PoiType = PoiType.parse(type) ?: PoiType.RUIN
 }

@@ -25,6 +25,7 @@ object Pois {
     private var enabled = true
     private var checkTicks = 40L
     internal var defaultRadius = 12.0
+    internal var activationDelayMs = 120_000L
     private var announceFirst = true
     internal var showTotal = true
     internal var defaultMoney: Map<PoiType, Long> = emptyMap()
@@ -36,6 +37,7 @@ object Pois {
         enabled = sec?.getBoolean("enabled", true) ?: true
         checkTicks = (sec?.getLong("checkTicks", 40L) ?: 40L).coerceIn(10L, 600L)
         defaultRadius = (sec?.getDouble("defaultRadius", 12.0) ?: 12.0).coerceIn(2.0, 200.0)
+        activationDelayMs = (sec?.getLong("activationDelaySeconds", 120L) ?: 120L).coerceIn(0L, 86400L) * 1000L
         announceFirst = sec?.getBoolean("announceFirstDiscovery", true) ?: true
         showTotal = sec?.getBoolean("showTotal", true) ?: true
         val money = HashMap<PoiType, Long>()
@@ -72,6 +74,7 @@ object Pois {
         if (pois.isEmpty()) {
             return
         }
+        val now = System.currentTimeMillis()
         try {
             for (player in Bukkit.getOnlinePlayers()) {
                 if (player.gameMode == GameMode.SPECTATOR) {
@@ -80,7 +83,7 @@ object Pois {
                 val uuid = player.uniqueId.toString()
                 val loc = player.location
                 for (poi in pois) {
-                    if (poi.world != loc.world?.name || PoiData.hasFound(uuid, poi.id)) {
+                    if (poi.activeAt > now || poi.world != loc.world?.name || PoiData.hasFound(uuid, poi.id)) {
                         continue
                     }
                     val dx = loc.x - poi.x

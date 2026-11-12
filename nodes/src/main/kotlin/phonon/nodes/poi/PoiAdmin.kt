@@ -16,14 +16,14 @@ import phonon.nodes.economy.Economy
 import phonon.nodes.utils.AdminPerms
 
 object PoiAdmin {
-    private val ACTIONS = listOf("add", "list", "show", "remove", "tp", "move", "name", "type", "desc", "radius", "reward", "reset")
+    private val ACTIONS = listOf("add", "list", "show", "remove", "tp", "move", "name", "type", "desc", "radius", "activate", "reward", "reset")
 
     fun complete(args: Array<String>): List<String> {
         fun starts(options: List<String>, text: String) = options.filter { it.startsWith(text, ignoreCase = true) }
         return when {
             args.size == 2 -> starts(ACTIONS, args[1])
             args.size == 3 && args[1].equals("add", true) -> starts(PoiType.values().map { it.name.lowercase() }, args[2])
-            args.size == 3 && args[1].lowercase() in listOf("show", "remove", "tp", "move", "name", "type", "desc", "radius", "reward") -> starts(PoiData.pois().map { "${it.id}" }, args[2])
+            args.size == 3 && args[1].lowercase() in listOf("show", "remove", "tp", "move", "name", "type", "desc", "radius", "activate", "reward") -> starts(PoiData.pois().map { "${it.id}" }, args[2])
             args.size == 3 && args[1].equals("reset", true) -> starts(Bukkit.getOnlinePlayers().map { it.name }, args[2])
             args.size == 4 && args[1].equals("type", true) -> starts(PoiType.values().map { it.name.lowercase() }, args[3])
             args.size == 4 && args[1].equals("reward", true) -> starts(listOf("money", "item", "title", "clearitems"), args[3])
@@ -80,6 +80,14 @@ object PoiAdmin {
                     true
                 }
             }
+            "activate" -> {
+                val poi = find(sender, args)
+                if (poi != null) {
+                    poi.activeAt = 0L
+                    PoiData.savePois()
+                    Message.print(sender, "${ChatColor.GREEN}#${poi.id} can be found now")
+                }
+            }
             "reward" -> reward(sender, args)
             "reset" -> reset(sender, args)
             else -> help(sender)
@@ -88,13 +96,14 @@ object PoiAdmin {
 
     private fun help(sender: CommandSender) {
         Message.print(sender, "${ChatColor.BOLD}[Nodes] POI admin commands:")
-        Message.print(sender, "/nda poi add <type> <name...>${ChatColor.WHITE}: Create a place at your position (types: ${PoiType.values().joinToString(", ") { it.name.lowercase() }})")
+        Message.print(sender, "/nda poi add <type> [radius=N] <name...>${ChatColor.WHITE}: Create a place at your position (cannot be found for a short while, so you do not discover it yourself) (types: ${PoiType.values().joinToString(", ") { it.name.lowercase() }})")
         Message.print(sender, "/nda poi list${ChatColor.WHITE}: List places")
         Message.print(sender, "/nda poi show <id>${ChatColor.WHITE}: Show one place")
         Message.print(sender, "/nda poi remove <id>${ChatColor.WHITE}: Delete a place")
         Message.print(sender, "/nda poi tp <id>${ChatColor.WHITE}: Teleport to a place")
         Message.print(sender, "/nda poi move <id>${ChatColor.WHITE}: Move a place to your position")
         Message.print(sender, "/nda poi name|desc|type|radius <id> <value...>${ChatColor.WHITE}: Edit a place")
+        Message.print(sender, "/nda poi activate <id>${ChatColor.WHITE}: Let players find a new place right away")
         Message.print(sender, "/nda poi reward <id> money <amount> | item <MATERIAL> [amount] | title <text|none> | clearitems${ChatColor.WHITE}: Set the discovery reward")
         Message.print(sender, "/nda poi reset <player> [id]${ChatColor.WHITE}: Clear a player's discoveries")
     }
@@ -120,6 +129,10 @@ object PoiAdmin {
         if (p.money > 0) rewards.add(Economy.show(p.money))
         rewards.addAll(p.items)
         p.title?.let { rewards.add("title " + Pois.colour(it) + ChatColor.GRAY) }
+        val wait = (p.activeAt - System.currentTimeMillis()) / 1000
+        if (wait > 0) {
+            Message.print(sender, "${ChatColor.GRAY}  can be found in ${wait / 60}m ${wait % 60}s (/nda poi activate ${p.id} to skip)")
+        }
         Message.print(sender, "${ChatColor.GRAY}  reward: ${if (rewards.isEmpty()) "none" else rewards.joinToString(", ")}")
         if (p.firstByName != null) {
             Message.print(sender, "${ChatColor.GRAY}  first found by ${p.firstByName} on ${Pois.date(p.firstAt)}")
@@ -132,20 +145,29 @@ object PoiAdmin {
             return
         }
         val type = args.getOrNull(2)?.let { PoiType.parse(it) }
-        if (type == null || args.size < 4) {
-            Message.error(sender, "Usage: /nda poi add <type> <name...> (types: ${PoiType.values().joinToString(", ") { it.name.lowercase() }})")
+        // optional radius=N before the name
+        val radiusArg = args.getOrNull(3)?.takeIf { it.startsWith("radius=", true) }
+        val radius = radiusArg?.substringAfter("=")?.toDoubleOrNull()
+        val nameStart = if (radiusArg != null) 4 else 3
+        if (type == null || args.size <= nameStart) {
+            Message.error(sender, "Usage: /nda poi add <type> [radius=N] <name...> (types: ${PoiType.values().joinToString(", ") { it.name.lowercase() }})")
+            return
+        }
+        if (radiusArg != null && (radius == null || radius < 2.0 || radius > 200.0)) {
+            Message.error(sender, "Radius is 2 to 200 blocks")
             return
         }
         val loc = sender.location
         val poi = PoiData.add(
             Poi(
-                name = args.drop(3).joinToString(" "),
+                name = args.drop(nameStart).joinToString(" "),
                 type = type.name,
                 world = loc.world?.name ?: "",
                 x = loc.x,
                 y = loc.y,
                 z = loc.z,
-                radius = Pois.defaultRadius,
+                radius = radius ?: Pois.defaultRadius,
+                activeAt = System.currentTimeMillis() + Pois.activationDelayMs,
                 money = Pois.defaultMoney[type] ?: 0L,
             ),
         )
@@ -176,6 +198,7 @@ object PoiAdmin {
         poi.x = loc.x
         poi.y = loc.y
         poi.z = loc.z
+        poi.activeAt = System.currentTimeMillis() + Pois.activationDelayMs
         PoiData.savePois()
         Message.print(sender, "${ChatColor.GREEN}Moved #${poi.id} to your position")
     }
