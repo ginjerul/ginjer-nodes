@@ -6,20 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.1.1] – 2026-11-12
+
 ### Added
+
 - Duels have an Elo rating (start and swing set by `duel.eloStart` and `duel.eloK`). It shows in `/duel stats`, the result message and `/duel top`, which is now ordered by rating.
-
-### Fixed
-- config.yml now fills in every missing option on startup, including ones inside existing sections (before, only top-level options were added). Existing values are never changed.
-- POI rewards can now be the exact item in your hand (`/nda poi reward <id> hand`), so custom named, enchanted or plugin items work, like supply drop loot.
-- POI: a new or moved POI cannot be found for `poi.activationDelaySeconds` (default 120), so the admin placing it no longer discovers it by standing there. `/nda poi activate <id>` skips the wait, and `/nda poi add <type> radius=N <name>` sets the discovery radius on creation.
-- Duels: XC gun hits (muskets etc.) are now handled too, so a killing shot ends the duel like a melee one instead of killing the player. Anyone who still dies in a duel is put back on respawn.
-
-### Changed
-- Help lists for duels, skills, calendar, map, capture times and the `/nda` duel, skills, calendar and POI sections now use the same `[Nodes] <feature> commands:` style as the other features.
-
-### Added
-
 - Ore bounties (`/bounty`): players fund bounties on other players with real ores or items from their inventory. The killer's reward goes to their town income or their inventory. Options are under `bounties:` in the config.
 - Economy (`/economy`, `/economyadmin`): nation, town, personal and business accounts, recurring trade routes between nations, loans from a funded reserve and infrastructure upkeep. Options are under `economy:` in the config. Based on the NodesEconomy prototype, rewritten as part of Nodes with no extra dependencies.
 - Economy: sell items to the server (`/economy sell`, `/economy prices`), a player market (`/economy market`), richest lists (`/economy top`), a menu (`/economy menu`), vote rewards (NuVotifier/Votifier or `/economyadmin vote`), and optional transfer/market fees and a daily town tax.
@@ -49,6 +40,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Exploration: admins place points of interest with `/nda poi add <type> <name>` (villages, ruins, caves, shrines, shipwrecks, dungeons, camps) and set radius, description and rewards (money, items, a title). Players discover them by walking close, get the reward once, and see only what they found in `/map`. Finding POIs earns milestone titles that can be shown in chat with `/map title`. Options are under `poi:` in the config; permissions are `nodes.command.map` and `nodes.admin.poi[.action]`. POIs are not shown on GinjerMap.
 - Duels (`/duel <player> [kit|own] [wager]`, `accept`, `deny`, `cancel`, `spectate <player>`, `leave`, `top`, `stats [player]`, `kits`): fights in admin-set arenas with a countdown and time limit. Nobody dies and players are put back with their position, health and inventory (also after a crash). Only the two duelists can hurt each other, overriding town PvP and friendly fire rules. Optional kits (everyone gets the same loadout), money wagers held in escrow and paid to the winner, win/loss records, and spectating. Admins use `/nda duel arena|kit|end|resetstats`. Options are under `duel:` in the config.
 - Skills (`/skills`, `/skills top <skill>`): mining, farming, woodcutting and hunting gain xp as players do them. Each level gives a small chance of one extra drop, and set levels earn titles that can be shown in chat with `/map title`. Blocks players placed, unripe crops and bred or spawner mobs give no xp. Admins use `/nda skills show|set|addxp|reset`. Options, xp values and titles are under `skills:` in the config.
+
+### Changed
+
+- Help lists for duels, skills, calendar, map, capture times and the `/nda` duel, skills, calendar and POI sections now use the same `[Nodes] <feature> commands:` style as the other features.
+
+### Fixed
+
+- config.yml now fills in every missing option on startup, including ones inside existing sections (before, only top-level options were added). Existing values are never changed.
+- POI rewards can now be the exact item in your hand (`/nda poi reward <id> hand`), so custom named, enchanted or plugin items work, like supply drop loot.
+- POI: a new or moved POI cannot be found for `poi.activationDelaySeconds` (default 120), so the admin placing it no longer discovers it by standing there. `/nda poi activate <id>` skips the wait, and `/nda poi add <type> radius=N <name>` sets the discovery radius on creation.
+- Duels: XC gun hits (muskets etc.) are now handled too, so a killing shot ends the duel like a melee one instead of killing the player. Anyone who still dies in a duel is put back on respawn.
 
 ## [0.1.0] – 2026-11-02
 
