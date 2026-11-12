@@ -59,6 +59,7 @@ class DuelStats(
     var losses: Int = 0,
     var streak: Int = 0,
     var bestStreak: Int = 0,
+    var elo: Int = 1000,
 )
 
 // where a player goes back to after a duel or spectating; items only for kit duels
@@ -222,6 +223,22 @@ object DuelData {
     // ===================================
     fun stats(uuid: String): DuelStats? = file.stats[uuid]
 
+    fun rating(uuid: String, start: Int): Int = file.stats[uuid]?.elo ?: start
+
+    // Elo: the winner gains what the loser loses; beating a stronger player is worth more.
+    // Returns the points moved.
+    fun recordResult(winner: String, winnerName: String, loser: String, loserName: String, start: Int, k: Int): Int {
+        val w = file.stats.getOrPut(winner) { DuelStats(winnerName, elo = start) }
+        val l = file.stats.getOrPut(loser) { DuelStats(loserName, elo = start) }
+        val expected = 1.0 / (1.0 + Math.pow(10.0, (l.elo - w.elo) / 400.0))
+        val delta = Math.round(k * (1.0 - expected)).toInt().coerceAtLeast(1)
+        w.elo += delta
+        l.elo = (l.elo - delta).coerceAtLeast(0)
+        recordWin(winner, winnerName)
+        recordLoss(loser, loserName)
+        return delta
+    }
+
     fun recordWin(uuid: String, name: String) {
         val s = file.stats.getOrPut(uuid) { DuelStats(name) }
         s.name = name
@@ -249,5 +266,5 @@ object DuelData {
         return removed
     }
 
-    fun top(count: Int): List<DuelStats> = file.stats.values.sortedWith(compareByDescending<DuelStats> { it.wins }.thenBy { it.losses }).take(count)
+    fun top(count: Int): List<DuelStats> = file.stats.values.sortedWith(compareByDescending<DuelStats> { it.elo }.thenByDescending { it.wins }).take(count)
 }

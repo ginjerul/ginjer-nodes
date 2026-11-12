@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+- Duels have an Elo rating (start and swing set by `duel.eloStart` and `duel.eloK`). It shows in `/duel stats`, the result message and `/duel top`, which is now ordered by rating.
+
 ### Fixed
 - config.yml now fills in every missing option on startup, including ones inside existing sections (before, only top-level options were added). Existing values are never changed.
 - POI rewards can now be the exact item in your hand (`/nda poi reward <id> hand`), so custom named, enchanted or plugin items work, like supply drop loot.

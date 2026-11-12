@@ -65,6 +65,8 @@ object Duels {
     internal val watching = HashMap<UUID, Duel>()
     internal val moving = HashSet<UUID>()
     private var task: BukkitTask? = null
+    private var eloStart = 1000
+    private var eloK = 32
 
     fun loadConfig(config: ConfigurationSection) {
         val sec = config.getConfigurationSection("duel")
@@ -77,6 +79,8 @@ object Duels {
         kitOnly = sec?.getBoolean("kitOnly", false) ?: false
         defaultKit = sec?.getString("defaultKit", "") ?: ""
         announce = sec?.getBoolean("announce", true) ?: true
+        eloStart = (sec?.getInt("eloStart", 1000) ?: 1000).coerceIn(0, 100000)
+        eloK = (sec?.getInt("eloK", 32) ?: 32).coerceIn(1, 200)
         val commands = sec?.getStringList("allowedCommands") ?: emptyList()
         allowedCommands = (commands + "duel").map { it.lowercase().removePrefix("/") }.toSet()
     }
@@ -331,10 +335,9 @@ object Duels {
         val text: String
         if (winner != null) {
             val loser = duel.opponent(winner)
-            DuelData.recordWin(winner.toString(), nameOf(winner))
-            DuelData.recordLoss(loser.toString(), nameOf(loser))
+            val points = DuelData.recordResult(winner.toString(), nameOf(winner), loser.toString(), nameOf(loser), eloStart, eloK)
             val prize = if (duel.wager > 0) " and wins ${Economy.show(duel.wager * 2)}" else ""
-            text = "${ChatColor.GOLD}${nameOf(winner)} defeated ${nameOf(loser)} in a duel$prize ${ChatColor.GRAY}($reason)"
+            text = "${ChatColor.GOLD}${nameOf(winner)} defeated ${nameOf(loser)} in a duel$prize ${ChatColor.GRAY}($reason, +$points/-$points rating)"
         } else {
             text = "${ChatColor.GRAY}The duel between ${nameOf(duel.first)} and ${nameOf(duel.second)} ended in a draw ($reason)"
         }
@@ -471,7 +474,7 @@ object Duels {
         }
         val total = s.wins + s.losses
         val rate = if (total == 0) 0 else s.wins * 100 / total
-        Message.print(sender, "${ChatColor.GOLD}${s.name}${ChatColor.WHITE}: ${s.wins} wins, ${s.losses} losses ($rate%), streak ${s.streak}, best ${s.bestStreak}")
+        Message.print(sender, "${ChatColor.GOLD}${s.name}${ChatColor.WHITE}: rating ${s.elo}, ${s.wins} wins, ${s.losses} losses ($rate%), streak ${s.streak}, best ${s.bestStreak}")
     }
 
     fun showTop(sender: org.bukkit.command.CommandSender) {
@@ -481,7 +484,7 @@ object Duels {
             Message.print(sender, "${ChatColor.GRAY}Nobody has dueled yet")
         }
         for ((i, s) in top.withIndex()) {
-            Message.print(sender, "${ChatColor.YELLOW}${i + 1}. ${ChatColor.WHITE}${s.name} ${ChatColor.GRAY}${s.wins}W ${s.losses}L")
+            Message.print(sender, "${ChatColor.YELLOW}${i + 1}. ${ChatColor.WHITE}${s.name} ${ChatColor.YELLOW}${s.elo} ${ChatColor.GRAY}${s.wins}W ${s.losses}L")
         }
     }
 }

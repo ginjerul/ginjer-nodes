@@ -602,6 +602,10 @@ duel:
   allowWager: true
   # largest wager, 0 for no limit
   maxWager: 0
+  # Elo rating: everyone starts at eloStart; eloK is the most a single duel can move (higher =
+  # faster changes). Beating a stronger player earns more. /duel top is ordered by rating.
+  eloStart: 1000
+  eloK: 32
   # true = a kit must always be picked; defaultKit is used when none is named ("" = own gear)
   kitOnly: false
   defaultKit: ""

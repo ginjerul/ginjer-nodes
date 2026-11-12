@@ -89,8 +89,8 @@ class DuelCommand :
         Message.print(sender, "/duel cancel${ChatColor.WHITE}: Withdraw your challenge")
         Message.print(sender, "/duel spectate <player>${ChatColor.WHITE}: Watch a duel")
         Message.print(sender, "/duel leave${ChatColor.WHITE}: Stop watching, or forfeit your own duel")
-        Message.print(sender, "/duel top${ChatColor.WHITE}: Best duelists")
-        Message.print(sender, "/duel stats [player]${ChatColor.WHITE}: Win and loss record")
+        Message.print(sender, "/duel top${ChatColor.WHITE}: Highest rated duelists")
+        Message.print(sender, "/duel stats [player]${ChatColor.WHITE}: Rating and win/loss record")
         Message.print(sender, "/duel kits${ChatColor.WHITE}: List kits")
     }
 
