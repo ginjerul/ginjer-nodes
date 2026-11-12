@@ -156,10 +156,48 @@ public object Nodes {
         Nodes.logger = plugin.getLogger()
     }
 
+    // sections whose entries are chosen by the admin (blocks, levels, titles...): if the section
+    // exists, entries the admin removed on purpose are not put back
+    private val adminKeyedSections = listOf(
+        "globalResources.income", "globalResources.ore", "globalResources.crops", "globalResources.animals",
+        "raid.attackerReward", "raid.defenderReward", "outpostTeleportCost", "nationTownTeleportCost",
+        "tabList.staffPermissions", "poi.milestones", "skills.titles", "fortify.levels",
+    )
+
+    private fun isAdminKeyed(path: String): Boolean =
+        adminKeyedSections.any { path == it || path.startsWith("$it.") } ||
+            Regex("^skills\\.[a-z]+\\.xp(\\..*)?$").matches(path)
+
+    // copies every option (at any depth) the bundled config has and the file lacks, with comments
+    private fun mergeMissing(defaults: org.bukkit.configuration.ConfigurationSection, config: YamlConfiguration, prefix: String, force: Boolean = false): Int {
+        var added = 0
+        for (key in defaults.getKeys(false)) {
+            val path = if (prefix.isEmpty()) key else "$prefix.$key"
+            val exists = config.contains(path, true)
+            if (defaults.isConfigurationSection(key)) {
+                if (!exists) {
+                    config.createSection(path)
+                    config.setComments(path, defaults.getComments(key))
+                    config.setInlineComments(path, defaults.getInlineComments(key))
+                    added += 1 + mergeMissing(defaults.getConfigurationSection(key)!!, config, path, true)
+                } else if (force || !isAdminKeyed(path)) {
+                    added += mergeMissing(defaults.getConfigurationSection(key)!!, config, path, force)
+                }
+                continue
+            }
+            if (exists) continue
+            config.set(path, defaults.get(key))
+            config.setComments(path, defaults.getComments(key))
+            config.setInlineComments(path, defaults.getInlineComments(key))
+            added++
+        }
+        return added
+    }
+
     /**
-     * An existing config.yml never gets options added by plugin updates. Copy the plain
-     * top-level options (not sections, so nothing an admin removed on purpose comes back)
-     * that the bundled config.yml has and this file lacks, with their comments.
+     * Plugin updates never touch an existing config.yml, so on every start copy in whatever the
+     * bundled config.yml has and this file lacks, with its comments. Existing values are never
+     * changed, and entries inside admin-keyed sections that were removed on purpose stay removed.
      */
     private fun addMissingConfigOptions(plugin: org.bukkit.plugin.Plugin, config: YamlConfiguration, file: File) {
         try {
@@ -167,17 +205,10 @@ public object Nodes {
             val defaults = stream.use {
                 YamlConfiguration.loadConfiguration(java.io.InputStreamReader(it, Charsets.UTF_8))
             }
-            var added = 0
-            for (key in defaults.getKeys(false)) {
-                if (defaults.isConfigurationSection(key) || config.contains(key, true)) continue
-                config.set(key, defaults.get(key))
-                config.setComments(key, defaults.getComments(key))
-                config.setInlineComments(key, defaults.getInlineComments(key))
-                added++
-            }
+            val added = mergeMissing(defaults, config, "")
             if (added > 0) {
                 config.save(file)
-                plugin.getLogger().info("config.yml: added $added new option(s) from this version (existing values kept)")
+                plugin.getLogger().info("config.yml: added $added missing option(s) from this version (existing values kept)")
             }
         } catch (e: Exception) {
             plugin.getLogger().warning("Could not add new options to config.yml: ${e.message}")
