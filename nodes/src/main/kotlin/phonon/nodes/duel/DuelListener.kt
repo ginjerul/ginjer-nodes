@@ -8,6 +8,7 @@ package phonon.nodes.duel
 
 import org.bukkit.entity.Player
 import org.bukkit.entity.Projectile
+import org.bukkit.event.Event
 import org.bukkit.event.EventHandler
 import org.bukkit.event.EventPriority
 import org.bukkit.event.Listener
@@ -17,10 +18,9 @@ import org.bukkit.event.entity.PlayerDeathEvent
 import org.bukkit.event.player.PlayerCommandPreprocessEvent
 import org.bukkit.event.player.PlayerDropItemEvent
 import org.bukkit.event.player.PlayerJoinEvent
-import org.bukkit.event.Event
 import org.bukkit.event.player.PlayerMoveEvent
-import org.bukkit.event.player.PlayerRespawnEvent
 import org.bukkit.event.player.PlayerQuitEvent
+import org.bukkit.event.player.PlayerRespawnEvent
 import org.bukkit.event.player.PlayerTeleportEvent
 import org.bukkit.plugin.Plugin
 
@@ -79,6 +79,7 @@ class DuelListener(private val plugin: Plugin) : Listener {
         } catch (_: ClassNotFoundException) {
             return
         }
+
         @Suppress("UNCHECKED_CAST")
         val clazz = eventClass as Class<out Event>
         plugin.server.pluginManager.registerEvent(
