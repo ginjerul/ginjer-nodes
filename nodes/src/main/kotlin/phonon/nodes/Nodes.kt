@@ -164,9 +164,9 @@ public object Nodes {
         "tabList.staffPermissions", "poi.milestones", "skills.titles", "fortify.levels",
     )
 
-    private fun isAdminKeyed(path: String): Boolean =
-        adminKeyedSections.any { path == it || path.startsWith("$it.") } ||
-            Regex("^skills\\.[a-z]+\\.xp(\\..*)?$").matches(path)
+    private val skillXpPath = Regex("^skills\\.[a-z]+\\.xp(\\..*)?$")
+
+    private fun isAdminKeyed(path: String): Boolean = adminKeyedSections.any { path == it || path.startsWith("$it.") } || skillXpPath.matches(path)
 
     // copies every option (at any depth) the bundled config has and the file lacks, with comments
     private fun mergeMissing(defaults: org.bukkit.configuration.ConfigurationSection, config: YamlConfiguration, prefix: String, force: Boolean = false): Int {
