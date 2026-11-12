@@ -44,6 +44,8 @@ class Poi(
     var money: Long = 0L,
     var items: MutableList<String> = mutableListOf(),
     var title: String? = null,
+    // exact items (custom names, enchantments, plugin items) saved from the admin's hand, base64
+    var customItems: MutableList<String> = mutableListOf(),
     // the first player to find it
     var firstBy: String? = null,
     var firstByName: String? = null,

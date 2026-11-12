@@ -13,6 +13,7 @@ import org.bukkit.command.CommandSender
 import org.bukkit.entity.Player
 import phonon.nodes.Message
 import phonon.nodes.economy.Economy
+import phonon.nodes.refinery.Refineries
 import phonon.nodes.utils.AdminPerms
 
 object PoiAdmin {
@@ -26,7 +27,7 @@ object PoiAdmin {
             args.size == 3 && args[1].lowercase() in listOf("show", "remove", "tp", "move", "name", "type", "desc", "radius", "activate", "reward") -> starts(PoiData.pois().map { "${it.id}" }, args[2])
             args.size == 3 && args[1].equals("reset", true) -> starts(Bukkit.getOnlinePlayers().map { it.name }, args[2])
             args.size == 4 && args[1].equals("type", true) -> starts(PoiType.values().map { it.name.lowercase() }, args[3])
-            args.size == 4 && args[1].equals("reward", true) -> starts(listOf("money", "item", "title", "clearitems"), args[3])
+            args.size == 4 && args[1].equals("reward", true) -> starts(listOf("money", "item", "hand", "title", "clearitems"), args[3])
             args.size == 5 && args[1].equals("reward", true) && args[3].equals("item", true) -> starts(Material.values().filter { it.isItem }.map { it.name.lowercase() }, args[4])
             else -> emptyList()
         }
@@ -104,7 +105,7 @@ object PoiAdmin {
         Message.print(sender, "/nda poi move <id>${ChatColor.WHITE}: Move a place to your position")
         Message.print(sender, "/nda poi name|desc|type|radius <id> <value...>${ChatColor.WHITE}: Edit a place")
         Message.print(sender, "/nda poi activate <id>${ChatColor.WHITE}: Let players find a new place right away")
-        Message.print(sender, "/nda poi reward <id> money <amount> | item <MATERIAL> [amount] | title <text|none> | clearitems${ChatColor.WHITE}: Set the discovery reward")
+        Message.print(sender, "/nda poi reward <id> money <amount> | item <MATERIAL> [amount] | hand | title <text|none> | clearitems${ChatColor.WHITE}: Set the discovery reward (hand = the exact item you hold, custom items included)")
         Message.print(sender, "/nda poi reset <player> [id]${ChatColor.WHITE}: Clear a player's discoveries")
     }
 
@@ -128,6 +129,11 @@ object PoiAdmin {
         val rewards = mutableListOf<String>()
         if (p.money > 0) rewards.add(Economy.show(p.money))
         rewards.addAll(p.items)
+        for (data in p.customItems) {
+            val item = Refineries.itemFromBase64(data) ?: continue
+            val name = item.itemMeta?.takeIf { it.hasDisplayName() }?.displayName ?: item.type.name.lowercase()
+            rewards.add("${item.amount} x $name${ChatColor.GRAY}")
+        }
         p.title?.let { rewards.add("title " + Pois.colour(it) + ChatColor.GRAY) }
         val wait = (p.activeAt - System.currentTimeMillis()) / 1000
         if (wait > 0) {
@@ -244,7 +250,24 @@ object PoiAdmin {
                 }
                 poi.title = if (text.equals("none", true)) null else text
             }
-            "clearitems" -> poi.items.clear()
+            "hand" -> {
+                val player = sender as? Player
+                val held = player?.inventory?.itemInMainHand
+                if (held == null || held.type == Material.AIR) {
+                    Message.error(sender, "Hold the item to give as the reward (name, enchantments and plugin items are kept exactly)")
+                    return
+                }
+                val data = Refineries.itemToBase64(held)
+                if (data == null) {
+                    Message.error(sender, "Could not save that item")
+                    return
+                }
+                poi.customItems.add(data)
+            }
+            "clearitems" -> {
+                poi.items.clear()
+                poi.customItems.clear()
+            }
             else -> {
                 Message.error(sender, "Usage: /nda poi reward <id> money|item|title|clearitems ...")
                 return

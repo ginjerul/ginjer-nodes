@@ -18,6 +18,7 @@ import org.bukkit.scheduler.BukkitTask
 import phonon.nodes.Message
 import phonon.nodes.Nodes
 import phonon.nodes.economy.Economy
+import phonon.nodes.refinery.Refineries
 import java.text.SimpleDateFormat
 import java.util.Date
 
@@ -150,6 +151,13 @@ object Pois {
             val leftover = player.inventory.addItem(ItemStack(material, amount))
             leftover.values.forEach { player.world.dropItemNaturally(player.location, it) }
             Message.print(player, "${ChatColor.GREEN}Reward: $amount x ${material.name.lowercase().replace('_', ' ')}")
+        }
+        for (data in poi.customItems) {
+            val item = Refineries.itemFromBase64(data) ?: continue
+            val name = item.itemMeta?.takeIf { it.hasDisplayName() }?.displayName ?: item.type.name.lowercase().replace('_', ' ')
+            val leftover = player.inventory.addItem(item)
+            leftover.values.forEach { player.world.dropItemNaturally(player.location, it) }
+            Message.print(player, "${ChatColor.GREEN}Reward: ${item.amount} x $name")
         }
         val title = poi.title
         if (title != null && !progress.titles.contains(title)) {
