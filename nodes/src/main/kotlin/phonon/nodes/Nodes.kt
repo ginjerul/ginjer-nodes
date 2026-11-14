@@ -514,15 +514,17 @@ public object Nodes {
             if (Files.exists(Config.pathTowns)) {
                 Deserializer.townsFromJson(Config.pathTowns)
 
-                // Pre-generate json strings to speed up the first save
-                for (resident in Nodes.residents.values) {
-                    resident.getSaveState()
-                }
-                for (town in Nodes.towns.values) {
-                    town.getSaveState()
-                }
-                for (nation in Nodes.nations.values) {
-                    nation.getSaveState()
+                // Pre-generate json strings to speed up the first save (a follower shard never saves)
+                if (!phonon.nodes.shard.Shards.follower) {
+                    for (resident in Nodes.residents.values) {
+                        resident.getSaveState()
+                    }
+                    for (town in Nodes.towns.values) {
+                        town.getSaveState()
+                    }
+                    for (nation in Nodes.nations.values) {
+                        nation.getSaveState()
+                    }
                 }
 
                 if (Nodes.dynmap) {
@@ -538,12 +540,14 @@ public object Nodes {
             if (Files.exists(Config.pathPorts)) {
                 Deserializer.portsFromJson(Config.pathPorts)
 
-                // Pre-generate json strings to speed up the first save
-                for (port in Nodes.ports.values) {
-                    port.getSaveState()
-                }
-                for (portGroup in Nodes.portGroups.values) {
-                    portGroup.getSaveState()
+                // Pre-generate json strings to speed up the first save (a follower shard never saves)
+                if (!phonon.nodes.shard.Shards.follower) {
+                    for (port in Nodes.ports.values) {
+                        port.getSaveState()
+                    }
+                    for (portGroup in Nodes.portGroups.values) {
+                        portGroup.getSaveState()
+                    }
                 }
 
                 if (Nodes.dynmap) {
@@ -926,11 +930,17 @@ public object Nodes {
         townCreateCooldown: Long,
         leftNation: String? = null,
         leftNationAt: Long = 0L,
+        savedName: String? = null,
     ) {
         var playerName: String? = Bukkit.getPlayer(uuid)?.let { player ->
             player.name
         } ?: run {
             Bukkit.getOfflinePlayer(uuid)?.getName()
+        }
+        // on shards a player may never have joined this server, so it does not know their name:
+        // use the name the leader saved instead of dropping them from their town
+        if (playerName == null && phonon.nodes.shard.Shards.enabled && !savedName.isNullOrBlank()) {
+            playerName = savedName
         }
 
         if (playerName == null) {

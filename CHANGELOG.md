@@ -10,6 +10,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 - Sharding, phase 1 (experimental, off by default, `sharding:` in the config): Nodes can run on several servers that share one world (Reef sharding). One server is the leader; followers copy its towns, nations, claims, ports and war state through Redis, so protection and info work on every shard. Commands that change things, and starting war attacks, only work on the leader for now. `/nda shards` shows the role and the other shards. See `nodes/SHARDING-DESIGN.md`.
 
+### Fixed
+
+- Sharding: players who had never joined a follower shard were dropped from their towns there, so towns showed no leader or residents and players arrived from the leader without a town. Nodes now uses the name saved in `towns.json` when sharding is on.
+- Sharding: turning war on is saved right away, so follower shards see it (before, nothing was written until the first attack).
+- Sharding: a follower no longer announces "Nodes war enabled" on every update, no longer runs attack progress itself, and removes the previous flags and beacons before showing the leader's current ones. Turning war off on the leader now turns it off on followers too.
+- Sharding: placing a war flag on a follower now says why it was refused.
+- Sharding: followers fetch the leader's state off the main thread, keep each player's minimap and chat channel across updates, and log how long each update took. The leader publishes again if Redis lost its copy (for example after a Redis restart). A Redis outage is logged once when it starts and once when it ends.
+
 ## [0.1.1] – 2026-11-12
 
 ### Added

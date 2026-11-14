@@ -65,6 +65,27 @@ object Shards {
     @Volatile
     private var syncCount = 0
 
+    // hash of a snapshot a follower has fetched and queued to apply on the main thread
+    @Volatile
+    private var pendingHash = ""
+    private val fetchLock = Any()
+
+    // logs when Redis goes down or comes back, once, instead of on every retry
+    private fun failed(e: Exception) {
+        val message = e.message ?: e.javaClass.simpleName
+        if (lastError == null) {
+            plugin?.logger?.warning("[Shards] Redis problem: $message (retrying every ${syncSeconds}s; /nda shards shows the status)")
+        }
+        lastError = message
+    }
+
+    private fun recovered() {
+        if (lastError != null) {
+            plugin?.logger?.info("[Shards] Redis is reachable again")
+        }
+        lastError = null
+    }
+
     fun loadConfig(config: ConfigurationSection) {
         val sec = config.getConfigurationSection("sharding")
         enabled = sec?.getBoolean("enabled", false) ?: false
@@ -128,7 +149,7 @@ object Shards {
         try {
             redis { it.command("PING") }
         } catch (e: Exception) {
-            lastError = e.message
+            failed(e)
             log.severe("[Shards] Cannot reach Redis at $host:$port: ${e.message}")
             if (follower) {
                 log.severe("[Shards] This follower starts from its own old files and will not change anything until Redis is back")
@@ -181,18 +202,20 @@ object Shards {
         }
         try {
             redis { it.command("SET", "$prefix:shard:$name", "${if (leader) "leader" else "follower"}|${System.currentTimeMillis()}|${Bukkit.getOnlinePlayers().size}", "EX", "${syncSeconds * 4 + 10}") }
+            val remote = (redis { it.command("HGET", snapshotKey, "hash") } as? ByteArray)?.let { String(it) }
             if (leader) {
-                publish()
-            } else {
-                // in case a published message was missed
-                val remote = redis { it.command("HGET", snapshotKey, "hash") } as? ByteArray
-                if (remote != null && String(remote) != lastHash) {
-                    applyOnMainThread()
+                // Redis lost the snapshot (restarted without persistence, flushed): publish it again
+                if (remote != lastHash) {
+                    lastHash = ""
                 }
+                publish()
+            } else if (remote != null && remote != lastHash) {
+                // in case a published message was missed
+                fetchAndApply()
             }
-            lastError = null
+            recovered()
         } catch (e: Exception) {
-            lastError = e.message
+            failed(e)
         }
     }
 
@@ -215,7 +238,10 @@ object Shards {
             }
             contents[field] = bytes
             digest.update(field.toByteArray())
-            digest.update(bytes)
+            // attack progress changes war.json every second during a war; publishing (and a full
+            // reload on every follower) for that alone would cause a hitch every few seconds.
+            // Progress still goes out with the next real change.
+            digest.update(if (field == "war") ATTACK_PROGRESS.replace(String(bytes, Charsets.UTF_8), "\"p\":0").toByteArray() else bytes)
         }
         if (contents.isEmpty()) {
             return
@@ -250,7 +276,14 @@ object Shards {
 
     // writes the leader's files into this shard's plugin folder; false if there is nothing new
     private fun pull(): Boolean {
-        val reply = redis { it.command("HGETALL", snapshotKey) } as? List<*> ?: return false
+        val fields = fetch() ?: return false
+        write(fields)
+        return true
+    }
+
+    // the leader's snapshot from Redis, or null if it is missing or already applied. Any thread.
+    private fun fetch(): Map<String, ByteArray>? {
+        val reply = redis { it.command("HGETALL", snapshotKey) } as? List<*> ?: return null
         val fields = HashMap<String, ByteArray>()
         var i = 0
         while (i + 1 < reply.size) {
@@ -261,10 +294,15 @@ object Shards {
             }
             i += 2
         }
-        val hash = fields["hash"]?.let { String(it) } ?: return false
+        val hash = fields["hash"]?.let { String(it) } ?: return null
         if (hash == lastHash) {
-            return false
+            return null
         }
+        return fields
+    }
+
+    private fun write(fields: Map<String, ByteArray>) {
+        val hash = fields["hash"]?.let { String(it) } ?: return
         for ((field, path) in files()) {
             val bytes = fields[field] ?: continue
             Files.createDirectories(path.parent)
@@ -275,29 +313,66 @@ object Shards {
         lastHash = hash
         lastSyncAt = System.currentTimeMillis()
         syncCount++
-        return true
     }
 
-    private fun applyOnMainThread() {
+    // fetches the new snapshot off the main thread, then applies it on the main thread
+    private fun fetchAndApply() {
         val plugin = this.plugin ?: return
         if (!running) {
             return
+        }
+        val fields = synchronized(fetchLock) {
+            val fetched = fetch() ?: return
+            val hash = fetched["hash"]?.let { String(it) } ?: return
+            if (hash == pendingHash) {
+                return
+            }
+            pendingHash = hash
+            fetched
         }
         plugin.server.scheduler.runTask(
             plugin,
             Runnable {
                 try {
-                    if (pull()) {
-                        Nodes.loadWorld()
-                        Nodes.initializeOnlinePlayers()
+                    if (running && fields["hash"]?.let { String(it) } != lastHash) {
+                        write(fields)
+                        reload()
                     }
-                    lastError = null
                 } catch (e: Exception) {
                     lastError = e.message
                     plugin.logger.severe("[Shards] Could not apply the leader's state: ${e.message}")
+                } finally {
+                    pendingHash = ""
                 }
             },
         )
+    }
+
+    // main thread: rebuild towns, claims and war from the files just written
+    private fun reload() {
+        val start = System.nanoTime()
+        // per-player things that are not part of the saved state
+        val minimaps = HashMap<java.util.UUID, Int>()
+        val chatModes = HashMap<java.util.UUID, phonon.nodes.chat.ChatMode>()
+        for (resident in Nodes.residents.values) {
+            resident.minimap?.let { minimaps[resident.uuid] = it.size }
+            chatModes[resident.uuid] = resident.chatMode
+            resident.destroyMinimap()
+        }
+        phonon.nodes.war.FlagWar.clearMirror()
+
+        Nodes.loadWorld()
+        Nodes.initializeOnlinePlayers()
+
+        for ((uuid, mode) in chatModes) {
+            Nodes.residents[uuid]?.chatMode = mode
+        }
+        for ((uuid, size) in minimaps) {
+            val player = Bukkit.getPlayer(uuid) ?: continue
+            Nodes.residents[uuid]?.createMinimap(player, size)
+        }
+        val ms = (System.nanoTime() - start) / 1_000_000
+        plugin?.logger?.info("[Shards] Applied the leader's state in ${ms}ms (${Nodes.getTownCount()} towns, ${Nodes.getTerritoryCount()} territories)")
     }
 
     private fun startSubscriber() {
@@ -311,13 +386,15 @@ object Shards {
                         val message = conn.read() as? List<*> ?: continue
                         val kind = (message.getOrNull(0) as? ByteArray)?.let { String(it) }
                         if (kind == "message") {
-                            applyOnMainThread()
+                            fetchAndApply()
                         }
                     }
                 } catch (_: InterruptedException) {
                     return@Thread
                 } catch (e: Exception) {
-                    lastError = e.message
+                    if (running) {
+                        failed(e)
+                    }
                 } finally {
                     conn.close()
                 }
@@ -381,6 +458,8 @@ object Shards {
     )
     private val noArgumentRoots = setOf("town", "nation", "nodesadmin", "skills", "duel", "war", "port", "plot", "refinery", "bounty")
     private val readOnlySubs = setOf("help", "info", "list", "online", "map", "minimap", "top", "prices", "balance", "bal", "show", "shards")
+
+    private val ATTACK_PROGRESS = Regex("\"p\":\\d+")
 
     private class FollowerGuard : Listener {
         @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)

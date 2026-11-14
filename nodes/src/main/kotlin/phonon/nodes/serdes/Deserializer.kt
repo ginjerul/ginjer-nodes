@@ -92,6 +92,7 @@ public object Deserializer {
                     townCreateCooldown,
                     leftNation,
                     leftNationAt,
+                    resident.get("name")?.takeIf { !it.isJsonNull }?.getAsString(),
                 )
             }
         }

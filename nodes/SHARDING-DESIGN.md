@@ -1,6 +1,6 @@
 # Nodes on Reef shards: design
 
-Status: **phases 0 and 1 are implemented (experimental, untested on a real network).** See "What phase 1 does" below. Decisions so far: one leader shard owns all Nodes state and logic, the other shards keep a mirror of it, and the shards talk over Redis (besides Velocity moving players).
+Status: **phases 0 and 1 are implemented (experimental).** Tested with a leader, a follower and Redis on one machine (plain Paper, no Velocity or Reef handoff yet). See "What phase 1 does" below. Decisions so far: one leader shard owns all Nodes state and logic, the other shards keep a mirror of it, and the shards talk over Redis (besides Velocity moving players).
 
 Reef (see its `SHARDING.md`) splits one world across servers: each shard simulates only its own regions and players are handed over at borders. Reef shares player data and nothing else. Nodes keeps everything (towns, nations, territory ownership, wars, economy, skills, duels, POIs, ports) in one server's memory and in local files, so on shards it would diverge. This document says how to fix that.
 
@@ -76,7 +76,7 @@ Phases 0 and 1 are usable on their own: a player on any shard can be protected a
 
 Not shared yet (each shard still keeps its own copy): skills xp, POI discoveries, kill and death stats, duels, the economy, bounties, truces, calendar, supply drops, refineries, chat and the tab list. Do not rely on those on follower shards until phases 2 and 3.
 
-Known cost: a follower reloads all towns and territories each time the leader publishes. On a large map that can cause a short hitch; this goes away when phase 2 replaces full reloads with small events.
+Known cost: a follower reloads all towns and territories each time the leader publishes. With 1,764 territories, 350 towns and 1,750 residents that took 95–300 ms on the main thread in testing (one long tick, after the leader's next save). This goes away when phase 2 replaces full reloads with small events.
 
 ## Open questions
 

@@ -247,6 +247,7 @@ public class NodesWorldListener : Listener {
                                     ErrorTooManyAttacks -> Message.error(player, "[War] You cannot attack any more chunks at the same time")
                                     ErrorAttackCustomCancel -> Message.error(player, "[War] Attack cancelled by another plugin")
                                     phonon.nodes.constants.ErrorNotEnoughPlaytime -> Message.error(player, "[War] You need ${Config.hoursRequiredToJoinWars} hours of playtime before you can attack")
+                                    phonon.nodes.constants.ErrorNotOnLeaderShard -> Message.error(player, "[War] Attacks can only be started on the main server for now")
                                 }
                                 event.isCancelled = true
                                 return

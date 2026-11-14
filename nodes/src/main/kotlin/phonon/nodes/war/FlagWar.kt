@@ -136,7 +136,8 @@ public object FlagWar {
             WarDeserializer.fromJson(Config.pathWar)
         }
 
-        if (FlagWar.enabled) {
+        // a follower shard reloads the leader's war state on every change: only the leader announces it
+        if (FlagWar.enabled && !phonon.nodes.shard.Shards.follower) {
             if (FlagWar.canOnlyAttackBorders) {
                 Message.broadcast("${ChatColor.DARK_RED}${ChatColor.BOLD}Nodes border skirmishing enabled")
                 phonon.nodes.util.DiscordRelay.war("**[War]** Nodes border skirmish enabled ")
@@ -149,6 +150,42 @@ public object FlagWar {
             }
             FlagWar.ensureAttackTickTask()
         }
+    }
+
+    /**
+     * Follower shards only: take down everything the previous war mirror put in this world (flag
+     * blocks, beacons, boss bars, holograms) before the leader's war state is loaded again. No
+     * events, messages or saves, because nothing really ended: the leader still runs the war.
+     */
+    internal fun clearMirror() {
+        FlagWar.saveTask?.cancel()
+        FlagWar.saveTask = null
+        FlagWar.attackTickTask?.cancel()
+        FlagWar.attackTickTask = null
+        for (attack in FlagWar.chunkToAttacker.values) {
+            attack.cancelled = true
+            attack.progressBar.removeAll()
+            attack.flagTorch.setType(Material.AIR)
+            attack.flagBlock.setType(Material.AIR)
+            attack.flagBase.setType(Material.AIR)
+            for (block in attack.skyBeaconWireframeBlocks) {
+                block.setType(Material.AIR)
+            }
+            for (block in attack.skyBeaconColorBlocks) {
+                block.setType(Material.AIR)
+            }
+            try {
+                attack.hologram?.remove()
+            } catch (_: Exception) {
+            }
+        }
+        FlagWar.attackers.clear()
+        FlagWar.chunkToAttacker.clear()
+        FlagWar.blockToAttacker.clear()
+        FlagWar.occupiedChunks.clear()
+        FlagWar.enabled = false
+        FlagWar.canAnnexTerritories = false
+        FlagWar.canOnlyAttackBorders = false
     }
 
     internal fun loadOccupiedChunk(townName: String, coord: Coord) {
@@ -237,6 +274,8 @@ public object FlagWar {
 
     internal fun ensureAttackTickTask() {
         val plugin = Nodes.plugin ?: return
+        // attack progress and captures run on the leader; a follower only shows its war state
+        if (phonon.nodes.shard.Shards.follower) return
         if (attackTickTask != null && attackTickTask?.isCancelled == false) return
 
         attackTickTask = Bukkit.getScheduler().runTaskTimerAsynchronously(
@@ -259,6 +298,8 @@ public object FlagWar {
         FlagWar.canAnnexTerritories = canAnnexTerritories
         FlagWar.canOnlyAttackBorders = canOnlyAttackBorders
         FlagWar.destructionEnabled = destructionEnabled
+        // write war.json soon, so the war state survives a restart and reaches follower shards
+        FlagWar.needsSave = true
 
         FlagWar.saveTask?.cancel()
         FlagWar.saveTask = Bukkit.getScheduler().runTaskTimerAsynchronously(
