@@ -65,6 +65,9 @@ object Shards {
     @Volatile
     private var syncCount = 0
 
+    // hash of each part (world, towns, ports, war) as last published (leader) or written (follower)
+    private val partHashes = java.util.concurrent.ConcurrentHashMap<String, String>()
+
     // hash of a snapshot a follower has fetched and queued to apply on the main thread
     @Volatile
     private var pendingHash = ""
@@ -250,6 +253,7 @@ object Shards {
                 // Redis lost the snapshot (restarted without persistence, flushed): publish it again
                 if (remote != lastHash) {
                     lastHash = ""
+                    partHashes.clear()
                 }
                 publish()
                 RemoteCommands.refreshPresence()
@@ -271,6 +275,7 @@ object Shards {
     // ===================================
     private fun publish() {
         val contents = LinkedHashMap<String, ByteArray>()
+        val parts = LinkedHashMap<String, String>()
         val digest = MessageDigest.getInstance("SHA-256")
         for ((field, path) in files()) {
             if (!Files.exists(path)) {
@@ -288,7 +293,9 @@ object Shards {
             // attack progress changes war.json every second during a war; publishing (and a full
             // reload on every follower) for that alone would cause a hitch every few seconds.
             // Progress still goes out with the next real change.
-            digest.update(if (field == "war") ATTACK_PROGRESS.replace(String(bytes, Charsets.UTF_8), "\"p\":0").toByteArray() else bytes)
+            val hashed = if (field == "war") ATTACK_PROGRESS.replace(String(bytes, Charsets.UTF_8), "\"p\":0").toByteArray() else bytes
+            digest.update(hashed)
+            parts[field] = sha256(hashed)
         }
         if (contents.isEmpty()) {
             return
@@ -300,9 +307,15 @@ object Shards {
         val args = ArrayList<ByteArray>()
         args.add("HSET".toByteArray())
         args.add(snapshotKey.toByteArray())
+        // only the parts that changed; each part's hash tells followers which ones to fetch
         for ((field, bytes) in contents) {
+            if (partHashes[field] == parts[field]) {
+                continue
+            }
             args.add(field.toByteArray())
             args.add(bytes)
+            args.add("hash:$field".toByteArray())
+            args.add(parts[field]!!.toByteArray())
         }
         args.add("hash".toByteArray())
         args.add(hash.toByteArray())
@@ -312,6 +325,7 @@ object Shards {
         args.add(System.currentTimeMillis().toString().toByteArray())
         redis { it.commandBytes(*args.toTypedArray()) }
         redis { it.command("PUBLISH", channel, "snapshot $hash") }
+        partHashes.putAll(parts)
         lastHash = hash
         lastSyncAt = System.currentTimeMillis()
         syncCount++
@@ -329,38 +343,53 @@ object Shards {
     }
 
     // the leader's snapshot from Redis, or null if it is missing or already applied. Any thread.
+    // Only the parts whose hash differs from what this shard has are fetched. The result holds
+    // "hash", each fetched part and its "hash:<part>".
     private fun fetch(): Map<String, ByteArray>? {
-        val reply = redis { it.command("HGETALL", snapshotKey) } as? List<*> ?: return null
-        val fields = HashMap<String, ByteArray>()
-        var i = 0
-        while (i + 1 < reply.size) {
-            val key = reply[i] as? ByteArray
-            val value = reply[i + 1] as? ByteArray
-            if (key != null && value != null) {
-                fields[String(key)] = value
-            }
-            i += 2
-        }
-        val hash = fields["hash"]?.let { String(it) } ?: return null
+        val names = files().keys.toList()
+        val meta = redis { it.command("HMGET", snapshotKey, "hash", *names.map { n -> "hash:$n" }.toTypedArray()) } as? List<*> ?: return null
+        val hash = (meta.getOrNull(0) as? ByteArray)?.let { String(it) } ?: return null
         if (hash == lastHash) {
             return null
+        }
+        val remoteParts = names.indices.associate { i -> names[i] to (meta.getOrNull(i + 1) as? ByteArray)?.let { String(it) } }
+        // a leader that sends no part hashes at all (older version): fetch everything. A part
+        // without a hash does not exist on the leader (no ports.json, say) and is skipped.
+        val wanted = if (remoteParts.values.all { it == null }) names else names.filter { remoteParts[it] != null && remoteParts[it] != partHashes[it] }
+        val fields = HashMap<String, ByteArray>()
+        fields["hash"] = hash.toByteArray()
+        if (wanted.isNotEmpty()) {
+            val values = redis { it.command("HMGET", snapshotKey, *wanted.toTypedArray()) } as? List<*> ?: return null
+            for ((i, name) in wanted.withIndex()) {
+                val bytes = values.getOrNull(i) as? ByteArray ?: continue
+                fields[name] = bytes
+                remoteParts[name]?.let { fields["hash:$name"] = it.toByteArray() }
+            }
         }
         return fields
     }
 
-    private fun write(fields: Map<String, ByteArray>) {
-        val hash = fields["hash"]?.let { String(it) } ?: return
+    // writes the fetched parts to this shard's files; returns the parts that changed
+    private fun write(fields: Map<String, ByteArray>): Set<String> {
+        val hash = fields["hash"]?.let { String(it) } ?: return emptySet()
+        val changed = HashSet<String>()
         for ((field, path) in files()) {
             val bytes = fields[field] ?: continue
             Files.createDirectories(path.parent)
             val tmp = path.resolveSibling(path.fileName.toString() + ".shard.tmp")
             Files.write(tmp, bytes)
             Files.move(tmp, path, StandardCopyOption.REPLACE_EXISTING)
+            changed.add(field)
+            val partHash = fields["hash:$field"]?.let { String(it) }
+            if (partHash != null) partHashes[field] = partHash else partHashes.remove(field)
         }
         lastHash = hash
         lastSyncAt = System.currentTimeMillis()
         syncCount++
+        return changed
     }
+
+    private fun sha256(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
 
     // fetches the new snapshot off the main thread, then applies it on the main thread
     private fun fetchAndApply() {
@@ -382,8 +411,8 @@ object Shards {
             Runnable {
                 try {
                     if (running && fields["hash"]?.let { String(it) } != lastHash) {
-                        write(fields)
-                        reload()
+                        val changed = write(fields)
+                        reload(changed)
                     }
                 } catch (e: Exception) {
                     lastError = e.message
@@ -396,7 +425,7 @@ object Shards {
     }
 
     // main thread: rebuild towns, claims and war from the files just written
-    private fun reload() {
+    private fun reload(changed: Set<String>) {
         val start = System.nanoTime()
         // per-player things that are not part of the saved state
         val minimaps = HashMap<java.util.UUID, Int>()
@@ -408,7 +437,13 @@ object Shards {
         }
         phonon.nodes.war.FlagWar.clearMirror()
 
-        Nodes.loadWorld()
+        // territories only change with world.json (map edits): otherwise keep them
+        val full = "world" in changed
+        if (full) {
+            Nodes.loadWorld()
+        } else {
+            Nodes.reloadTownState()
+        }
         Nodes.initializeOnlinePlayers()
 
         for ((uuid, mode) in chatModes) {
@@ -419,7 +454,7 @@ object Shards {
             Nodes.residents[uuid]?.createMinimap(player, size)
         }
         val ms = (System.nanoTime() - start) / 1_000_000
-        plugin?.logger?.info("[Shards] Applied the leader's state in ${ms}ms (${Nodes.getTownCount()} towns, ${Nodes.getTerritoryCount()} territories)")
+        plugin?.logger?.info("[Shards] Applied the leader's ${changed.sorted().joinToString("+").ifEmpty { "state" }} in ${ms}ms (${if (full) "full reload, " else ""}${Nodes.getTownCount()} towns, ${Nodes.getTerritoryCount()} territories)")
         RemoteCommands.deliverHeld()
     }
 

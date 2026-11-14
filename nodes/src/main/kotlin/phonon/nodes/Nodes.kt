@@ -511,59 +511,84 @@ public object Nodes {
                 TaskCopyToDynmap(Config.pathWorld, Nodes.DYNMAP_DIR, Nodes.DYNMAP_PATH_WORLD).run()
             }
 
-            if (Files.exists(Config.pathTowns)) {
-                Deserializer.townsFromJson(Config.pathTowns)
-
-                // Pre-generate json strings to speed up the first save (a follower shard never saves)
-                if (!phonon.nodes.shard.Shards.follower) {
-                    for (resident in Nodes.residents.values) {
-                        resident.getSaveState()
-                    }
-                    for (town in Nodes.towns.values) {
-                        town.getSaveState()
-                    }
-                    for (nation in Nodes.nations.values) {
-                        nation.getSaveState()
-                    }
-                }
-
-                if (Nodes.dynmap) {
-                    Files.copy(Config.pathTowns, Nodes.DYNMAP_PATH_TOWNS, StandardCopyOption.REPLACE_EXISTING)
-                }
-
-                Nodes.war.load()
-            } else {
-                System.err.println("No towns found: ${Config.pathTowns}")
-                return true
-            }
-
-            if (Files.exists(Config.pathPorts)) {
-                Deserializer.portsFromJson(Config.pathPorts)
-
-                // Pre-generate json strings to speed up the first save (a follower shard never saves)
-                if (!phonon.nodes.shard.Shards.follower) {
-                    for (port in Nodes.ports.values) {
-                        port.getSaveState()
-                    }
-                    for (portGroup in Nodes.portGroups.values) {
-                        portGroup.getSaveState()
-                    }
-                }
-
-                if (Nodes.dynmap) {
-                    Files.copy(Config.pathPorts, Nodes.DYNMAP_PATH_PORTS, StandardCopyOption.REPLACE_EXISTING)
-                }
-            } else {
-                System.err.println("No ports found: ${Config.pathPorts}")
-                return true
-            }
-
-            Bukkit.getPluginManager().callEvent(NodesWorldLoadedEvent())
+            return Nodes.loadTownState()
         } else {
             System.err.println("Failed to load world: ${Config.pathWorld}")
             return false
         }
+    }
 
+    /**
+     * Follower shards: reload towns, nations, residents, ports and war from their files but keep
+     * the resource nodes and territories, when only those files changed. Rebuilding territories
+     * from world.json is most of the cost of a full loadWorld() on a large map.
+     */
+    internal fun reloadTownState(): Boolean {
+        for (territory in Nodes.territories.values) {
+            territory.town = null
+            territory.occupier = null
+        }
+        for (chunk in Nodes.territoryChunks.values) {
+            chunk.attacker = null
+            chunk.occupier = null
+        }
+        Nodes.towns.clear()
+        Nodes.nations.clear()
+        Nodes.residents.clear()
+        Nodes.ports.clear()
+        return Nodes.loadTownState()
+    }
+
+    // towns.json, war.json and ports.json, on top of loaded territories
+    private fun loadTownState(): Boolean {
+        if (Files.exists(Config.pathTowns)) {
+            Deserializer.townsFromJson(Config.pathTowns)
+
+            // Pre-generate json strings to speed up the first save (a follower shard never saves)
+            if (!phonon.nodes.shard.Shards.follower) {
+                for (resident in Nodes.residents.values) {
+                    resident.getSaveState()
+                }
+                for (town in Nodes.towns.values) {
+                    town.getSaveState()
+                }
+                for (nation in Nodes.nations.values) {
+                    nation.getSaveState()
+                }
+            }
+
+            if (Nodes.dynmap) {
+                Files.copy(Config.pathTowns, Nodes.DYNMAP_PATH_TOWNS, StandardCopyOption.REPLACE_EXISTING)
+            }
+
+            Nodes.war.load()
+        } else {
+            System.err.println("No towns found: ${Config.pathTowns}")
+            return true
+        }
+
+        if (Files.exists(Config.pathPorts)) {
+            Deserializer.portsFromJson(Config.pathPorts)
+
+            // Pre-generate json strings to speed up the first save (a follower shard never saves)
+            if (!phonon.nodes.shard.Shards.follower) {
+                for (port in Nodes.ports.values) {
+                    port.getSaveState()
+                }
+                for (portGroup in Nodes.portGroups.values) {
+                    portGroup.getSaveState()
+                }
+            }
+
+            if (Nodes.dynmap) {
+                Files.copy(Config.pathPorts, Nodes.DYNMAP_PATH_PORTS, StandardCopyOption.REPLACE_EXISTING)
+            }
+        } else {
+            System.err.println("No ports found: ${Config.pathPorts}")
+            return true
+        }
+
+        Bukkit.getPluginManager().callEvent(NodesWorldLoadedEvent())
         return true
     }
 

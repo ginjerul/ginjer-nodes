@@ -89,6 +89,16 @@ Commands typed on a follower that change Nodes state run on the leader with the 
 - A change made by a player on the leader is published right away too (about 0.2-0.3 s to a follower, reload included), not after the next save.
 - If the leader does not answer within 6 s the player is told nothing changed; the leader drops requests older than 10 s, so a command is never applied late.
 
+Followers only rebuild what changed. The leader stores a hash for each part of the state (`world`, `towns`, `ports`, `war`) next to it in Redis and sends only the parts that changed; a follower fetches only parts whose hash differs from its own. If `world.json` is unchanged (it only changes with map edits) the follower keeps its resource nodes and territories and rebuilds towns, nations, residents, ports and war (`Nodes.reloadTownState()`). Measured with 1,764 territories, 352 towns and 1,750 residents:
+
+| Change | Before | Now |
+| --- | --- | --- |
+| A town, nation, claim or diplomacy change | 85-130 ms (full reload) | 10-20 ms (41 ms the first time after start) |
+| A war flag placed (beacon blocks are built) | | about 130 ms, once per attack |
+| A map edit (`world.json`) | 85-130 ms | 99 ms (full reload, as before) |
+
+Rebuilding territories from `world.json` was 70-105 ms of the old full reload; towns, nations and residents together are 10-20 ms, under one tick. Per-mutation events (one message per claim, join, ...) would bring that to about 1 ms, but would need a serialisable form for each of the ~45 state-changing functions and their setters; with the partial reload this is not needed for the hitch.
+
 Which commands go where on a follower:
 
 | | Run on the follower (mirror) | Forwarded to the leader | Refused for now |
@@ -100,7 +110,6 @@ Which commands go where on a follower:
 
 Still to do in phase 2:
 
-- Small events instead of full reloads: every change still makes each follower reload all towns (95-300 ms on a 1,764-territory map), now after every command instead of every save. This matters most once many players use commands on followers.
 - Commands that need the player's inventory, a teleport or a menu (`/town spawn`, `/town income`, `/economy sell`, `/economy menu`, plots, ports) need their own handlers.
 - Messages Nodes sends to players by looping over a town's `playersOnline` (and chat) only reach players on the leader; that is the chat part of phase 3.
 
