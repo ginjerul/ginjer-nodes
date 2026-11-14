@@ -43,8 +43,10 @@ internal object RemoteCommands {
     // ===================================
 
     // read only: answered from this shard's mirror
-    private val townLocal = setOf("help", "list", "info", "online", "onlinetop", "map", "minimap")
-    private val nationLocal = setOf("help", "list", "info", "online", "onlinetop")
+    // spawn, fly and supply only read the mirror and act on the player here; protect only turns
+    // on chest-protect mode (the chest clicks go to the leader, see Nodes.protectTownChest)
+    private val townLocal = setOf("help", "list", "info", "online", "onlinetop", "map", "minimap", "spawn", "fly", "supply", "protect")
+    private val nationLocal = setOf("help", "list", "info", "online", "onlinetop", "spawn")
     private val economyLocal = setOf("help", "prices")
 
     // change state but need nothing from the player except who and where they are
@@ -59,15 +61,15 @@ internal object RemoteCommands {
         "accept", "deny", "reject", "color", "rename",
     )
 
-    // economy: the leader keeps the one ledger, so even balances are read there. Not forwarded:
-    // anything that opens a menu or takes items from the inventory.
-    private val economyRefuse = setOf("menu", "sell", "market", "shop")
+    // economy: the leader keeps the one ledger, so even balances are read there. Selling and the
+    // shop are RemoteActions; market listings carry whole items and the menu is not done yet.
+    private val economyRefuse = setOf("menu")
 
     // diplomacy commands, forwarded whole
     private val diplomacyRoots = setOf("ally", "unally", "war", "peace", "truce")
 
     /** null when [root] is not one of the commands this file decides. */
-    fun route(root: String, sub: String?): Route? = when (root) {
+    fun route(root: String, sub: String?, second: String? = null): Route? = when (root) {
         "town" -> when (sub) {
             null, in townLocal -> Route.LOCAL
             in townForward -> Route.FORWARD
@@ -81,6 +83,10 @@ internal object RemoteCommands {
         "economy" -> when (sub) {
             null, in economyLocal -> Route.LOCAL
             in economyRefuse -> Route.REFUSE
+            // "sell town" sells stored town income: no inventory involved
+            "sell" -> if (second == "town") Route.FORWARD else Route.REFUSE
+            "shop" -> if (second == null || second == "list") Route.FORWARD else Route.REFUSE
+            "market" -> if (second == null || second == "list" || second == "mine") Route.FORWARD else Route.REFUSE
             else -> Route.FORWARD
         }
         in diplomacyRoots -> Route.FORWARD
@@ -228,6 +234,10 @@ internal object RemoteCommands {
                     while (Shards.isRunning) {
                         val reply = conn.command("BLPOP", Shards.commandsKey, "5") as? List<*> ?: continue
                         val text = (reply.getOrNull(1) as? ByteArray)?.let { String(it, Charsets.UTF_8) } ?: continue
+                        if (text.startsWith("{\"action\"")) {
+                            RemoteActions.onRequest(text)
+                            continue
+                        }
                         val request = parse(text)
                         if (request == null) {
                             plugin.logger.warning("[Shards] Ignored a bad command request")

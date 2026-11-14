@@ -1482,17 +1482,7 @@ public class TownCommand :
             return
         }
 
-        val hasPermissions = if (resident === town.leader || town.officers.contains(resident)) {
-            true
-        } else if (town.permissions[TownPermissions.INCOME].contains(PermissionsGroup.TOWN) && resident.town === town) {
-            true
-        } else if (town.permissions[TownPermissions.INCOME].contains(PermissionsGroup.TRUSTED) && resident.town === town && resident.trusted) {
-            true
-        } else {
-            false
-        }
-
-        if (hasPermissions) {
+        if (Nodes.canTakeTownIncome(resident, town)) {
             player.openInventory(Nodes.getTownIncomeInventory(town))
         } else {
             Message.error(player, "You do not have permissions to view town income")

@@ -131,6 +131,44 @@ object EconomyExtras {
 
     fun prices(): List<String> = shopEntries().filter { it.sellPrice != null }.map { describe(it) }
 
+    // ---- for sharding: the inventory part runs on a follower, the money part here on the leader ----
+
+    /** An item the server buys (plain, with no meta). */
+    internal fun buysPlainItem(item: ItemStack?): Boolean = buys(item)
+
+    /** Leader: pay [uuid]'s wallet for items a follower already took from their inventory. */
+    internal fun sellCounts(uuid: UUID, counts: Map<Material, Int>): String {
+        if (counts.isEmpty() || counts.keys.any { !buys(it) }) {
+            throw EconomyException("The server does not buy that item. See /economy prices")
+        }
+        val total = settleSale(uuid.toString(), wallet(uuid), counts)
+        val parts = counts.entries.joinToString(", ") { "${it.value}x ${it.key.name}" }
+        return "Sold $parts for ${show(total)} (paid to your wallet)"
+    }
+
+    /** Follower: room for a shop purchase, checked like shopBuy does. */
+    internal fun hasSpaceFor(player: Player, material: Material, amount: Int): Boolean = BountyItems.add(player.inventory.storageContents, BountyItems.stacks(material, amount), player.inventory.maxStackSize) != null
+
+    /** Leader: charge [uuid] for a shop purchase that a follower hands out; the shopBuy rules without the inventory. */
+    internal fun shopCharge(uuid: UUID, material: Material, amount: Int): String {
+        val fixed = Economy.shopPrices[material]
+        if (!Exchange.has(material) && fixed == null) {
+            throw EconomyException("The server shop does not sell that. See /economy shop list")
+        }
+        if (amount < 1 || amount > 2304) {
+            throw EconomyException("Amount must be 1-2304")
+        }
+        val from = wallet(uuid)
+        val total = Economy.transaction {
+            val cost = if (Exchange.has(material)) Exchange.buy(material, amount) else Math.multiplyExact(fixed!!, amount.toLong())
+            Economy.requireAvailable(from)
+            Economy.credit(from, -cost)
+            Economy.log("shop-purchase", from, "issuance", cost)
+            cost
+        }
+        return "Bought ${amount}x ${material.name} for ${show(total)}"
+    }
+
     fun sellHand(player: Player): String {
         requirePlaying(player)
         val item = player.inventory.itemInMainHand

@@ -64,6 +64,24 @@ public class IncomeInventory : InventoryHolder {
 
     public fun empty(): Boolean = (storage.size == 0) && (storageSpawnEgg.size == 0)
 
+    /**
+     * Removes up to [amount] of [mat], from storage first, then from the open inventory view.
+     * Returns how many were removed. Used when a player on another shard takes income.
+     */
+    public fun take(mat: Material, amount: Int): Int {
+        var taken = 0
+        val stored = this.storage[mat] ?: 0
+        if (stored > 0) {
+            taken = minOf(stored, amount)
+            if (stored - taken > 0) this.storage[mat] = stored - taken else this.storage.remove(mat)
+        }
+        if (taken < amount) {
+            val left = this._inventory.removeItem(ItemStack(mat, amount - taken))
+            taken += (amount - taken) - left.values.sumOf { it.amount }
+        }
+        return taken
+    }
+
     public override fun getInventory(): Inventory {
         while (this.storage.size > 0) {
             val item = this.storage.iterator().next()

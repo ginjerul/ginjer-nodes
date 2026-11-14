@@ -2014,6 +2014,15 @@ public object Nodes {
         return true
     }
 
+    /** Whether [resident] may open and take from [town]'s income. */
+    public fun canTakeTownIncome(resident: Resident, town: Town): Boolean = if (resident === town.leader || town.officers.contains(resident)) {
+        true
+    } else if (town.permissions[TownPermissions.INCOME].contains(PermissionsGroup.TOWN) && resident.town === town) {
+        true
+    } else {
+        town.permissions[TownPermissions.INCOME].contains(PermissionsGroup.TRUSTED) && resident.town === town && resident.trusted
+    }
+
     public fun getTownIncomeInventory(town: Town): Inventory {
         // mark dirty if inventory not empty (player could take items)
         if (!town.income.empty()) {
@@ -3123,6 +3132,11 @@ public object Nodes {
 
         town.needsUpdate()
         Nodes.needsSave = true
+
+        // a follower shard only mirrors protected chests: the change is made on the leader too
+        if (phonon.nodes.shard.Shards.follower) {
+            phonon.nodes.shard.RemoteActions.protectChest(town, blocks, protect)
+        }
     }
 
     internal fun showProtectedChests(town: Town, resident: Resident) {

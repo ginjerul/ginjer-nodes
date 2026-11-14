@@ -113,6 +113,7 @@ object Shards {
     private val snapshotKey: String get() = "$prefix:snapshot"
     private val channel: String get() = "$prefix:events"
     internal val commandsKey: String get() = "$prefix:commands"
+    internal val keyPrefix: String get() = prefix
     internal val presenceKey: String get() = "$prefix:presence"
 
     internal val pluginOrNull: Plugin? get() = plugin
@@ -211,11 +212,21 @@ object Shards {
 
         running = true
         plugin.server.pluginManager.registerEvents(FollowerGuard(), plugin)
+        plugin.server.pluginManager.registerEvents(RemoteActions.ActionListener(), plugin)
         val period = syncSeconds * 20L
         plugin.server.scheduler.runTaskTimerAsynchronously(plugin, Runnable { tick() }, period, period)
         if (follower) {
             startSubscriber()
-            plugin.server.scheduler.runTaskTimer(plugin, Runnable { RemoteCommands.deliverHeld() }, 20L, 20L)
+            plugin.server.scheduler.runTaskTimer(
+                plugin,
+                Runnable {
+                    RemoteCommands.deliverHeld()
+                    RemoteActions.tick()
+                    clearFinishedTeleports()
+                },
+                20L,
+                20L,
+            )
         } else {
             plugin.server.pluginManager.registerEvents(LeaderListener(), plugin)
             RemoteCommands.startLeaderWorker()
@@ -427,12 +438,12 @@ object Shards {
     // main thread: rebuild towns, claims and war from the files just written
     private fun reload(changed: Set<String>) {
         val start = System.nanoTime()
-        // per-player things that are not part of the saved state
+        // per-player things that are not part of the saved state: kept across the reload
         val minimaps = HashMap<java.util.UUID, Int>()
-        val chatModes = HashMap<java.util.UUID, phonon.nodes.chat.ChatMode>()
+        val runtime = HashMap<java.util.UUID, phonon.nodes.objects.Resident>()
         for (resident in Nodes.residents.values) {
             resident.minimap?.let { minimaps[resident.uuid] = it.size }
-            chatModes[resident.uuid] = resident.chatMode
+            runtime[resident.uuid] = resident
             resident.destroyMinimap()
         }
         phonon.nodes.war.FlagWar.clearMirror()
@@ -446,8 +457,13 @@ object Shards {
         }
         Nodes.initializeOnlinePlayers()
 
-        for ((uuid, mode) in chatModes) {
-            Nodes.residents[uuid]?.chatMode = mode
+        for ((uuid, old) in runtime) {
+            val now = Nodes.residents[uuid] ?: continue
+            now.chatMode = old.chatMode
+            now.isProtectingChests = old.isProtectingChests
+            now.teleportThread = old.teleportThread
+            now.isTeleportingToOutpost = old.isTeleportingToOutpost
+            now.isTeleportingToNationTown = old.isTeleportingToNationTown
         }
         for ((uuid, size) in minimaps) {
             val player = Bukkit.getPlayer(uuid) ?: continue
@@ -456,6 +472,20 @@ object Shards {
         val ms = (System.nanoTime() - start) / 1_000_000
         plugin?.logger?.info("[Shards] Applied the leader's ${changed.sorted().joinToString("+").ifEmpty { "state" }} in ${ms}ms (${if (full) "full reload, " else ""}${Nodes.getTownCount()} towns, ${Nodes.getTerritoryCount()} territories)")
         RemoteCommands.deliverHeld()
+        RemoteActions.refreshViews()
+    }
+
+    // a spawn teleport that finished clears its task on the resident object of before a reload
+    private fun clearFinishedTeleports() {
+        val scheduler = Bukkit.getScheduler()
+        for (resident in Nodes.residents.values) {
+            val task = resident.teleportThread ?: continue
+            if (task.isCancelled || (!scheduler.isQueued(task.taskId) && !scheduler.isCurrentlyRunning(task.taskId))) {
+                resident.teleportThread = null
+                resident.isTeleportingToOutpost = false
+                resident.isTeleportingToNationTown = false
+            }
+        }
     }
 
     // ===================================
@@ -582,6 +612,7 @@ object Shards {
                             val data = (message.getOrNull(2) as? ByteArray)?.let { String(it, Charsets.UTF_8) } ?: ""
                             when (data.substringBefore(' ')) {
                                 "reply" -> RemoteCommands.onReply(data.substringAfter(' '))
+                                "action" -> RemoteActions.onReply(data.substringAfter(' '))
                                 else -> fetchAndApply()
                             }
                         }
@@ -688,7 +719,12 @@ object Shards {
             }
             // with no arguments most commands only print help; the rest open menus that can change things
             val sub = parts.getOrNull(1)?.lowercase()
-            when (RemoteCommands.route(command.name.lowercase(), sub)) {
+            // items, menus and clicks: handled here with the leader's help
+            if (RemoteActions.handleCommand(event.player, command.name.lowercase(), parts.drop(1))) {
+                event.isCancelled = true
+                return
+            }
+            when (RemoteCommands.route(command.name.lowercase(), sub, parts.getOrNull(2)?.lowercase())) {
                 RemoteCommands.Route.LOCAL -> return
                 RemoteCommands.Route.FORWARD -> {
                     event.isCancelled = true

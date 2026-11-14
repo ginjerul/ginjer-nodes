@@ -101,16 +101,34 @@ Rebuilding territories from `world.json` was 70-105 ms of the old full reload; t
 
 Which commands go where on a follower:
 
-| | Run on the follower (mirror) | Forwarded to the leader | Refused for now |
-| --- | --- | --- | --- |
-| `/town` | help, list, info, online, onlinetop, map, minimap | create, delete, officer, promote, demote, leader, apply/join, invite, accept, deny, leave, kick, setspawn, color, claim, unclaim, prefix, suffix, rename, pvp, perms, trust, untrust, capital, annex, outpost | spawn, income, protect, fly, supply, fortify (teleports, menus, items) |
-| `/nation` | help, list, info, online, onlinetop | announce, create, delete, leave, capital, invite, accept, deny, color, rename | spawn |
-| `/economy` | help, prices | balance, deposit, withdraw, pay, business, history, stock and the rest (the leader keeps the one ledger) | menu, sell, market, shop |
-| `/ally`, `/unally`, `/war`, `/peace`, `/truce` | | everything | |
+| | Run on the follower (mirror) | Forwarded to the leader | Actions (items or clicks, see below) | Refused for now |
+| --- | --- | --- | --- | --- |
+| `/town` | help, list, info, online, onlinetop, map, minimap, spawn, fly, supply, protect | create, delete, officer, promote, demote, leader, apply/join, invite, accept, deny, leave, kick, setspawn, color, claim, unclaim, prefix, suffix, rename, pvp, perms, trust, untrust, capital, annex, outpost | income; chest clicks while protecting | fortify |
+| `/nation` | help, list, info, online, onlinetop, spawn | announce, create, delete, leave, capital, invite, accept, deny, color, rename | | |
+| `/economy` | help, prices | balance, deposit, withdraw, pay, business, history, stock, top, sell town, shop list, market list/mine and the rest | sell hand, sell all, shop buy, shop sell | menu, market sell/buy/cancel |
+| `/ally`, `/unally`, `/war`, `/peace`, `/truce` | | everything | | |
+
+`/town spawn` and `/nation spawn` run on the follower because they only read the mirror and move the player; a destination in another shard's region is a normal Reef handoff. `/town protect` only turns chest-protect mode on; each chest click is sent to the leader.
+
+### Actions: items and clicks (`shard/RemoteActions.kt`)
+
+The leader keeps the state (town income, the economy ledger, protected chests); the follower has the player and their inventory.
+
+- **Town income:** the follower opens its own "Town Income" view filled from the mirror. A click asks the leader for that stack; the leader checks the income permission, removes what is still there and puts it in the player's mailbox. The view refreshes when the new state arrives.
+- **Selling** (`sell hand`, `sell all`, `shop sell`): the follower takes the sellable items first and holds them; the leader prices and pays the wallet. If the sale fails, or the leader does not answer, the items go back to the player.
+- **Shop buy:** the follower checks for inventory space, the leader charges the wallet and puts the items in the mailbox.
+- **Chest protection:** `Nodes.protectTownChest` on a follower works out the chest's blocks (the leader's copy of that region may not have the chest), updates the mirror at once and sends the blocks to the leader, which keeps only blocks in that town's own land. This also covers protected chests that get destroyed.
+
+Each action is applied exactly once. The leader claims `<prefix>:txn:<id>` with SET NX before applying it; a follower that gets no answer within 8 s claims the same key as "cancelled": if that works the leader never applied it and anything taken from the player is given back; if not, the stored result says what happened.
+
+Items for a player go to their mailbox `<prefix>:mail:<uuid>`. Whichever shard the player is on takes them out with LPOP (when the answer arrives and when they join any shard), so nothing is given twice and nothing is lost if they move to another shard or log off first.
+
+A follower also keeps players' chat channel, minimap, chest-protect mode and spawn countdown across its reloads.
 
 Still to do in phase 2:
 
-- Commands that need the player's inventory, a teleport or a menu (`/town spawn`, `/town income`, `/economy sell`, `/economy menu`, plots, ports) need their own handlers.
+- `/economy market sell|buy|cancel` (listings hold whole items with their metadata) and `/economy menu`.
+- `/town fortify`, plots and port commands use side stores (fortifications, plots, port requests and policies) that followers do not mirror yet, so they stay leader-only until the side stores in phase 3. The ports themselves (`ports.json`) are mirrored.
 - Messages Nodes sends to players by looping over a town's `playersOnline` (and chat) only reach players on the leader; that is the chat part of phase 3.
 
 ## Open questions
