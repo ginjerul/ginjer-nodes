@@ -105,7 +105,7 @@ Which commands go where on a follower:
 | --- | --- | --- | --- | --- |
 | `/town` | help, list, info, online, onlinetop, map, minimap, spawn, fly, supply, protect | create, delete, officer, promote, demote, leader, apply/join, invite, accept, deny, leave, kick, setspawn, color, claim, unclaim, prefix, suffix, rename, pvp, perms, trust, untrust, capital, annex, outpost | income; chest clicks while protecting | fortify |
 | `/nation` | help, list, info, online, onlinetop, spawn | announce, create, delete, leave, capital, invite, accept, deny, color, rename | | |
-| `/economy` | help, prices | balance, deposit, withdraw, pay, business, history, stock, top, sell town, shop list, market list/mine and the rest | sell hand, sell all, shop buy, shop sell | menu, market sell/buy/cancel |
+| `/economy` | help, prices | balance, deposit, withdraw, pay, business, history, stock, top, sell town, shop list, market list/mine and the rest | sell hand, sell all, shop buy, shop sell, market sell, market buy, market cancel | menu |
 | `/ally`, `/unally`, `/war`, `/peace`, `/truce` | | everything | | |
 
 `/town spawn` and `/nation spawn` run on the follower because they only read the mirror and move the player; a destination in another shard's region is a normal Reef handoff. `/town protect` only turns chest-protect mode on; each chest click is sent to the leader.
@@ -117,6 +117,7 @@ The leader keeps the state (town income, the economy ledger, protected chests); 
 - **Town income:** the follower opens its own "Town Income" view filled from the mirror. A click asks the leader for that stack; the leader checks the income permission, removes what is still there and puts it in the player's mailbox. The view refreshes when the new state arrives.
 - **Selling** (`sell hand`, `sell all`, `shop sell`): the follower takes the sellable items first and holds them; the leader prices and pays the wallet. If the sale fails, or the leader does not answer, the items go back to the player.
 - **Shop buy:** the follower checks for inventory space, the leader charges the wallet and puts the items in the mailbox.
+- **Market:** for `market sell` the follower takes the held stack (with its name, enchantments and other metadata) and the leader creates the listing, or the stack goes back if it fails. For `market buy` and `market cancel` the follower checks for a free slot, the leader pays or removes the listing and puts the item in the mailbox. Mailbox entries carry items with metadata encoded whole.
 - **Chest protection:** `Nodes.protectTownChest` on a follower works out the chest's blocks (the leader's copy of that region may not have the chest), updates the mirror at once and sends the blocks to the leader, which keeps only blocks in that town's own land. This also covers protected chests that get destroyed.
 
 Each action is applied exactly once. The leader claims `<prefix>:txn:<id>` with SET NX before applying it; a follower that gets no answer within 8 s claims the same key as "cancelled": if that works the leader never applied it and anything taken from the player is given back; if not, the stored result says what happened.
@@ -127,7 +128,7 @@ A follower also keeps players' chat channel, minimap, chest-protect mode and spa
 
 Still to do in phase 2:
 
-- `/economy market sell|buy|cancel` (listings hold whole items with their metadata) and `/economy menu`.
+- `/economy menu`: it shows balances, listings and loans from the economy store, which followers do not mirror yet (phase 3 side stores).
 - `/town fortify`, plots and port commands use side stores (fortifications, plots, port requests and policies) that followers do not mirror yet, so they stay leader-only until the side stores in phase 3. The ports themselves (`ports.json`) are mirrored.
 - Messages Nodes sends to players by looping over a town's `playersOnline` (and chat) only reach players on the leader; that is the chat part of phase 3.
 

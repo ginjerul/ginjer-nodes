@@ -68,6 +68,8 @@ internal object RemoteActions {
             root == "economy" && sub == "sell" && (second == "hand" || second == "all") -> sellInventory(player, second == "all")
             root == "economy" && sub == "shop" && second == "sell" -> shopSell(player, args)
             root == "economy" && sub == "shop" && second == "buy" -> shopBuy(player, args)
+            root == "economy" && sub == "market" && second == "sell" -> marketSell(player, args)
+            root == "economy" && sub == "market" && (second == "buy" || second == "cancel") -> marketTake(player, second, args)
             else -> return false
         }
         return true
@@ -249,7 +251,7 @@ internal object RemoteActions {
         if (items.isEmpty()) {
             return
         }
-        val entry = itemsJson(items.map { it.type to it.amount })
+        val entry = itemsJson(items)
         val send = Runnable {
             try {
                 Shards.redis { it.command("RPUSH", mailKey(uuid), entry) }
@@ -261,12 +263,18 @@ internal object RemoteActions {
         if (Bukkit.isPrimaryThread()) plugin.server.scheduler.runTaskAsynchronously(plugin, send) else send.run()
     }
 
-    private fun itemsJson(items: List<Pair<Material, Int>>): String {
+    // plain items as material and amount (any amount), items with metadata encoded whole
+    private fun itemsJson(items: List<ItemStack>): String {
         val array = JsonArray()
-        for ((material, amount) in items) {
+        for (item in items) {
             val o = JsonObject()
-            o.addProperty("m", material.name)
-            o.addProperty("a", amount)
+            val encoded = if (item.hasItemMeta()) phonon.nodes.bounty.BountyItems.encode(item) else null
+            if (encoded != null) {
+                o.addProperty("e", encoded)
+            } else {
+                o.addProperty("m", item.type.name)
+                o.addProperty("a", item.amount)
+            }
             array.add(o)
         }
         return array.toString()
@@ -276,7 +284,10 @@ internal object RemoteActions {
         try {
             for (e in JsonParser.parseString(text).asJsonArray) {
                 val o = e.asJsonObject
-                val material = Material.matchMaterial(o.get("m").asString) ?: continue
+                o.get("e")?.asString?.let { encoded ->
+                    phonon.nodes.bounty.BountyItems.decode(encoded)?.let { into.add(it) }
+                }
+                val material = o.get("m")?.asString?.let { Material.matchMaterial(it) } ?: continue
                 var amount = o.get("a").asInt
                 while (amount > 0) {
                     val n = minOf(amount, material.maxStackSize.coerceAtLeast(1))
@@ -436,6 +447,54 @@ internal object RemoteActions {
         send(player, "shopBuy", payload)
     }
 
+    private fun marketSell(player: Player, args: List<String>) {
+        if (!playing(player)) {
+            return
+        }
+        val price = args.getOrNull(2)
+        if (price == null) {
+            Message.error(player, "Usage: /economy market sell <price> (hold the stack)")
+            return
+        }
+        val item = player.inventory.itemInMainHand
+        if (item.type.isAir) {
+            Message.error(player, "Hold the item stack you want to sell")
+            return
+        }
+        val encoded = phonon.nodes.bounty.BountyItems.encode(item)
+        if (encoded == null) {
+            Message.error(player, "That item cannot be listed")
+            return
+        }
+        val held = item.clone()
+        player.inventory.setItemInMainHand(null)
+        player.saveData()
+        val payload = JsonObject()
+        payload.addProperty("item", encoded)
+        payload.addProperty("price", price)
+        send(player, "marketSell", payload, listOf(held))
+    }
+
+    private fun marketTake(player: Player, what: String, args: List<String>) {
+        if (what == "buy" && !playing(player)) {
+            return
+        }
+        val id = args.getOrNull(2)
+        if (id == null) {
+            Message.error(player, "Usage: /economy market $what <id>")
+            return
+        }
+        // a listing is one stack; this shard cannot see which, so it needs a free slot
+        if (player.inventory.storageContents.none { it == null || it.type.isAir }) {
+            Message.error(player, "Make space in your inventory first")
+            return
+        }
+        val payload = JsonObject()
+        payload.addProperty("id", id)
+        payload.addProperty("admin", player.hasPermission("nodes.economy.admin"))
+        send(player, if (what == "buy") "marketBuy" else "marketCancel", payload)
+    }
+
     private fun countsJson(items: List<ItemStack>): JsonObject {
         val counts = JsonObject()
         val sums = EnumMap<Material, Int>(Material::class.java)
@@ -473,7 +532,7 @@ internal object RemoteActions {
     // ===================================
     // leader: claim and apply
     // ===================================
-    private class Outcome(val ok: Boolean, val message: String, val give: List<Pair<Material, Int>> = emptyList())
+    private class Outcome(val ok: Boolean, val message: String, val give: List<ItemStack> = emptyList())
 
     /** Leader, worker thread: [text] is an action request. */
     fun onRequest(text: String) {
@@ -504,6 +563,9 @@ internal object RemoteActions {
                 "sell" -> sell(uuid, data)
                 "shopBuy" -> buy(uuid, data)
                 "chestProtect" -> chestProtect(data)
+                "marketSell" -> marketList(uuid, data)
+                "marketBuy" -> marketBuy(uuid, json.get("name")?.asString ?: "", data)
+                "marketCancel" -> marketCancel(uuid, data)
                 else -> Outcome(false, "Unknown action")
             }
         } catch (e: EconomyException) {
@@ -552,7 +614,7 @@ internal object RemoteActions {
         }
         town.needsUpdate()
         Nodes.needsSave = true
-        return Outcome(true, "", listOf(material to taken))
+        return Outcome(true, "", listOf(ItemStack(material, taken)))
     }
 
     private fun sell(uuid: UUID?, data: JsonObject): Outcome {
@@ -570,7 +632,25 @@ internal object RemoteActions {
         val material = Material.matchMaterial(data.get("material").asString) ?: return Outcome(false, "Unknown material")
         val amount = data.get("amount").asInt
         val message = EconomyExtras.shopCharge(uuid, material, amount)
-        return Outcome(true, message, listOf(material to amount))
+        return Outcome(true, message, listOf(ItemStack(material, amount)))
+    }
+
+    private fun marketList(uuid: UUID?, data: JsonObject): Outcome {
+        uuid ?: return Outcome(false, "Unknown player")
+        val item = phonon.nodes.bounty.BountyItems.decode(data.get("item").asString) ?: return Outcome(false, "That item cannot be listed")
+        return Outcome(true, EconomyExtras.marketListCore(uuid, item, data.get("price").asString))
+    }
+
+    private fun marketBuy(uuid: UUID?, name: String, data: JsonObject): Outcome {
+        uuid ?: return Outcome(false, "Unknown player")
+        val (message, item) = EconomyExtras.marketBuyCore(uuid, name, data.get("id").asString) { true }
+        return Outcome(true, message, listOf(item))
+    }
+
+    private fun marketCancel(uuid: UUID?, data: JsonObject): Outcome {
+        uuid ?: return Outcome(false, "Unknown player")
+        val (message, item) = EconomyExtras.marketCancelCore(uuid, data.get("id").asString, data.get("admin").asBoolean) { true }
+        return Outcome(true, message, listOf(item))
     }
 
     private fun chestProtect(data: JsonObject): Outcome {

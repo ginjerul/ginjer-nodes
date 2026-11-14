@@ -360,12 +360,20 @@ object EconomyExtras {
         if (item.type.isAir) {
             throw EconomyException("Hold the item stack you want to sell")
         }
+        val message = marketListCore(player.uniqueId, item, priceText)
+        player.inventory.setItemInMainHand(null)
+        return message
+    }
+
+    /** The ledger part of marketSell: checks and creates the listing. On shards a follower holds the item. */
+    internal fun marketListCore(sellerId: UUID, item: ItemStack, priceText: String): String {
+        requireMarket()
         val price = Economy.parseMoney(priceText)
         if (price > Economy.marketMaxPrice) {
             throw EconomyException("The highest allowed price is ${show(Economy.marketMaxPrice)}")
         }
         val encoded = BountyItems.encode(item) ?: throw EconomyException("That item cannot be listed")
-        val seller = player.uniqueId.toString()
+        val seller = sellerId.toString()
         val id = Economy.newId(Economy.state.listings)
         Economy.transaction {
             val listings = Economy.state.listings
@@ -384,7 +392,6 @@ object EconomyExtras {
             )
             Economy.log("market-listed $id", seller, "market", 0)
         }
-        player.inventory.setItemInMainHand(null)
         return "Listed ${BountyItems.summary(listOf(item))} for ${show(price)}. ID: $id"
     }
 
@@ -400,16 +407,24 @@ object EconomyExtras {
     fun marketBuy(player: Player, id: String): String {
         requireMarket()
         requirePlaying(player)
+        val (message, item) = marketBuyCore(player.uniqueId, player.name, id) { fits(player, it) }
+        give(player, item)
+        return message
+    }
+
+    /** The ledger part of marketBuy: pays and removes the listing, returns the item to hand out. */
+    internal fun marketBuyCore(buyerId: UUID, buyerName: String, id: String, fits: (ItemStack) -> Boolean): Pair<String, ItemStack> {
+        requireMarket()
         val listing = Economy.state.listings[id] ?: throw EconomyException("No listing with that ID")
-        val buyer = player.uniqueId.toString()
+        val buyer = buyerId.toString()
         if (listing.seller == buyer) {
             throw EconomyException("That is your listing. Use /economy market cancel $id")
         }
         val item = BountyItems.decode(listing.item) ?: throw EconomyException("That listing is unreadable; ask staff")
-        if (!fits(player, item)) {
+        if (!fits(item)) {
             throw EconomyException("Make space in your inventory first")
         }
-        val from = wallet(player.uniqueId)
+        val from = wallet(buyerId)
         val to = "wallet-${listing.seller}"
         val fee = Economy.percentOf(listing.price, Economy.marketFeePercent)
         val price = listing.price
@@ -421,28 +436,33 @@ object EconomyExtras {
                 Economy.move(from, "reserve", fee, "market-fee $id")
             }
         }
-        give(player, item)
         runCatching { UUID.fromString(listing.seller) }.getOrNull()?.let { seller ->
-            Bukkit.getPlayer(seller)?.let { Message.print(it, "${player.name} bought ${listing.summary} for ${show(price)}; ${show(price - fee)} went to your wallet") }
+            phonon.nodes.shard.Shards.player(seller)?.let { Message.print(it, "$buyerName bought ${listing.summary} for ${show(price)}; ${show(price - fee)} went to your wallet") }
         }
-        return "Bought ${listing.summary} for ${show(price)}"
+        return Pair("Bought ${listing.summary} for ${show(price)}", item)
     }
 
     fun marketCancel(player: Player, id: String, admin: Boolean): String {
+        val (message, item) = marketCancelCore(player.uniqueId, id, admin) { fits(player, it) }
+        give(player, item)
+        return message
+    }
+
+    /** The ledger part of marketCancel: removes the listing, returns the item to hand back. */
+    internal fun marketCancelCore(playerId: UUID, id: String, admin: Boolean, fits: (ItemStack) -> Boolean): Pair<String, ItemStack> {
         val listing = Economy.state.listings[id] ?: throw EconomyException("No listing with that ID")
-        if (listing.seller != player.uniqueId.toString() && !admin) {
+        if (listing.seller != playerId.toString() && !admin) {
             throw EconomyException("That is not your listing")
         }
         val item = BountyItems.decode(listing.item) ?: throw EconomyException("That listing is unreadable; ask staff")
-        if (!fits(player, item)) {
+        if (!fits(item)) {
             throw EconomyException("Make space in your inventory first")
         }
         Economy.transaction {
             Economy.state.listings.remove(id) ?: throw EconomyException("That listing is gone")
             Economy.log("market-cancelled $id", "market", listing.seller, 0)
         }
-        give(player, item)
-        return "Listing cancelled; ${listing.summary} returned to you"
+        return Pair("Listing cancelled; ${listing.summary} returned to you", item)
     }
 
     // newest first
