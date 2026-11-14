@@ -130,14 +130,14 @@ public class PeaceCommand :
 
             if (townNation !== null) {
                 for (r in townNation.residents) {
-                    val p = r.player()
+                    val p = r.onlinePlayer()
                     if (p !== null) {
                         Message.print(p, "Your nation is negotiating peace with $enemyName")
                     }
                 }
             } else {
                 for (r in town.residents) {
-                    val p = r.player()
+                    val p = r.onlinePlayer()
                     if (p !== null) {
                         Message.print(p, "Your town is negotiating peace with $enemyName")
                     }
@@ -146,14 +146,14 @@ public class PeaceCommand :
 
             if (enemyNation !== null) {
                 for (r in enemyNation.residents) {
-                    val p = r.player()
+                    val p = r.onlinePlayer()
                     if (p !== null) {
                         Message.print(p, "$initiatorName is offering your nation a peace treaty, use \"/peace ${initiatorName}\" to negotiate")
                     }
                 }
             } else {
                 for (r in enemy.residents) {
-                    val p = r.player()
+                    val p = r.onlinePlayer()
                     if (p !== null) {
                         Message.print(p, "$initiatorName is offering your town a peace treaty, use \"/peace ${initiatorName}\" to negotiate")
                     }

@@ -565,7 +565,7 @@ public class TownCommand :
             return
         }
 
-        val targetPlayer = target.player()
+        val targetPlayer = target.onlinePlayer()
 
         if (toggle === null) {
             if (town.officers.contains(target)) {
@@ -650,7 +650,7 @@ public class TownCommand :
         Nodes.townSetLeader(town, target)
         Message.print(player, "You made ${target.name} the new leader of ${town.name}")
 
-        val targetPlayer = target.player()
+        val targetPlayer = target.onlinePlayer()
         if (targetPlayer !== null) {
             Message.print(targetPlayer, "You are now the leader of ${town.name}")
         }
@@ -703,11 +703,11 @@ public class TownCommand :
         }
 
         val approvers: ArrayList<Player> = ArrayList()
-        Bukkit.getPlayer(town.leader!!.name)?.let { player ->
+        phonon.nodes.shard.Shards.player(town.leader!!.name)?.let { player ->
             approvers.add(player)
         }
         town.officers.forEach { officer ->
-            Bukkit.getPlayer(officer.name)?.let { player ->
+            phonon.nodes.shard.Shards.player(officer.name)?.let { player ->
                 approvers.add(player)
             }
         }
@@ -770,7 +770,7 @@ public class TownCommand :
             return
         }
 
-        val invitee: Player? = Bukkit.getPlayer(args[1])
+        val invitee: Player? = phonon.nodes.shard.Shards.player(args[1])
         if (invitee == null) {
             Message.error(player, "That player is not online")
             return
@@ -900,8 +900,7 @@ public class TownCommand :
 
             Message.print(player, "${applicant.name} has been accepted into your town!")
 
-            val applicantPlayer = Bukkit.getPlayer(applicant.uuid)
-                ?: Bukkit.getPlayerExact(applicant.name)
+            val applicantPlayer = phonon.nodes.shard.Shards.player(applicant.uuid)
             if (applicantPlayer != null) {
                 Message.print(applicantPlayer, "You have been accepted into ${town.name}!")
             }
@@ -965,7 +964,7 @@ public class TownCommand :
             }
 
             Message.print(player, "${applicant.name} has been denied residence in your town!")
-            val applicantPlayer = Bukkit.getPlayer(applicant.name)
+            val applicantPlayer = phonon.nodes.shard.Shards.player(applicant.name)
             if (applicantPlayer != null) {
                 Message.print(applicantPlayer, "Your application to ${town.name} has been rejected!")
             }
@@ -1055,7 +1054,7 @@ public class TownCommand :
 
         Message.print(player, "You have kicked ${target.name} from the town")
 
-        val targetPlayer = target.player()
+        val targetPlayer = target.onlinePlayer()
         if (targetPlayer !== null) {
             Message.print(targetPlayer, "${ChatColor.DARK_RED}You have been kicked from ${town.name}")
         }

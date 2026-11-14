@@ -35,6 +35,8 @@ public object Message {
     public fun broadcast(s: String) {
         val msg = Component.text("${COL_MSG}$s")
         Bukkit.broadcast(msg)
+        // on shards, the leader's broadcasts are shown on every shard
+        phonon.nodes.shard.Shards.relayBroadcast(msg)
     }
 
     /** Shows [s] in the player's action bar. */

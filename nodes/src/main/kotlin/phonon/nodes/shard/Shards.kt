@@ -71,7 +71,7 @@ object Shards {
     private val fetchLock = Any()
 
     // logs when Redis goes down or comes back, once, instead of on every retry
-    private fun failed(e: Exception) {
+    internal fun failed(e: Exception) {
         val message = e.message ?: e.javaClass.simpleName
         if (lastError == null) {
             plugin?.logger?.warning("[Shards] Redis problem: $message (retrying every ${syncSeconds}s; /nda shards shows the status)")
@@ -109,11 +109,49 @@ object Shards {
 
     private val snapshotKey: String get() = "$prefix:snapshot"
     private val channel: String get() = "$prefix:events"
+    internal val commandsKey: String get() = "$prefix:commands"
+    internal val presenceKey: String get() = "$prefix:presence"
 
-    private fun newConnection(readTimeoutMs: Int) = RedisConnection(host, port, password, database, readTimeoutMs)
+    internal val pluginOrNull: Plugin? get() = plugin
+    internal val isRunning: Boolean get() = running
+
+    // the snapshot this shard has loaded (follower) or last published (leader)
+    internal val appliedHash: String get() = lastHash
+
+    internal val presenceMaxAgeMs: Long get() = (syncSeconds * 4 + 10) * 1000L
+
+    /**
+     * The online player with this id: on this shard, or on the leader also a player online on
+     * another shard (a stand-in that only receives messages, relayed to them). Without sharding
+     * this is Bukkit.getPlayer.
+     */
+    fun player(uuid: java.util.UUID): org.bukkit.entity.Player? {
+        Bukkit.getPlayer(uuid)?.let { return it }
+        if (!enabled || !leader || !running) {
+            return null
+        }
+        RemoteCommands.current(uuid)?.let { return it }
+        val (shard, name) = RemoteCommands.findRemote(uuid) ?: return null
+        return RemoteCommands.messenger(uuid, name, shard)
+    }
+
+    /** On the leader, while running a command from another shard: that command's player. */
+    fun commandPlayer(uuid: java.util.UUID): org.bukkit.entity.Player? = if (enabled && leader) RemoteCommands.current(uuid) else null
+
+    fun player(name: String): org.bukkit.entity.Player? {
+        Bukkit.getPlayerExact(name)?.let { return it }
+        if (!enabled || !leader || !running) {
+            return Bukkit.getPlayer(name)
+        }
+        val (shard, uuid) = RemoteCommands.findRemote(name) ?: return Bukkit.getPlayer(name)
+        RemoteCommands.current(uuid)?.let { return it }
+        return RemoteCommands.messenger(uuid, name, shard)
+    }
+
+    internal fun newConnection(readTimeoutMs: Int) = RedisConnection(host, port, password, database, readTimeoutMs)
 
     // runs a command on the shared connection, reconnecting once if it dropped
-    private fun <T> redis(block: (RedisConnection) -> T): T {
+    internal fun <T> redis(block: (RedisConnection) -> T): T {
         synchronized(this) {
             var conn = commands
             if (conn == null || !conn.connected) {
@@ -174,6 +212,10 @@ object Shards {
         plugin.server.scheduler.runTaskTimerAsynchronously(plugin, Runnable { tick() }, period, period)
         if (follower) {
             startSubscriber()
+            plugin.server.scheduler.runTaskTimer(plugin, Runnable { RemoteCommands.deliverHeld() }, 20L, 20L)
+        } else {
+            plugin.server.pluginManager.registerEvents(LeaderListener(), plugin)
+            RemoteCommands.startLeaderWorker()
         }
     }
 
@@ -190,6 +232,7 @@ object Shards {
             }
         }
         subscriber?.interrupt()
+        RemoteCommands.stop()
         synchronized(this) {
             commands?.close()
             commands = null
@@ -209,9 +252,13 @@ object Shards {
                     lastHash = ""
                 }
                 publish()
-            } else if (remote != null && remote != lastHash) {
-                // in case a published message was missed
-                fetchAndApply()
+                RemoteCommands.refreshPresence()
+            } else {
+                if (remote != null && remote != lastHash) {
+                    // in case a published message was missed
+                    fetchAndApply()
+                }
+                plugin?.let { p -> p.server.scheduler.runTask(p, Runnable { RemoteCommands.sendPresence() }) }
             }
             recovered()
         } catch (e: Exception) {
@@ -373,6 +420,117 @@ object Shards {
         }
         val ms = (System.nanoTime() - start) / 1_000_000
         plugin?.logger?.info("[Shards] Applied the leader's state in ${ms}ms (${Nodes.getTownCount()} towns, ${Nodes.getTerritoryCount()} territories)")
+        RemoteCommands.deliverHeld()
+    }
+
+    // ===================================
+    // leader: save and publish right after a change
+    // ===================================
+    private val flushCallbacks = ArrayList<(String) -> Unit>() // main thread
+    private var flushScheduled = false
+
+    /**
+     * Main thread, leader. Saves what changed and publishes it on the next tick (once for all the
+     * commands of this tick), then calls [then] with the published snapshot hash, off the main thread.
+     */
+    internal fun flushSoon(then: ((String) -> Unit)? = null) {
+        val plugin = this.plugin ?: return
+        if (!enabled || !leader || !running) {
+            return
+        }
+        if (then != null) {
+            flushCallbacks.add(then)
+        }
+        if (flushScheduled) {
+            return
+        }
+        flushScheduled = true
+        plugin.server.scheduler.runTask(
+            plugin,
+            Runnable {
+                flushScheduled = false
+                val callbacks = ArrayList(flushCallbacks)
+                flushCallbacks.clear()
+                try {
+                    Nodes.saveWorld(checkIfNeedsSave = true, async = false)
+                    if (phonon.nodes.war.FlagWar.needsSave) {
+                        phonon.nodes.war.FlagWar.needsSave = false
+                        phonon.nodes.war.WarSerializer.save(false)
+                    }
+                } catch (e: Exception) {
+                    plugin.logger.severe("[Shards] Could not save before publishing: $e")
+                }
+                plugin.server.scheduler.runTaskAsynchronously(
+                    plugin,
+                    Runnable {
+                        try {
+                            publish()
+                            recovered()
+                        } catch (e: Exception) {
+                            failed(e)
+                        }
+                        val hash = lastHash
+                        for (callback in callbacks) {
+                            try {
+                                callback(hash)
+                            } catch (e: Exception) {
+                                failed(e)
+                            }
+                        }
+                    },
+                )
+            },
+        )
+    }
+
+    /** Any thread: a message on the events channel ("<type> <payload>"), sent off the main thread. */
+    internal fun sendEvent(type: String, payload: String) {
+        val plugin = this.plugin ?: return
+        val send = Runnable {
+            try {
+                redis { it.command("PUBLISH", channel, "$type $payload") }
+            } catch (e: Exception) {
+                failed(e)
+            }
+        }
+        if (Bukkit.isPrimaryThread()) {
+            plugin.server.scheduler.runTaskAsynchronously(plugin, send)
+        } else {
+            send.run()
+        }
+    }
+
+    /**
+     * Leader: Nodes broadcasts (new towns, wars, ...) are shown on every shard. They go out after
+     * the next publish, and followers show them once they have that state, so "X has created the
+     * town" is never followed by a /town info that does not know the town yet.
+     */
+    fun relayBroadcast(message: net.kyori.adventure.text.Component) {
+        val plugin = this.plugin ?: return
+        if (!enabled || !leader || !running) {
+            return
+        }
+        val json = net.kyori.adventure.text.serializer.gson.GsonComponentSerializer.gson().serialize(message)
+        val queue = Runnable { flushSoon { hash -> RemoteCommands.sendBroadcast(hash, json) } }
+        if (Bukkit.isPrimaryThread()) {
+            queue.run()
+        } else {
+            plugin.server.scheduler.runTask(plugin, queue)
+        }
+    }
+
+    // after a player's Nodes command on the leader itself, publish right away too
+    private class LeaderListener : Listener {
+        @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+        fun onCommand(event: PlayerCommandPreprocessEvent) {
+            val label = event.message.removePrefix("/").trim().substringBefore(' ').lowercase().substringAfter(":")
+            val command = Bukkit.getPluginCommand(label) ?: return
+            val plugin = plugin ?: return
+            if (command.plugin === plugin) {
+                // the command runs after this event: flush on the next tick
+                plugin.server.scheduler.runTask(plugin, Runnable { flushSoon() })
+            }
+        }
     }
 
     private fun startSubscriber() {
@@ -386,7 +544,11 @@ object Shards {
                         val message = conn.read() as? List<*> ?: continue
                         val kind = (message.getOrNull(0) as? ByteArray)?.let { String(it) }
                         if (kind == "message") {
-                            fetchAndApply()
+                            val data = (message.getOrNull(2) as? ByteArray)?.let { String(it, Charsets.UTF_8) } ?: ""
+                            when (data.substringBefore(' ')) {
+                                "reply" -> RemoteCommands.onReply(data.substringAfter(' '))
+                                else -> fetchAndApply()
+                            }
                         }
                     }
                 } catch (_: InterruptedException) {
@@ -462,6 +624,22 @@ object Shards {
     private val ATTACK_PROGRESS = Regex("\"p\":\\d+")
 
     private class FollowerGuard : Listener {
+        @EventHandler(priority = EventPriority.MONITOR)
+        fun onJoin(event: org.bukkit.event.player.PlayerJoinEvent) {
+            if (follower) {
+                RemoteCommands.sendPresence()
+            }
+        }
+
+        @EventHandler(priority = EventPriority.MONITOR)
+        fun onQuit(event: org.bukkit.event.player.PlayerQuitEvent) {
+            val plugin = plugin ?: return
+            if (follower) {
+                // the quitting player is still listed during this event
+                plugin.server.scheduler.runTask(plugin, Runnable { RemoteCommands.sendPresence() })
+            }
+        }
+
         @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
         fun onCommand(event: PlayerCommandPreprocessEvent) {
             if (!follower) {
@@ -475,6 +653,20 @@ object Shards {
             }
             // with no arguments most commands only print help; the rest open menus that can change things
             val sub = parts.getOrNull(1)?.lowercase()
+            when (RemoteCommands.route(command.name.lowercase(), sub)) {
+                RemoteCommands.Route.LOCAL -> return
+                RemoteCommands.Route.FORWARD -> {
+                    event.isCancelled = true
+                    RemoteCommands.forward(event.player, command.name.lowercase(), parts.drop(1))
+                    return
+                }
+                RemoteCommands.Route.REFUSE -> {
+                    event.isCancelled = true
+                    Message.error(event.player, "That command only works on the main server for now.")
+                    return
+                }
+                null -> {}
+            }
             if (sub == null && command.name.lowercase() in noArgumentRoots) {
                 return
             }

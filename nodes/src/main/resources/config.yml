@@ -590,8 +590,9 @@ skills:
 # Sharding (experimental): run Nodes on several servers that share one world behind Velocity
 # (Reef sharding). One server is the leader and owns all towns, nations, claims and wars. The
 # others are followers: they copy the leader's state through Redis so protection and info work
-# there, but commands that change things only work on the leader for now. Every server needs
-# the same world.json to start with. See SHARDING-DESIGN.md. /nda shards shows the status.
+# there. Town, nation, claim, diplomacy and economy commands typed on a follower run on the
+# leader; commands that need items, teleports or menus only work on the leader for now. Every
+# server needs the same world.json to start with. See SHARDING-DESIGN.md. /nda shards shows the status.
 sharding:
   enabled: false
   # leader (exactly one server) or follower

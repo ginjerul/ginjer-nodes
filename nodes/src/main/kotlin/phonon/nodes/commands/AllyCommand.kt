@@ -149,7 +149,7 @@ public class AllyCommand :
                 AllianceRequest.NEW -> {
                     val thisSideMsg = "You are offering an alliance to $otherSideName"
                     for (r in town.residents) {
-                        val player = r.player()
+                        val player = r.onlinePlayer()
                         if (player !== null) {
                             Message.print(player, thisSideMsg)
                         }
@@ -157,7 +157,7 @@ public class AllyCommand :
 
                     val otherSideMsg = "$thisSideName is offering an alliance, use \"/ally ${thisSideName}\" to accept"
                     for (r in other.residents) {
-                        val player = r.player()
+                        val player = r.onlinePlayer()
                         if (player !== null) {
                             Message.print(player, otherSideMsg)
                         }

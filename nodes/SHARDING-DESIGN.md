@@ -1,6 +1,6 @@
 # Nodes on Reef shards: design
 
-Status: **phases 0 and 1 are implemented (experimental).** Tested with a leader, a follower and Redis on one machine (plain Paper, no Velocity or Reef handoff yet). See "What phase 1 does" below. Decisions so far: one leader shard owns all Nodes state and logic, the other shards keep a mirror of it, and the shards talk over Redis (besides Velocity moving players).
+Status: **phases 0, 1 and the first part of 2 are implemented (experimental).** Tested with a leader, a follower and Redis, on plain Paper and on Reef behind Velocity with border handoffs. See "What phase 1 does" and "What phase 2 does so far" below. Decisions so far: one leader shard owns all Nodes state and logic, the other shards keep a mirror of it, and the shards talk over Redis (besides Velocity moving players).
 
 Reef (see its `SHARDING.md`) splits one world across servers: each shard simulates only its own regions and players are handed over at borders. Reef shares player data and nothing else. Nodes keeps everything (towns, nations, territory ownership, wars, economy, skills, duels, POIs, ports) in one server's memory and in local files, so on shards it would diverge. This document says how to fix that.
 
@@ -77,6 +77,32 @@ Phases 0 and 1 are usable on their own: a player on any shard can be protected a
 Not shared yet (each shard still keeps its own copy): skills xp, POI discoveries, kill and death stats, duels, the economy, bounties, truces, calendar, supply drops, refineries, chat and the tab list. Do not rely on those on follower shards until phases 2 and 3.
 
 Known cost: a follower reloads all towns and territories each time the leader publishes. With 1,764 territories, 350 towns and 1,750 residents that took 95–300 ms on the main thread in testing (one long tick, after the leader's next save). This goes away when phase 2 replaces full reloads with small events.
+
+## What phase 2 does so far
+
+Commands typed on a follower that change Nodes state run on the leader with the normal command code, so every rule stays in one place:
+
+- The follower sends the player's id, name, position, Nodes permissions and the command line to the Redis list `<prefix>:commands` (`shard/RemoteCommands.kt`).
+- The leader runs the real command for a stand-in player (`shard/RemotePlayer.kt`) that answers who and where the player is and collects every message sent to it. It then saves and publishes at once and sends the messages back on `<prefix>:events`, tagged with the published snapshot.
+- The follower shows the answer only once it has loaded that snapshot, so `/town info` right after `/town claim` is already up to date. Leader broadcasts ("X has created the town") are relayed to every shard the same way.
+- Followers keep the shards' online players in the hash `<prefix>:presence`. On the leader, `Shards.player(...)` and `Resident.onlinePlayer()` also find players online on other shards for messages only (applications, invites, alliance and peace offers), so "no officers online" and invitations work across shards.
+- A change made by a player on the leader is published right away too (about 0.2-0.3 s to a follower, reload included), not after the next save.
+- If the leader does not answer within 6 s the player is told nothing changed; the leader drops requests older than 10 s, so a command is never applied late.
+
+Which commands go where on a follower:
+
+| | Run on the follower (mirror) | Forwarded to the leader | Refused for now |
+| --- | --- | --- | --- |
+| `/town` | help, list, info, online, onlinetop, map, minimap | create, delete, officer, promote, demote, leader, apply/join, invite, accept, deny, leave, kick, setspawn, color, claim, unclaim, prefix, suffix, rename, pvp, perms, trust, untrust, capital, annex, outpost | spawn, income, protect, fly, supply, fortify (teleports, menus, items) |
+| `/nation` | help, list, info, online, onlinetop | announce, create, delete, leave, capital, invite, accept, deny, color, rename | spawn |
+| `/economy` | help, prices | balance, deposit, withdraw, pay, business, history, stock and the rest (the leader keeps the one ledger) | menu, sell, market, shop |
+| `/ally`, `/unally`, `/war`, `/peace`, `/truce` | | everything | |
+
+Still to do in phase 2:
+
+- Small events instead of full reloads: every change still makes each follower reload all towns (95-300 ms on a 1,764-territory map), now after every command instead of every save. This matters most once many players use commands on followers.
+- Commands that need the player's inventory, a teleport or a menu (`/town spawn`, `/town income`, `/economy sell`, `/economy menu`, plots, ports) need their own handlers.
+- Messages Nodes sends to players by looping over a town's `playersOnline` (and chat) only reach players on the leader; that is the chat part of phase 3.
 
 ## Open questions
 

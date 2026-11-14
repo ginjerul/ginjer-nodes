@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Added
 
 - Sharding, phase 1 (experimental, off by default, `sharding:` in the config): Nodes can run on several servers that share one world (Reef sharding). One server is the leader; followers copy its towns, nations, claims, ports and war state through Redis, so protection and info work on every shard. Commands that change things, and starting war attacks, only work on the leader for now. `/nda shards` shows the role and the other shards. See `nodes/SHARDING-DESIGN.md`.
+- Sharding, phase 2 (first part): town, nation, claim, join, diplomacy and economy commands typed on a follower now run on the leader, and the player gets the answer once their shard has the new state. Leader broadcasts and messages to players on other shards (applications, invites, alliance and peace offers) reach them on their shard. Changes are published right away instead of after the next save. If the leader is down the player is told nothing changed. Commands that need items, teleports or menus still only work on the leader.
 
 ### Fixed
 

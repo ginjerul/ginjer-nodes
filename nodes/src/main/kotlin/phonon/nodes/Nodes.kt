@@ -1091,7 +1091,8 @@ public object Nodes {
     // - player becomes town leader
     // - territory at player's location becomes town home
     public fun createTown(name: String, territory: Territory, leader: Resident?): Result<Town> {
-        val leaderPlayer = leader?.player()
+        // on a shard leader, a town founded from another shard starts at where its founder stands there
+        val leaderPlayer = leader?.let { phonon.nodes.shard.Shards.commandPlayer(it.uuid) ?: it.player() }
         var spawnpoint = if (leaderPlayer != null) {
             leaderPlayer.location
         } else {
@@ -1487,7 +1488,7 @@ public object Nodes {
             if (town.isOverClaimsMax) {
                 val msg = "${ChatColor.DARK_RED}Your town is over max claims: ${town.claimsUsed}/${town.claimsMax}, you have a $resourcePenalty"
                 for (r in town.residents) {
-                    val player = r.player()
+                    val player = r.onlinePlayer()
                     if (player !== null) {
                         Message.print(player, msg)
                     }
@@ -1801,7 +1802,8 @@ public object Nodes {
         if (nation != null && !ignoreCooldown) {
             val wait = nationJoinCooldownLeft(resident, nation)
             if (wait > 0L) {
-                if (player != null) {
+                val target = player ?: resident.onlinePlayer()
+                if (target != null) {
                     val totalMin = (wait + 59_999L) / 60_000L
                     val d = totalMin / 1440
                     val h = (totalMin % 1440) / 60
@@ -1811,7 +1813,7 @@ public object Nodes {
                         h > 0 -> "${h}h ${m}m"
                         else -> "${m}m"
                     }
-                    Message.error(player, "You left a nation recently and cannot join another nation's town for $left")
+                    Message.error(target, "You left a nation recently and cannot join another nation's town for $left")
                 }
                 return false
             }
@@ -2321,7 +2323,7 @@ public object Nodes {
                 val newCapital: Town = nation.towns.first()
                 nation.capital = newCapital
                 for (r in newCapital.residents) {
-                    val player = r.player()
+                    val player = r.onlinePlayer()
                     if (player !== null) {
                         Message.print(player, "Your town is now the capital of ${nation.name}")
                     }

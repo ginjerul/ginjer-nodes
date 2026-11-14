@@ -65,6 +65,9 @@ public class Resident(val uuid: UUID, val name: String) {
     // null when offline
     public fun player(): Player? = Bukkit.getPlayer(this.uuid)
 
+    /** For messages: the player on this server, or (on a shard leader) on another shard. */
+    public fun onlinePlayer(): Player? = phonon.nodes.shard.Shards.player(this.uuid)
+
     public fun createMinimap(player: Player, size: Int) {
         this.destroyMinimap()
 

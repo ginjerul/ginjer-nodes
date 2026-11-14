@@ -338,7 +338,7 @@ public class NationCommand :
         Nodes.removeTownFromNation(nation, town)
 
         for (r in town.residents) {
-            val p = r.player()
+            val p = r.onlinePlayer()
             if (p != null) {
                 Message.print(p, "${ChatColor.BOLD}${ChatColor.DARK_RED}Your town has left nation ${ChatColor.WHITE}${nation.name}")
             }
@@ -450,7 +450,7 @@ public class NationCommand :
             Message.error(player, "That town has no leader (?)")
             return
         }
-        val invitee: Player? = Bukkit.getPlayer(inviteeResident.name)
+        val invitee: Player? = phonon.nodes.shard.Shards.player(inviteeResident.name)
         if (invitee == null) {
             Message.error(player, "That town's leader is not online")
             return
